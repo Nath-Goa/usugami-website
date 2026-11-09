@@ -1,0 +1,921 @@
+/* The web app's shell: page basics, screens and their transitions, and the shell's own screens
+   (Home, Recent files, Settings, About, Open-source licenses, Choose a tool). Phone first (from
+   320 px), centred with a maximum width on wider screens. Colours, radii and spacing come from
+   ../../assets/css/tokens.css; the UI kit's components are styled in css/components.css. */
+
+/* ---- Page ---- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  background: var(--background);
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--background);
+  color: var(--on-background);
+  font-family: var(--font);
+  font-size: 1rem;
+  line-height: 1.5;
+  -webkit-tap-highlight-color: transparent;
+  overflow-wrap: break-word;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+a {
+  color: var(--primary);
+}
+
+img,
+svg,
+canvas {
+  max-width: 100%;
+}
+
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* Headings and screens take the focus to be announced, not to be operated: no ring. */
+h1[tabindex="-1"]:focus,
+h2[tabindex="-1"]:focus,
+[role="heading"][tabindex="-1"]:focus,
+.screen[tabindex="-1"]:focus,
+[data-main][tabindex="-1"]:focus {
+  outline: none;
+}
+
+/* hidden hides, whatever display a class gives the element. */
+[hidden] {
+  display: none !important;
+}
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.icon {
+  display: inline-block;
+  flex: none;
+  vertical-align: middle;
+}
+
+[dir="rtl"] .icon-mirrored {
+  transform: scaleX(-1);
+}
+
+.skip-link {
+  position: fixed;
+  inset-inline-start: var(--space-2);
+  top: var(--space-2);
+  z-index: 1000;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-full);
+  background: var(--primary);
+  color: var(--on-primary);
+  font-weight: 600;
+  text-decoration: none;
+  transform: translateY(-200%);
+  transition: transform var(--duration) var(--ease);
+}
+
+.skip-link:focus {
+  transform: none;
+}
+
+.noscript {
+  max-width: 40rem;
+  margin: var(--space-7) auto;
+  padding: 0 var(--gutter);
+}
+
+/* ---- Screens ---- */
+
+.app {
+  min-height: 100vh;
+  min-height: 100dvh;
+  /* A screen sliding in mustn't make the page scroll sideways (clip keeps sticky bars working). */
+  overflow-x: clip;
+}
+
+.screen {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Motion.kt's screen change: the new screen slides in a short way while it fades in. */
+@keyframes screen-in-forward {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+}
+
+@keyframes screen-in-back {
+  from {
+    opacity: 0;
+    transform: translateX(-24px);
+  }
+}
+
+.screen-forward {
+  animation: screen-in-forward calc(var(--duration) * 1.5) cubic-bezier(0.05, 0.7, 0.1, 1) both;
+}
+
+.screen-back {
+  animation: screen-in-back calc(var(--duration) * 1.5) cubic-bezier(0.05, 0.7, 0.1, 1) both;
+}
+
+[dir="rtl"] .screen-forward {
+  animation-name: screen-in-back;
+}
+
+[dir="rtl"] .screen-back {
+  animation-name: screen-in-forward;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .screen-forward,
+  .screen-back {
+    animation: none;
+  }
+}
+
+/* A thin bar at the top while a screen takes a moment to load (shown only after 300 ms). */
+@keyframes route-progress {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+
+@keyframes appear {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.route-progress {
+  position: fixed;
+  inset-inline: 0;
+  top: 0;
+  z-index: 50;
+  height: 3px;
+  overflow: hidden;
+  opacity: 0;
+  animation: appear 1ms linear 300ms forwards;
+  pointer-events: none;
+}
+
+.route-progress::before {
+  content: "";
+  display: block;
+  width: 40%;
+  height: 100%;
+  background: var(--primary);
+  animation: route-progress 1.2s var(--ease) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .route-progress::before {
+    width: 100%;
+    animation: none;
+    opacity: 0.6;
+  }
+}
+
+/* The content of a screen under its top bar: the app's 20 dp sides on a phone, centred with a
+   maximum width on wider screens. */
+.page {
+  width: 100%;
+  max-width: var(--content-max);
+  margin-inline: auto;
+  padding: var(--space-3) 20px calc(var(--space-6) + env(safe-area-inset-bottom, 0px));
+  padding-inline: max(20px, env(safe-area-inset-left, 0px));
+}
+
+.page--narrow {
+  max-width: 760px;
+}
+
+.page--list {
+  padding-inline: 0;
+}
+
+@media (min-width: 840px) {
+  .page {
+    padding-inline: var(--space-6);
+  }
+
+  .page--list {
+    padding-inline: var(--space-5);
+  }
+}
+
+/* ---- The shell's own bar and message, for a screen that couldn't load (no UI kit needed) ---- */
+
+.shell-bar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 64px;
+  padding: var(--space-2) var(--space-1);
+  background: var(--surface);
+}
+
+.shell-bar-title {
+  margin: 0;
+  padding-inline: var(--space-3);
+  font-size: 1.375rem;
+  font-weight: 400;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shell-icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: var(--touch);
+  height: var(--touch);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--on-surface-variant);
+  cursor: pointer;
+}
+
+.shell-icon-button:hover {
+  background: color-mix(in srgb, var(--on-surface) 8%, transparent);
+}
+
+.shell-problem {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  max-width: 34rem;
+  margin: var(--space-7) auto;
+  padding: 0 var(--space-5);
+  text-align: center;
+  color: var(--on-surface-variant);
+}
+
+.shell-problem p {
+  margin: 0;
+  color: var(--on-surface);
+  font-size: 1.0625rem;
+}
+
+.shell-problem-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-3);
+}
+
+.shell-button {
+  min-height: 40px;
+  padding: 10px 24px;
+  border-radius: var(--radius-full);
+  font-weight: 500;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.shell-button-filled {
+  border: 0;
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+.shell-button-outlined {
+  border: 1px solid var(--outline);
+  background: transparent;
+  color: var(--primary);
+}
+
+/* ---- Home ---- */
+
+.home-subtitle {
+  margin: 0;
+  color: var(--on-surface-variant);
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.home-top {
+  display: grid;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+}
+
+.home-top[hidden],
+.home-sections[hidden],
+.home-results[hidden] {
+  display: none;
+}
+
+@media (min-width: 840px) {
+  .home-top.has-recent {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+/* Files dragged over Home (on a computer): dropped, they open as files shared to the app do. */
+.home-page.is-dragover {
+  border-radius: var(--radius-l);
+  outline: 2px dashed var(--primary);
+  outline-offset: -4px;
+  background: color-mix(in srgb, var(--primary) 4%, transparent);
+}
+
+/* Scan document: larger than the tools' cards, in the theme's main colour. */
+.scan-card {
+  margin: 0;
+  padding: 20px 20px 16px;
+  border-radius: var(--radius-m);
+  background: var(--primary-container);
+  color: var(--on-primary-container);
+}
+
+.scan-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.scan-card-head .icon {
+  width: 48px;
+  height: 48px;
+}
+
+.scan-card-title {
+  margin: 0;
+  font-size: 1.375rem;
+  font-weight: 400;
+  line-height: 1.3;
+}
+
+.scan-card-detail {
+  margin: 2px 0 0;
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
+/* Side by side, as tall as each other when a long label takes two lines. */
+.scan-card-buttons {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.scan-card-buttons > * {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  white-space: normal;
+  text-align: center;
+}
+
+/* Recent files on Home: a heading with See all, then the last three. */
+.home-recent-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-top: 6px;
+}
+
+.home-recent-head h2 {
+  margin: 0;
+  color: var(--primary);
+  font-size: 0.875rem;
+  font-weight: 500;
+  letter-spacing: 0.1px;
+}
+
+/* The search field: a rounded bar like Material's search bar. */
+.home-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-top: var(--space-4);
+  min-height: 56px;
+  border-radius: var(--radius-full);
+  background: var(--surface-high);
+  color: var(--on-surface);
+}
+
+.home-search:focus-within {
+  outline: 2px solid var(--primary);
+  outline-offset: 0;
+}
+
+.home-search-icon {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  flex: none;
+  color: var(--on-surface-variant);
+}
+
+.home-search input {
+  flex: 1;
+  min-width: 0;
+  height: 56px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: 1rem;
+  outline: none;
+}
+
+.home-search input::placeholder {
+  color: var(--on-surface-variant);
+  opacity: 1;
+}
+
+.home-search input::-webkit-search-cancel-button,
+.home-search input::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.home-search-clear {
+  margin-inline-end: var(--space-1);
+}
+
+.home-search-clear[hidden] {
+  display: none;
+}
+
+.home-search-key {
+  display: none;
+  margin-inline-end: var(--space-4);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--outline-variant);
+  border-radius: var(--radius-xs);
+  color: var(--on-surface-variant);
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+}
+
+@media (min-width: 840px) and (hover: hover) and (pointer: fine) {
+  .home-search-key {
+    display: inline-block;
+  }
+
+  .home-search-key[hidden],
+  .home-search:focus-within .home-search-key {
+    display: none;
+  }
+}
+
+/* A small heading over a group of tool cards, which a screen reader can jump to. */
+.home-section-heading,
+.home-results-count {
+  margin: 18px 0 8px;
+  color: var(--primary);
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.43;
+  letter-spacing: 0.1px;
+}
+
+.home-results-count.is-none {
+  margin-top: var(--space-5);
+  color: var(--on-surface-variant);
+  font-size: 1rem;
+  font-weight: 400;
+}
+
+.home-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+}
+
+@media (min-width: 600px) {
+  .home-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-2);
+  }
+}
+
+@media (min-width: 1100px) {
+  .home-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.home-grid > * {
+  min-width: 0;
+}
+
+/* The scan card among search results takes a row of its own. */
+.home-grid > .scan-card {
+  grid-column: 1 / -1;
+}
+
+/* ---- Recent files ---- */
+
+.recent-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.recent-row {
+  display: flex;
+  align-items: center;
+  min-height: 64px;
+  border: 1px solid var(--outline-variant);
+  border-radius: var(--radius-m);
+  background: var(--surface);
+  transition: background-color var(--duration) var(--ease), transform calc(var(--duration) * 0.75) var(--ease);
+}
+
+.recent-row:active {
+  transform: scale(0.99);
+}
+
+.recent-open {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+  min-height: 62px;
+  padding: 10px 0 10px var(--space-4);
+  padding-inline: var(--space-4) 0;
+  border: 0;
+  border-radius: var(--radius-m);
+  background: transparent;
+  text-align: start;
+  cursor: pointer;
+}
+
+.recent-open:hover,
+.recent-menu:hover {
+  background: color-mix(in srgb, var(--on-surface) 6%, transparent);
+}
+
+.recent-open > .icon {
+  color: var(--primary);
+}
+
+.recent-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.recent-name {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  font-size: 1rem;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.recent-detail {
+  color: var(--on-surface-variant);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+}
+
+.recent-menu {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: var(--touch);
+  height: var(--touch);
+  margin-inline: var(--space-1);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--on-surface-variant);
+  cursor: pointer;
+}
+
+.recent-empty {
+  margin: 0;
+  padding: var(--space-7) var(--space-6);
+  color: var(--on-surface-variant);
+  font-size: 1rem;
+  text-align: center;
+}
+
+.recent-note {
+  display: flex;
+  gap: var(--space-3);
+  margin: var(--space-5) 0 0;
+  color: var(--on-surface-variant);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+/* ---- Settings, About, licenses ---- */
+
+.settings-list {
+  display: grid;
+  margin: 0;
+  padding: var(--space-2) 0;
+}
+
+.settings-external {
+  display: inline-grid;
+  place-items: center;
+  width: var(--touch);
+  color: var(--on-surface-variant);
+}
+
+/* The choices in the Language and Appearance dialogs: each row one radio choice. */
+.choice-list {
+  display: grid;
+  margin: var(--space-1) calc(-1 * var(--space-2)) 0;
+}
+
+.choice-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-height: var(--touch);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-s);
+  color: var(--on-surface);
+  font-size: 1rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.choice-row:hover {
+  background: color-mix(in srgb, var(--on-surface) 6%, transparent);
+}
+
+.choice-row:focus-visible {
+  outline-offset: -2px;
+}
+
+.choice-radio {
+  position: relative;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin: 10px;
+  border: 2px solid var(--on-surface-variant);
+  border-radius: 50%;
+}
+
+.choice-row[aria-selected="true"] .choice-radio {
+  border-color: var(--primary);
+}
+
+.choice-row[aria-selected="true"] .choice-radio::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: var(--primary);
+}
+
+.about-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--space-4) var(--space-5);
+  text-align: center;
+}
+
+/* The launcher icon cropped as a launcher shows it: the middle 72 of its 108 units. */
+.app-icon {
+  width: 72px;
+  height: 72px;
+  overflow: hidden;
+  border-radius: 20px;
+}
+
+.app-icon img {
+  display: block;
+  width: 108px;
+  max-width: none;
+  height: 108px;
+  margin: -18px;
+}
+
+.about-name {
+  margin: var(--space-4) 0 var(--space-1);
+  font-size: 1.5rem;
+  font-weight: 400;
+  line-height: 1.33;
+}
+
+.about-line {
+  margin: 0;
+  color: var(--on-surface-variant);
+  font-size: 0.875rem;
+}
+
+.about-privacy {
+  display: flex;
+  gap: var(--space-4);
+  margin: var(--space-4);
+  padding: var(--space-4);
+  border-radius: var(--radius-l);
+  background: var(--surface-container);
+}
+
+.about-privacy > .icon {
+  color: var(--primary);
+}
+
+.about-privacy p {
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
+.about-privacy p + p {
+  margin-top: var(--space-2);
+  color: var(--on-surface-variant);
+}
+
+.about-copyright {
+  margin: 0;
+  padding: var(--space-5);
+  color: var(--on-surface-variant);
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+.licenses-intro {
+  margin: 0 0 var(--space-2);
+  color: var(--on-surface-variant);
+}
+
+.licenses-notices {
+  margin-bottom: var(--space-4);
+}
+
+.licenses-notices p {
+  margin: 0;
+  color: var(--on-surface-variant);
+}
+
+.licenses-list {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.license {
+  padding: var(--space-4);
+  border: 1px solid var(--outline-variant);
+  border-radius: var(--radius-m);
+}
+
+.license--own {
+  border: 0;
+  background: var(--surface-container);
+}
+
+.license h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.license-version {
+  color: var(--on-surface-variant);
+  font-weight: 400;
+}
+
+.license p {
+  margin: var(--space-1) 0 0;
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
+.license-meta {
+  color: var(--on-surface-variant);
+}
+
+.license-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  margin-top: var(--space-2);
+  font-size: 0.875rem;
+}
+
+.license-links a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--touch);
+  gap: var(--space-1);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.license-links a:hover {
+  text-decoration: underline;
+}
+
+/* ---- Choose a tool ---- */
+
+.choose-files {
+  display: grid;
+  gap: var(--space-3);
+}
+
+@media (min-width: 840px) {
+  .choose-files {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.choose-hint {
+  margin: var(--space-4) 0 0;
+  color: var(--on-surface-variant);
+  font-size: 0.875rem;
+}
+
+.choose-busy {
+  margin-bottom: var(--space-4);
+}
+
+.choose-tools[hidden],
+.choose-busy[hidden] {
+  display: none;
+}
+
+/* ---- First launch: the language ---- */
+
+.language-page {
+  display: grid;
+  gap: var(--space-3);
+  max-width: 34rem;
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-5);
+}
+
+.language-page h1 {
+  margin: var(--space-2) 0 0;
+  font-size: 1.5rem;
+  font-weight: 400;
+}
+
+.language-page p {
+  margin: 0 0 var(--space-3);
+  color: var(--on-surface-variant);
+}

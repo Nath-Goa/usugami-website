@@ -1,0 +1,35 @@
+/* Delete pages (index.js): the count, the "Keep at least one page." line and the grid of pages. */
+
+/* titleSmall */
+.delete-pages-count {
+  margin: 0;
+  color: var(--on-surface);
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.25rem;
+}
+
+/* bodyMedium in the error colour, 4 dp under the count */
+.delete-pages-need {
+  margin: var(--space-1) 0 0;
+  color: var(--error);
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
+/* The grid scrolls inside the screen past 480 dp (GridMaxHeight), so the file name stays near. */
+.delete-pages-grid {
+  max-height: 480px;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  /* Room for the focus ring inside the area that clips. */
+  padding: 4px;
+  margin: -4px;
+  scrollbar-width: thin;
+}
+
+@media (min-width: 840px) {
+  .delete-pages-grid {
+    max-height: max(480px, 60vh);
+  }
+}

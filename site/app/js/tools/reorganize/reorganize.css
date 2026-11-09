@@ -1,0 +1,178 @@
+/* Reorganize PDF: the page count and Undo, the bar for the chosen page, the grid and Add pages
+   (PageGrids.kt). The tool's frame and the result screen are merge.css's. */
+
+.reorganize-options {
+  display: flex;
+  flex-direction: column;
+}
+
+.reorganize-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* titleMedium */
+.reorganize-count:focus {
+  outline: none;
+}
+
+.reorganize-count {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 500;
+  line-height: 1.5rem;
+  letter-spacing: 0.009em;
+}
+
+.reorganize-hint {
+  margin: 0;
+  color: var(--on-surface-variant);
+  font-size: 0.75rem;
+  line-height: 1rem;
+  letter-spacing: 0.025em;
+}
+
+/* The chosen page's bar: a rounded surface, tinted once a page is chosen. */
+.reorganize-bar {
+  display: flex;
+  align-items: center;
+  min-height: 48px;
+  margin-top: var(--space-3);
+  padding-inline: var(--space-4) var(--space-1);
+  border-radius: var(--radius-l);
+  background: var(--surface-high);
+  color: var(--on-surface-variant);
+  transition: background-color var(--ui-short) linear, color var(--ui-short) linear;
+}
+
+.reorganize-bar.is-chosen {
+  background: var(--secondary-container);
+  color: var(--on-secondary-container);
+}
+
+/* labelLarge */
+.reorganize-bar-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.25rem;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.reorganize-bar-buttons {
+  display: flex;
+  flex: none;
+}
+
+.reorganize-bar .ui-icon-btn {
+  color: inherit;
+}
+
+.reorganize-bar .ui-icon-btn:disabled {
+  opacity: 0.38;
+}
+
+/* Too narrow for "Page 12" beside five 48 px buttons (a 320 px phone): the chosen page's name is
+   left to screen readers (its frame in the grid shows which it is), and the buttons spread out. */
+.reorganize-pages {
+  container-type: inline-size;
+}
+
+@container (max-width: 319px) {
+  .reorganize-bar.is-chosen .reorganize-bar-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .reorganize-bar.is-chosen .reorganize-bar-buttons {
+    flex: 1;
+    justify-content: space-between;
+  }
+
+  .reorganize-bar.is-chosen {
+    padding-inline-start: var(--space-1);
+  }
+}
+
+/* The grid scrolls inside the screen past this height, so the file name stays near. */
+.reorganize-grid {
+  max-height: 480px;
+  margin-top: var(--space-3);
+  padding: 3px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.reorganize-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+
+/* Wider screens: the PDF, its count, Add pages and the file name beside the bar and the grid,
+   which takes the rest of the screen's height. */
+@media (min-width: 840px) {
+  .reorganize-page .merge-content {
+    display: grid;
+    grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+    grid-template-rows: auto auto auto auto 1fr;
+    align-items: start;
+    column-gap: var(--space-6);
+    row-gap: 0;
+  }
+
+  .reorganize-options {
+    display: contents;
+  }
+
+  .reorganize-card {
+    grid-area: 1 / 1;
+    margin-bottom: var(--space-4);
+  }
+
+  .reorganize-head {
+    grid-area: 2 / 1;
+  }
+
+  .reorganize-hint {
+    grid-area: 3 / 1;
+  }
+
+  .reorganize-actions {
+    grid-area: 4 / 1;
+    margin-top: var(--space-3);
+  }
+
+  .reorganize-name {
+    grid-area: 5 / 1;
+    margin-top: var(--space-4);
+  }
+
+  .reorganize-pages {
+    grid-column: 2;
+    grid-row: 1 / span 5;
+    min-width: 0;
+  }
+
+  .reorganize-pages .reorganize-bar {
+    margin-top: 0;
+  }
+
+  .reorganize-grid {
+    max-height: max(360px, calc(100vh - 240px));
+    max-height: max(360px, calc(100dvh - 240px));
+  }
+}

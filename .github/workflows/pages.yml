@@ -1,0 +1,87 @@
+# Publishes site/ to GitHub Pages. One-time setup: repository Settings > Pages > Source: GitHub Actions.
+# The site then appears at https://nath-goa.github.io/usugami-website/ (or at the custom domain set
+# in Settings > Pages; no CNAME file is needed when deploying with Actions).
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deployment at a time. A deployment that has started is never cancelled halfway; a newer
+# push waits for it and then deploys.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    name: Check and package the site
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pages: read # configure-pages reads the repository's Pages settings
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The same Node as CI and development. The check uses only Node's built-in modules, so
+      # there is no npm install here: the site is plain files, deployed as they are in the repository.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Check the site
+        run: node tools/check-site.mjs
+
+      # The service worker names its offline cache after VERSION, so each deployment replaces the
+      # files visitors have cached. Stop if the line is missing, rather than deploy a worker that
+      # never updates.
+      - name: Stamp the service worker with the commit
+        run: |
+          sw=site/app/sw.js
+          line="const VERSION = 'dev';"
+          if [ ! -f "$sw" ]; then
+            echo "::error::$sw is missing."
+            exit 1
+          fi
+          count=$(grep -cxF -- "$line" "$sw" || true)
+          if [ "$count" != 1 ]; then
+            echo "::error file=$sw::Expected the line $line exactly once in $sw (whole line, LF endings), found it $count times."
+            exit 1
+          fi
+          sha=$(git rev-parse --short HEAD)
+          sed -i "s/^const VERSION = 'dev';\$/const VERSION = '$sha';/" "$sw"
+          grep -qxF "const VERSION = '$sha';" "$sw"
+          echo "Service worker version: $sha"
+
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      pages: write # publish the deployment
+      id-token: write # prove to Pages that the artifact comes from this workflow
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

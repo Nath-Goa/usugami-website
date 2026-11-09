@@ -1,0 +1,1018 @@
+/* Scan document and Images to PDF: the editor, the crop screen's two steps and the Create PDF sheet,
+   drawn as the Android app's (EditorScreen.kt, CropScreen.kt, FilterScreen.kt, ConvertSheet.kt).
+   Phone first; wider screens get more page columns, and the crop steps put their controls beside
+   the picture when it is wider than tall. Colours come from tokens.css. */
+
+/* ---- Screens ---- */
+
+@keyframes images-in-forward {
+  from { opacity: 0; transform: translateX(24px); }
+}
+
+@keyframes images-in-back {
+  from { opacity: 0; transform: translateX(-24px); }
+}
+
+.images-in-forward {
+  animation: images-in-forward calc(var(--duration) * 1.5) cubic-bezier(0.05, 0.7, 0.1, 1) both;
+}
+
+.images-in-back {
+  animation: images-in-back calc(var(--duration) * 1.5) cubic-bezier(0.05, 0.7, 0.1, 1) both;
+}
+
+[dir="rtl"] .images-in-forward { animation-name: images-in-back; }
+[dir="rtl"] .images-in-back { animation-name: images-in-forward; }
+
+@media (prefers-reduced-motion: reduce) {
+  .images-in-forward,
+  .images-in-back {
+    animation: none;
+  }
+}
+
+/* A circular progress indicator. */
+.images-spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid color-mix(in srgb, var(--primary) 20%, transparent);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: images-spin 900ms linear infinite;
+}
+
+.images-spinner--small {
+  width: 24px;
+  height: 24px;
+  border-width: 2.5px;
+}
+
+.images-spinner[hidden] {
+  display: none;
+}
+
+@keyframes images-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .images-spinner {
+    animation-duration: 3s;
+  }
+}
+
+/* ---- Editor ---- */
+
+.images-editor {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.images-import-progress {
+  position: sticky;
+  top: 64px;
+  z-index: 9;
+  flex: none;
+}
+
+.images-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.images-main.is-dragover {
+  outline: 2px dashed var(--primary);
+  outline-offset: -8px;
+  background: color-mix(in srgb, var(--primary) 6%, transparent);
+}
+
+.images-content {
+  width: 100%;
+  max-width: var(--content-max);
+  margin-inline: auto;
+}
+
+.images-content[hidden],
+.images-empty[hidden],
+.images-bottombar[hidden] {
+  display: none;
+}
+
+/* The page size, orientation and margin chips, in a row that scrolls sideways. */
+.images-options {
+  display: flex;
+  gap: var(--space-2);
+  overflow-x: auto;
+  padding: var(--space-1) var(--space-3);
+  scrollbar-width: none;
+}
+
+.images-options::-webkit-scrollbar {
+  display: none;
+}
+
+.images-options > * {
+  flex: none;
+}
+
+.images-reorder-hint {
+  margin: var(--space-1) 0 0;
+  padding: 0 var(--space-4);
+  color: var(--on-surface-variant);
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+
+.images-reorder-hint[hidden] {
+  display: none;
+}
+
+/* Before the first image. */
+.images-empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  text-align: center;
+}
+
+.images-empty-icon {
+  display: grid;
+  place-items: center;
+  padding: var(--space-5);
+  border-radius: var(--radius-xl);
+  background: var(--primary-container);
+  color: var(--on-primary-container);
+}
+
+.images-empty-title {
+  margin: var(--space-5) 0 0;
+  font-size: 1.5rem;
+  font-weight: 400;
+  line-height: 2rem;
+}
+
+.images-empty-body {
+  max-width: 34em;
+  margin: var(--space-3) 0 0;
+  color: var(--on-surface-variant);
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
+.images-empty-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-6);
+}
+
+.images-empty-buttons > .ui-btn {
+  min-width: 220px;
+}
+
+.images-empty-hint {
+  max-width: 34em;
+  margin: var(--space-5) 0 0;
+  color: var(--on-surface-variant);
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+
+/* ---- The pages ---- */
+
+.images-grid {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-3) var(--space-4);
+}
+
+@media (min-width: 840px) {
+  .images-grid {
+    grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+    gap: var(--space-4);
+    padding-inline: var(--space-4);
+  }
+}
+
+.images-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-radius: var(--radius-m);
+  background: var(--surface-low);
+  box-shadow: var(--shadow);
+  transition: transform var(--ui-medium) var(--ease), box-shadow var(--ui-short);
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.images-card.is-dragging {
+  z-index: 3;
+  box-shadow: var(--shadow-high), 0 8px 24px rgb(0 0 0 / 0.18);
+  transition: box-shadow var(--ui-short);
+  cursor: grabbing;
+}
+
+.images-grid.is-dragging {
+  cursor: grabbing;
+}
+
+.images-card-picture {
+  position: relative;
+  overflow: hidden;
+  aspect-ratio: 0.85;
+  border-start-start-radius: var(--radius-m);
+  border-start-end-radius: var(--radius-m);
+  background: var(--surface-highest);
+}
+
+.images-card-handle {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .images-card-handle {
+    cursor: grab;
+  }
+}
+
+.images-card-handle:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
+.images-card-number {
+  position: absolute;
+  top: var(--space-3);
+  inset-inline-start: var(--space-3);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+  background: var(--primary);
+  color: var(--on-primary);
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1rem;
+  pointer-events: none;
+}
+
+.images-card-crop {
+  position: absolute;
+  top: var(--space-1);
+  inset-inline-end: var(--space-1);
+}
+
+.images-card-spinner {
+  position: absolute;
+  top: calc(50% - 20px);
+  left: calc(50% - 20px);
+}
+
+/* Move earlier and later: there for keyboards and screen readers, shown with the focus or a pointer. */
+.images-card-moves {
+  position: absolute;
+  inset-inline: 0;
+  top: calc(50% - 24px);
+  display: flex;
+  justify-content: space-between;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--ui-short);
+}
+
+.images-card-moves[hidden] {
+  display: none;
+}
+
+.images-card-moves .ui-icon-btn {
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  box-shadow: var(--shadow);
+}
+
+.images-card-moves:focus-within {
+  opacity: 1;
+}
+
+.images-card-moves:focus-within .ui-icon-btn {
+  pointer-events: auto;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .images-card:hover .images-card-moves:not(:has(:disabled:only-child)) {
+    opacity: 1;
+  }
+
+  .images-card:hover .images-card-moves .ui-icon-btn:not(:disabled) {
+    pointer-events: auto;
+  }
+
+  .images-card:hover .images-card-moves .ui-icon-btn:disabled {
+    visibility: hidden;
+  }
+
+  .images-grid.is-dragging .images-card-moves {
+    opacity: 0;
+  }
+}
+
+.images-card-name {
+  min-width: 0;
+  padding: var(--space-2) var(--space-3) 0;
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1rem;
+}
+
+.images-name-shown {
+  display: flex;
+  min-width: 0;
+}
+
+.images-name-head {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+
+.images-name-tail {
+  flex: none;
+  white-space: pre;
+}
+
+.images-card-actions {
+  display: flex;
+  justify-content: space-between;
+  padding: 0 2px;
+}
+
+/* A page as it will come out: a white page of the layout's shape, its image in its place. */
+.images-preview {
+  position: absolute;
+  inset: var(--space-3);
+  display: grid;
+  place-items: center;
+  container-type: size;
+  pointer-events: none;
+}
+
+.images-preview-page {
+  position: relative;
+  width: min(100cqw, calc(100cqh * var(--ratio, 0.707)));
+  aspect-ratio: var(--ratio, 0.707);
+  background: #fff;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.28);
+  outline: 0.5px solid rgb(0 0 0 / 0.13);
+}
+
+.images-preview-image {
+  position: absolute;
+  overflow: hidden;
+  background: var(--surface-variant);
+  transition: background-color var(--ui-short);
+}
+
+.images-preview-image.has-picture {
+  background: transparent;
+}
+
+.images-preview-canvas {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  display: block;
+  max-width: none;
+  opacity: 0;
+  transition: opacity var(--ui-short), transform var(--ui-medium) var(--ease);
+}
+
+.images-preview-image.has-picture .images-preview-canvas {
+  opacity: 1;
+}
+
+/* Add more: an outlined card at the end. */
+.images-add-more {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  width: 100%;
+  aspect-ratio: 0.85;
+  padding: var(--space-3);
+  border: 1px solid var(--outline-variant);
+  border-radius: var(--radius-m);
+  background: var(--surface);
+  color: var(--on-surface);
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.25rem;
+  cursor: pointer;
+}
+
+.images-add-more::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--on-surface);
+  opacity: 0;
+  transition: opacity var(--ui-short) linear;
+}
+
+@media (hover: hover) {
+  .images-add-more:hover::before {
+    opacity: 0.08;
+  }
+}
+
+.images-add-more:active::before,
+.images-add-more:focus-visible::before {
+  opacity: 0.12;
+}
+
+.images-add-more-icon {
+  color: var(--primary);
+}
+
+/* The bar at the bottom: Add images as wide as its label, Convert to PDF taking the rest. It slides
+   up when the first image arrives. */
+.images-bottombar {
+  align-items: center;
+  gap: var(--space-3);
+  background: var(--surface-container);
+  box-shadow: 0 -1px 4px rgb(0 0 0 / 0.1);
+  animation: images-slide-up var(--ui-medium) var(--ui-ease-enter);
+}
+
+@keyframes images-slide-up {
+  from { transform: translateY(100%); }
+}
+
+.images-bottombar > .images-add-button {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.images-bottombar > .images-add-button .ui-btn-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.images-bottombar > .images-convert-button {
+  flex: 1 0 auto;
+}
+
+/* On the narrowest phones the buttons keep their labels whole with less padding. */
+@media (max-width: 380px) {
+  .images-bottombar {
+    gap: var(--space-2);
+    padding-inline: var(--space-4);
+  }
+
+  .images-bottombar > .ui-btn {
+    padding-inline: var(--space-3) var(--space-4);
+  }
+}
+
+@media (min-width: 840px) {
+  .images-bottombar > .images-add-button,
+  .images-bottombar > .images-convert-button {
+    flex: none;
+    min-width: 0;
+  }
+
+  .images-bottombar > .images-convert-button {
+    min-width: 240px;
+  }
+}
+
+/* ---- The crop screen ---- */
+
+.images-crop {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.images-crop > .ui-topbar {
+  flex: none;
+}
+
+/* A step: the picture as large as there is room for, the controls under it (at most half the
+   height, scrolling) or, when the step is wider than tall, beside it; the buttons stay in sight. */
+.images-step {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.images-step.is-wide {
+  flex-direction: row;
+}
+
+.images-step-area {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 140px;
+}
+
+.images-step-panel {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  max-height: 50%;
+  padding-bottom: calc(var(--space-2) + env(safe-area-inset-bottom, 0px));
+}
+
+.images-step.is-wide .images-step-panel {
+  width: 320px;
+  max-height: none;
+  padding-inline-end: env(safe-area-inset-right, 0px);
+}
+
+.images-step-controls {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.images-step.is-wide .images-step-controls {
+  flex: 1;
+}
+
+.images-step-buttons {
+  flex: none;
+  padding: var(--space-1) var(--space-4);
+}
+
+.images-step-button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+}
+
+.images-step-button {
+  flex: 1 1 100%;
+  min-height: 40px;
+  height: auto;
+  white-space: normal;
+}
+
+.images-step-button-row.has-two .images-step-button {
+  flex: 1 1 calc(50% - 6px);
+  min-width: max-content;
+}
+
+.images-step-button .ui-btn-label {
+  text-align: center;
+}
+
+/* Next's arrow comes after its label. */
+.images-step-button.has-icon-after > .icon {
+  margin-inline: 0 -8px;
+}
+
+.images-crop-hint {
+  display: grid;
+  flex: none;
+  padding: var(--space-2) var(--space-4);
+  text-align: center;
+}
+
+.images-step.is-wide .images-crop-hint {
+  text-align: start;
+}
+
+.images-crop-hint-text {
+  grid-area: 1 / 1;
+  margin: 0;
+  color: var(--on-surface-variant);
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
+.images-crop-hint-spare {
+  visibility: hidden;
+}
+
+.images-crop-hint.is-error .images-crop-hint-text {
+  color: var(--error);
+}
+
+.images-crop-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  touch-action: none;
+}
+
+.images-crop-spinner {
+  position: absolute;
+  top: calc(50% - 20px);
+  left: calc(50% - 20px);
+}
+
+.images-crop-handles {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* Each handle's place for the keyboard and screen readers; the picture draws the handle itself. */
+.images-crop-handle {
+  position: absolute;
+  width: 56px;
+  height: 56px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  pointer-events: none;
+}
+
+.images-crop-handle:focus-visible {
+  outline: 3px solid var(--primary);
+  outline-offset: -6px;
+  box-shadow: inset 0 0 0 9px rgb(255 255 255 / 0.55);
+}
+
+.images-crop-moves {
+  display: flex;
+  align-items: center;
+  padding-inline: var(--space-4) var(--space-2);
+}
+
+.images-crop-handle-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.25rem;
+}
+
+.images-crop-resets {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  padding-inline: var(--space-2);
+}
+
+/* ---- Filters ---- */
+
+.images-filter-area {
+  padding: var(--space-4);
+}
+
+.images-filter-canvas {
+  position: absolute;
+  inset: var(--space-4);
+  display: block;
+  width: calc(100% - 2 * var(--space-4));
+  height: calc(100% - 2 * var(--space-4));
+  max-width: none;
+  object-fit: contain;
+}
+
+.images-filter-spinner {
+  position: absolute;
+  top: calc(50% - 20px);
+  left: calc(50% - 20px);
+}
+
+.images-filter-busy {
+  position: absolute;
+  top: var(--space-4);
+  inset-inline-end: var(--space-4);
+}
+
+.images-look-title {
+  margin: var(--space-1) var(--space-4) 0;
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.25rem;
+}
+
+.images-looks {
+  display: flex;
+  gap: var(--space-1);
+  overflow-x: auto;
+  padding: var(--space-1) var(--space-3);
+  scrollbar-width: thin;
+}
+
+.images-look {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  width: 80px;
+  margin: 0;
+  padding: var(--space-1);
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: var(--on-surface);
+  cursor: pointer;
+}
+
+.images-look:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 0;
+}
+
+@media (hover: hover) {
+  .images-look:hover {
+    background: color-mix(in srgb, var(--on-surface) 8%, transparent);
+  }
+}
+
+.images-look-sample {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  padding: 5px;
+  border: 1px solid var(--outline-variant);
+  border-radius: 10px;
+  background: var(--surface-highest);
+  overflow: hidden;
+}
+
+.images-look.is-selected .images-look-sample {
+  padding: 3px;
+  border: 3px solid var(--primary);
+}
+
+.images-look-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  object-fit: contain;
+}
+
+.images-look-check {
+  position: absolute;
+  top: 3px;
+  inset-inline-end: 3px;
+  display: none;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+.images-look.is-selected .images-look-check {
+  display: grid;
+}
+
+.images-look-label {
+  margin-top: var(--space-1);
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1rem;
+  text-align: center;
+}
+
+.images-look.is-selected .images-look-label {
+  color: var(--primary);
+  font-weight: 700;
+}
+
+/* Brightness and contrast: 0 in the middle, filled from the middle to the thumb either way. */
+.images-adjust {
+  padding-inline: var(--space-4) var(--space-1);
+}
+
+.images-adjust-head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-top: var(--space-1);
+  padding-inline-end: 52px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.25rem;
+}
+
+.images-adjust-value {
+  color: var(--on-surface-variant);
+  font-variant-numeric: tabular-nums;
+}
+
+.images-adjust-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.images-adjust-input {
+  --at: 50%;
+  --track: linear-gradient(to right,
+    var(--secondary-container) min(50%, var(--at)),
+    var(--primary) min(50%, var(--at)),
+    var(--primary) max(50%, var(--at)),
+    var(--secondary-container) max(50%, var(--at)));
+  flex: 1;
+  min-width: 0;
+  height: 44px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+[dir="rtl"] .images-adjust-input {
+  --track: linear-gradient(to left,
+    var(--secondary-container) min(50%, var(--at)),
+    var(--primary) min(50%, var(--at)),
+    var(--primary) max(50%, var(--at)),
+    var(--secondary-container) max(50%, var(--at)));
+}
+
+.images-adjust-input:focus-visible {
+  outline: none;
+}
+
+.images-adjust-input::-webkit-slider-runnable-track {
+  height: 16px;
+  border-radius: 8px;
+  background: var(--track);
+}
+
+.images-adjust-input::-webkit-slider-thumb {
+  width: 4px;
+  height: 44px;
+  margin-top: -14px;
+  border: 0;
+  border-radius: 2px;
+  background: var(--primary);
+  -webkit-appearance: none;
+}
+
+.images-adjust-input::-moz-range-track {
+  height: 16px;
+  border-radius: 8px;
+  background: var(--track);
+}
+
+.images-adjust-input::-moz-range-thumb {
+  width: 4px;
+  height: 44px;
+  border: 0;
+  border-radius: 2px;
+  background: var(--primary);
+}
+
+.images-adjust-input:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--primary);
+}
+
+.images-adjust-input:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--primary);
+}
+
+.images-all-pages {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 48px;
+  padding: var(--space-2) var(--space-4);
+  font-size: 1rem;
+  line-height: 1.5rem;
+  cursor: pointer;
+}
+
+.images-all-pages[hidden] {
+  display: none;
+}
+
+.images-all-pages-box {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 0 3px;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+/* While a scan waits for its next image. */
+.images-waiting-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  padding: var(--space-5);
+}
+
+.images-waiting-text {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.5rem;
+  text-align: center;
+}
+
+/* ---- The Create PDF sheet ---- */
+
+.images-sheet-summary {
+  margin: 0;
+  color: var(--on-surface-variant);
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
+.images-sheet .ui-switch-row {
+  margin-top: var(--space-3);
+}
+
+.images-sheet-name {
+  margin-top: var(--space-4);
+}
+
+.images-sheet-name[hidden],
+.images-sheet-ocr[hidden],
+.images-sheet .ui-switch-row[hidden],
+.images-sheet-adding[hidden] {
+  display: none;
+}
+
+.images-sheet-heading {
+  margin: var(--space-5) 0 var(--space-2);
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.25rem;
+}
+
+.images-sheet-ocr .images-sheet-heading {
+  margin-top: var(--space-2);
+}
+
+.images-sheet-note {
+  margin: 6px 0 0;
+  color: var(--on-surface-variant);
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+
+.images-sheet .ui-sheet-actions {
+  flex-direction: column;
+  align-items: stretch;
+  flex-wrap: nowrap;
+  gap: var(--space-2);
+}
+
+.images-sheet-adding {
+  margin: 0;
+}
+
+.images-create-button {
+  width: 100%;
+}
+
+.images-ocr-problem p {
+  margin: 0 0 var(--space-3);
+}
+
+.images-ocr-problem p:last-child {
+  margin-bottom: 0;
+}
+
+/* ---- The result ---- */
+
+.images-result {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-height: 100dvh;
+}

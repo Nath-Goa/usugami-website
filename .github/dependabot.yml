@@ -1,0 +1,30 @@
+version: 2
+updates:
+  # Pinned action commit SHAs in .github/workflows
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
+
+  # npm packages (package.json). The libraries are also copied into site/app/vendor/, which
+  # Dependabot can't do: on the update's branch run npm install and npm run vendor, test, update
+  # the versions in THIRD_PARTY_NOTICES.md and commit. CI fails until the vendored copies match.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    # Wait a week after a release before proposing it, so broken or malicious releases are
+    # usually caught and withdrawn first.
+    cooldown:
+      default-days: 7
+    groups:
+      # Only used to develop and test; nothing in site/ changes.
+      dev-tools:
+        patterns: ['esbuild', 'playwright']
+      # Shipped in site/: copied into site/app/vendor/ by npm run vendor (the Material icons are
+      # copied into site/app/js/core/icons.js by tools/build-icons.mjs instead).
+      site-libraries:
+        patterns: ['*']

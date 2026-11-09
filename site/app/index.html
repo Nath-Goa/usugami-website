@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Usugami</title>
+  <meta name="description" content="Usugami's PDF tools in your browser: make PDFs from images and Office files, and split, merge, edit, sign and compress PDFs. Files never leave your device.">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#fff8f7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#171717" media="(prefers-color-scheme: dark)">
+  <script>
+    // The appearance and language saved in Settings, applied before the page is drawn so it
+    // doesn't flash in the wrong theme.
+    try {
+      var saved = JSON.parse(localStorage.getItem('usugami.settings') || '{}') || {};
+      if (saved.appearance === 'light' || saved.appearance === 'dark') document.documentElement.setAttribute('data-theme', saved.appearance);
+      if (typeof saved.language === 'string' && /^[a-z]{2,3}$/.test(saved.language)) document.documentElement.lang = saved.language;
+    } catch (e) {
+      // No storage: the device's theme and the browser's language.
+    }
+  </script>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Usugami">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="stylesheet" href="../assets/css/tokens.css">
+  <link rel="stylesheet" href="css/app.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="modulepreload" href="js/main.js">
+  <script type="module" src="js/main.js"></script>
+</head>
+<body>
+  <div id="app" class="app"></div>
+  <noscript>
+    <div class="noscript">
+      <p><strong>Usugami needs JavaScript.</strong> Its tools work in your browser, on your device, so your files are never uploaded. Turn JavaScript on for this site, then reload the page.</p>
+      <p><a href="../">Usugami's website</a> · <a href="../download/">Get the Android app</a></p>
+    </div>
+  </noscript>
+</body>
+</html>

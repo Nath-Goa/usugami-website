@@ -1,0 +1,25 @@
+The notices tesseract.js 7.0.0 publishes next to its bundles (dist/tesseract.min.js.LICENSE.txt
+and dist/worker.min.js.LICENSE.txt). They apply to site/app/vendor/tesseract/tesseract.esm.min.js
+and site/app/vendor/tesseract/worker.min.js, which refer to these file names. npm run vendor
+also copies both files, unchanged, next to those bundles.
+
+------------------------------------------------------------------------
+
+== tesseract.min.js.LICENSE.txt ==
+
+/*! regenerator-runtime -- Copyright (c) 2014-present, Facebook, Inc. -- license (MIT): https://github.com/facebook/regenerator/blob/main/LICENSE */
+
+== worker.min.js.LICENSE.txt ==
+
+/*!
+ * The buffer module from node.js, for the browser.
+ *
+ * @author   Feross Aboukhadijeh <https://feross.org>
+ * @license  MIT
+ */
+
+/*! ieee754. BSD-3-Clause License. Feross Aboukhadijeh <https://feross.org/opensource> */
+
+/*! regenerator-runtime -- Copyright (c) 2014-present, Facebook, Inc. -- license (MIT): https://github.com/facebook/regenerator/blob/main/LICENSE */
+
+/** @license zlib.js 2012 - imaya [ https://github.com/imaya/zlib.js ] The MIT License */

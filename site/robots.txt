@@ -1,0 +1,6 @@
+# Usugami's website: every page may be indexed.
+# Search engines read this file only at the root of a domain (https://usugami.com/robots.txt),
+# so it takes effect once the domain is linked. Then a sitemap can be added here, with an
+# absolute address, for example: Sitemap: https://usugami.com/sitemap.xml
+User-agent: *
+Disallow:

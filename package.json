@@ -1,0 +1,29 @@
+{
+  "name": "usugami-website",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Usugami's website and in-browser PDF tools, served as static files from site/.",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "scripts": {
+    "serve": "node tools/serve.mjs",
+    "vendor": "node tools/vendor.mjs",
+    "check": "node tools/check-site.mjs",
+    "test": "node tests/run.mjs"
+  },
+  "devDependencies": {
+    "@cantoo/fontkit": "2.0.12",
+    "@cantoo/pdf-lib": "2.11.1",
+    "@material-design-icons/svg": "0.14.15",
+    "@tesseract.js-data/eng": "1.0.0",
+    "@tesseract.js-data/fra": "1.0.0",
+    "@tesseract.js-data/hin": "1.0.0",
+    "@tesseract.js-data/spa": "1.0.0",
+    "esbuild": "0.28.2",
+    "fflate": "0.8.3",
+    "libheif-js": "1.23.5",
+    "pdfjs-dist": "6.4.299",
+    "playwright": "1.65.0",
+    "tesseract.js": "7.0.0"
+  }
+}

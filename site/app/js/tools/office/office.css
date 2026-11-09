@@ -1,0 +1,153 @@
+/* Word, PowerPoint, Excel and EPUB to PDF (js/tools/office/): one column in the app's order, its
+   parts 16 px apart (the app's Column with spacedBy(16.dp)). On wide screens one file stays in a
+   column of readable width, and several are listed in the kit's grid of cards under what goes for
+   all of them. */
+
+.office-page {
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.office-progress {
+  flex: none;
+  margin-bottom: var(--space-4);
+}
+
+.office-progress[hidden] {
+  display: none;
+}
+
+.office-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+/* OutlinedButton: as wide as its words, at the start. */
+.office-add {
+  align-self: flex-start;
+}
+
+/* DocumentIcon: the kind's icon on secondaryContainer, where a PDF's first page would show. */
+.office-doc-icon {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius-s);
+  background: var(--secondary-container);
+  color: var(--on-secondary-container);
+}
+
+.office-card .ui-file-thumb,
+.office-list .ui-file-thumb {
+  border-radius: var(--radius-s);
+  box-shadow: none;
+}
+
+/* bodySmall, onSurfaceVariant: what converts (OfficeNote) and the note under the book's page size. */
+.office-note,
+.office-detail {
+  margin: 0;
+  color: var(--on-surface-variant);
+  font-size: 0.75rem;
+  line-height: 1rem;
+  letter-spacing: 0.025em;
+}
+
+/* titleMedium: "Page size" over a book's A5 / A4. */
+.office-heading {
+  margin: 0;
+  color: var(--on-surface);
+  font-size: 1rem;
+  font-weight: 500;
+  line-height: 1.5rem;
+  letter-spacing: 0.009375em;
+}
+
+/* SheetPageOptions: the chips side by side (one under the other when they don't fit, as with
+   large text), then the two switches, each 8 dp above and below. Each chip takes 48 px of height
+   to tap, as the app's: 8 px above and below it, 16 px between two rows, so the targets never
+   overlap. */
+.office-sheet {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.office-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4) var(--space-2);
+  min-width: 0;
+  padding-block: var(--space-2);
+}
+
+.office-chips > .ui-chip {
+  max-width: 100%;
+}
+
+.office-sheet > .ui-switch-row {
+  padding-block: var(--space-2);
+}
+
+/* The page, slide or chapter in the progress dialog: a line of its own under the file's name. */
+.office-progress-step {
+  margin: 0;
+  color: var(--on-surface);
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
+.office-progress-step[hidden] {
+  display: none;
+}
+
+/* Off for a moment (files being checked or converted) while keeping the focus: looks as off as disabled. */
+.office-run[aria-disabled="true"],
+.office-add[aria-disabled="true"],
+.office-content .ui-empty[aria-disabled="true"] {
+  cursor: default;
+  color: color-mix(in srgb, var(--on-surface) 38%, transparent);
+}
+
+.office-run.ui-btn--filled[aria-disabled="true"] {
+  background: color-mix(in srgb, var(--on-surface) 12%, transparent);
+  box-shadow: none;
+}
+
+.office-add.ui-btn--outlined[aria-disabled="true"] {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--on-surface) 12%, transparent);
+}
+
+.office-content .ui-empty[aria-disabled="true"] .ui-empty-icon,
+.office-content .ui-empty[aria-disabled="true"] .ui-empty-detail,
+.office-content .ui-empty[aria-disabled="true"] .ui-empty-drop {
+  color: inherit;
+}
+
+.office-run[aria-disabled="true"]::before,
+.office-add[aria-disabled="true"]::before,
+.office-content .ui-empty[aria-disabled="true"]::before {
+  display: none;
+}
+
+@media (min-width: 840px) {
+  .office-content--empty,
+  .office-content--one {
+    width: 100%;
+    max-width: 640px;
+    margin-inline: auto;
+  }
+
+  /* What goes for all keeps the width it has for one file; the cards take the screen. */
+  .office-content--many > .office-note,
+  .office-content--many > .office-heading,
+  .office-content--many > .office-book-page,
+  .office-content--many > .office-detail,
+  .office-content--many > .office-sheet {
+    max-width: 640px;
+  }
+}

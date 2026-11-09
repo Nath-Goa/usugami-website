@@ -1,0 +1,82 @@
+/* The screen Add page numbers and Add watermark share (stamp-screen.js): one column on phones, as
+   the app's; on wide screens the PDFs on one side and the choices on the other. */
+
+.stamps-page {
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.stamps-progress {
+  margin-bottom: var(--space-4);
+}
+
+.stamps-progress[hidden] {
+  display: none;
+}
+
+.stamps-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.stamps-content--empty {
+  width: 100%;
+  max-width: 560px;
+  margin-inline: auto;
+}
+
+.stamps-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.stamps-add {
+  align-self: flex-start;
+}
+
+/* The tool's choices: a column spaced as the app's (16 dp). */
+.stamps-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+/* titleMedium */
+.stamps-heading {
+  margin: 0;
+  color: var(--on-surface);
+  font-size: 1rem;
+  font-weight: 500;
+  line-height: 1.5rem;
+  letter-spacing: 0.009375em;
+}
+
+/* bodySmall, under the choices made for several PDFs. */
+.stamps-hint {
+  margin: 0;
+  color: var(--on-surface-variant);
+  font-size: 0.75rem;
+  line-height: 1rem;
+  letter-spacing: 0.025em;
+}
+
+@media (min-width: 840px) {
+  .stamps-content--panes {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--space-6);
+    align-items: start;
+  }
+
+  /* The batch list keeps to one column inside its pane. */
+  .stamps-content--panes .ui-batch-list {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

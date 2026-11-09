@@ -1,0 +1,13 @@
+{
+  "@cantoo/pdf-lib": "2.11.1",
+  "@cantoo/fontkit": "2.0.12",
+  "fflate": "0.8.3",
+  "pdfjs-dist": "6.4.299",
+  "tesseract.js": "7.0.0",
+  "tesseract.js-core": "7.0.0",
+  "@tesseract.js-data/eng": "1.0.0",
+  "@tesseract.js-data/fra": "1.0.0",
+  "@tesseract.js-data/spa": "1.0.0",
+  "@tesseract.js-data/hin": "1.0.0",
+  "libheif-js": "1.23.5"
+}

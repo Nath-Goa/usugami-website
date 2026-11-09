@@ -1,0 +1,100 @@
+/* The screen Split PDF, Delete pages and Rotate PDF share (frame.js): the app's PdfToolScreen
+   column, its sections opening and closing as pdfSectionEnter and pdfSectionExit. */
+
+.onepdf {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+.onepdf-main {
+  flex: 1;
+}
+
+/* The column's 16 dp between its parts (Arrangement.spacedBy(16.dp)). */
+.onepdf-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.onepdf-loading .ui-progress {
+  margin-bottom: var(--space-4);
+}
+
+.onepdf-card:focus {
+  outline: none;
+}
+
+.onepdf-card:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* Under the name: the thumbnail's width in, so the text button's label lines up with the name
+   (the button's own padding takes the gap's place). */
+.onepdf-card .ui-file-actions {
+  margin-inline-start: 58px;
+}
+
+/* titleMedium */
+.onepdf-heading {
+  margin: 0;
+  color: var(--on-surface);
+  font-size: 1rem;
+  font-weight: 500;
+  line-height: 1.5rem;
+}
+
+/* bodySmall in onSurfaceVariant */
+.onepdf-hint {
+  margin: 0;
+  color: var(--on-surface-variant);
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+
+/* A section that opens and closes: its content's height and opacity move together. */
+.onepdf-collapse {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition: grid-template-rows var(--ui-medium) cubic-bezier(0.4, 0, 0.2, 1), opacity var(--ui-medium) linear;
+}
+
+.onepdf-collapse.is-collapsed {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+
+.onepdf-collapse-inner {
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Clipped only while it moves, so focus rings and shadows show once it is open. */
+.onepdf-collapse:not(.is-settled) > .onepdf-collapse-inner {
+  overflow: hidden;
+}
+
+/* On wide screens the main button ends where the column above it ends (.page--narrow: 760 px). */
+@media (min-width: 840px) {
+  .onepdf > .ui-bottombar {
+    padding-inline: max(var(--space-6), calc((100% - 760px) / 2 + var(--space-6)));
+  }
+}
+
+/* Files dragged over the screen while a PDF is open take its place: the column is marked, not
+   the whole screen (the kit tints any drop zone). */
+.onepdf.is-dragover {
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+}
+
+.onepdf.is-dragover .onepdf-main {
+  border-radius: var(--radius-l);
+  background: color-mix(in srgb, var(--primary-container) 45%, transparent);
+  outline: 2px dashed var(--primary);
+  outline-offset: -6px;
+}

@@ -1,0 +1,36 @@
+# Text files are stored and checked out with LF endings on every system (Windows too), so
+# diffs stay clean and the exact-line service worker stamp in .github/workflows/pages.yml matches.
+* text=auto eol=lf
+
+# Binary files: never convert line endings or show text diffs.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.avif binary
+*.heic binary
+*.heif binary
+*.gif binary
+*.bmp binary
+*.tif binary
+*.tiff binary
+*.ico binary
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary
+*.wasm binary
+*.gz binary
+*.pdf binary
+*.zip binary
+*.docx binary
+*.pptx binary
+*.xlsx binary
+*.epub binary
+# pdf.js data files (character maps, Type 1 fonts, colour profile)
+*.bcmap binary
+*.pfb binary
+*.icc binary
+
+# Libraries copied in by npm run vendor: not counted as this project's code on GitHub.
+site/app/vendor/** linguist-vendored

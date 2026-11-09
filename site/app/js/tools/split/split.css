@@ -1,0 +1,40 @@
+/* Split PDF (index.js): the modes, the pages field, the combine switch and the page picker. */
+
+/* The sections under the chips carry the gap above them, so it opens and closes with them. */
+.split-section > .onepdf-collapse-inner > :first-child {
+  margin-top: var(--space-4);
+}
+
+/* The page picker: a page chosen is framed in the accent colour, 2 dp as the app's. */
+.split-picker .ui-page-tile.is-selected .ui-page::after {
+  box-shadow: inset 0 0 0 2px var(--primary);
+}
+
+/* Phones: one row of pages that scrolls sideways, as the app's LazyRow, each card 105 dp wide. */
+@media (max-width: 839.98px) {
+  .split-picker .ui-pagegrid {
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: 105px;
+    gap: var(--space-2);
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    /* Room for the focus ring, inside the row that clips. */
+    padding: 4px;
+    margin: -4px;
+    scroll-padding-inline: 4px;
+    scrollbar-width: thin;
+  }
+}
+
+/* Wider screens: the pages wrap into a grid that scrolls inside, so the file name stays near. */
+@media (min-width: 840px) {
+  .split-picker {
+    max-height: min(480px, 60vh);
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    padding: 4px;
+    margin: -4px;
+    scrollbar-width: thin;
+  }
+}

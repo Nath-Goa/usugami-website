@@ -1,0 +1,143 @@
+/* Usugami's design tokens, shared by the website pages and the web app.
+   Colors are the Android app's Material 3 scheme (app/src/main/java/.../ui/Theme.kt): a red accent
+   on warm white in light mode, neutral grays with a soft red accent in dark mode.
+   The theme follows the device; <html data-theme="light"> or "dark" overrides it (app Settings). */
+
+:root {
+  color-scheme: light;
+  --primary: #b3261e;
+  --on-primary: #ffffff;
+  --primary-container: #f9dedc;
+  --on-primary-container: #410e0b;
+  --secondary: #775652;
+  --on-secondary: #ffffff;
+  --secondary-container: #ffdad5;
+  --on-secondary-container: #2c1512;
+  --tertiary: #705c2e;
+  --tertiary-container: #fcdfa6;
+  --on-tertiary-container: #261a00;
+  --background: #fff8f7;
+  --on-background: #231918;
+  --surface: #fff8f7;
+  --on-surface: #231918;
+  --surface-variant: #f5ddda;
+  --on-surface-variant: #534341;
+  --outline: #857371;
+  --outline-variant: #d8c2bf;
+  --surface-lowest: #ffffff;
+  --surface-low: #fff0ee;
+  --surface-container: #fceae7;
+  --surface-high: #f6e4e2;
+  --surface-highest: #f1dedc;
+  --error: #b3261e;
+  --scrim: rgb(0 0 0 / 0.32);
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.12), 0 2px 6px rgb(0 0 0 / 0.08);
+  --shadow-high: 0 4px 12px rgb(0 0 0 / 0.16), 0 1px 3px rgb(0 0 0 / 0.12);
+
+  /* The app icon's colors (the launcher icon is purple, the app inside is red). */
+  --brand: #e8def8;
+  --brand-ink: #4a3f6b;
+
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Helvetica Neue", Arial,
+    "Noto Sans Devanagari", "Nirmala UI", sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", Menlo, Consolas, monospace;
+
+  --radius-xs: 4px;
+  --radius-s: 8px;
+  --radius-m: 12px;
+  --radius-l: 16px;
+  --radius-xl: 28px;
+  --radius-full: 999px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+
+  --touch: 48px;
+  --gutter: 16px;
+  --content-max: 1120px;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --duration: 200ms;
+}
+
+@media (min-width: 720px) {
+  :root { --gutter: 24px; }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --primary: #ffb4ab;
+    --on-primary: #690005;
+    --primary-container: #93000a;
+    --on-primary-container: #ffdad6;
+    --secondary: #e7bdb7;
+    --on-secondary: #442925;
+    --secondary-container: #464646;
+    --on-secondary-container: #f2f2f2;
+    --tertiary: #dfc38c;
+    --tertiary-container: #574419;
+    --on-tertiary-container: #fcdfa6;
+    --background: #171717;
+    --on-background: #ededed;
+    --surface: #171717;
+    --on-surface: #ededed;
+    --surface-variant: #444444;
+    --on-surface-variant: #c9c9c9;
+    --outline: #919191;
+    --outline-variant: #444444;
+    --surface-lowest: #101010;
+    --surface-low: #1f1f1f;
+    --surface-container: #232323;
+    --surface-high: #2d2d2d;
+    --surface-highest: #383838;
+    --error: #ffb4ab;
+    --scrim: rgb(0 0 0 / 0.5);
+    --shadow: 0 1px 2px rgb(0 0 0 / 0.5);
+    --shadow-high: 0 4px 12px rgb(0 0 0 / 0.6);
+    --brand: #4a3f6b;
+    --brand-ink: #e8def8;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --primary: #ffb4ab;
+  --on-primary: #690005;
+  --primary-container: #93000a;
+  --on-primary-container: #ffdad6;
+  --secondary: #e7bdb7;
+  --on-secondary: #442925;
+  --secondary-container: #464646;
+  --on-secondary-container: #f2f2f2;
+  --tertiary: #dfc38c;
+  --tertiary-container: #574419;
+  --on-tertiary-container: #fcdfa6;
+  --background: #171717;
+  --on-background: #ededed;
+  --surface: #171717;
+  --on-surface: #ededed;
+  --surface-variant: #444444;
+  --on-surface-variant: #c9c9c9;
+  --outline: #919191;
+  --outline-variant: #444444;
+  --surface-lowest: #101010;
+  --surface-low: #1f1f1f;
+  --surface-container: #232323;
+  --surface-high: #2d2d2d;
+  --surface-highest: #383838;
+  --error: #ffb4ab;
+  --scrim: rgb(0 0 0 / 0.5);
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.5);
+  --shadow-high: 0 4px 12px rgb(0 0 0 / 0.6);
+  --brand: #4a3f6b;
+  --brand-ink: #e8def8;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --duration: 0ms; }
+}

@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-jMe6rNJgQiAWDTIKU+Ry6cW9fksKi/2lF8vxcgEekyQ='; style-src 'self'; img-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
+  <title>Privacy: Usugami</title>
+  <meta name="description" content="Usugami’s privacy policy: the Android app has no ads, analytics, tracking or accounts and collects no data, and the website and web app work on your files in your browser, never upload them, and set no cookies.">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#fff8f7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#171717" media="(prefers-color-scheme: dark)">
+  <script>
+    // Use the theme chosen in the web app (Settings, Appearance); otherwise follow the device.
+    try {
+      var a = JSON.parse(localStorage['usugami.settings']).appearance;
+      if (a === 'light' || a === 'dark') {
+        document.documentElement.setAttribute('data-theme', a);
+        document.querySelectorAll('meta[name="theme-color"]').forEach(function (m) {
+          m.setAttribute('content', a === 'dark' ? '#171717' : '#fff8f7');
+        });
+      }
+    } catch (e) {}
+  </script>
+  <link rel="icon" href="../assets/img/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="../assets/img/icon-32.png" sizes="32x32" type="image/png">
+  <link rel="apple-touch-icon" href="../assets/img/apple-touch-icon.png">
+  <link rel="stylesheet" href="../assets/css/tokens.css">
+  <link rel="stylesheet" href="../assets/css/site.css">
+  <!-- Once the domain is linked, add these (they need absolute URLs; see docs/website.md):
+  <link rel="canonical" href="https://usugami.com/privacy/">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Usugami">
+  <meta property="og:title" content="Privacy: Usugami">
+  <meta property="og:description" content="Usugami’s privacy policy: the Android app has no ads, analytics, tracking or accounts and collects no data, and the website and web app work on your files in your browser, never upload them, and set no cookies.">
+  <meta property="og:url" content="https://usugami.com/privacy/">
+  <meta property="og:image" content="https://usugami.com/assets/img/social-preview.png">
+  <meta property="og:image:width" content="1280">
+  <meta property="og:image:height" content="640">
+  <meta name="twitter:card" content="summary_large_image">
+  -->
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="wrap header-inner">
+      <a class="brand" href="../">
+        <img src="../assets/img/icon.svg" width="36" height="36" alt="">
+        <span>Usugami</span>
+      </a>
+      <nav class="nav-wide" aria-label="Main">
+        <ul class="nav-list">
+          <li><a href="../">Home</a></li>
+          <li><a href="../app/">Web app</a></li>
+          <li><a href="../download/">Download</a></li>
+          <li><a href="../privacy/" aria-current="page">Privacy</a></li>
+        </ul>
+      </nav>
+      <details class="nav-menu">
+        <summary>
+          <svg class="icon icon-open" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 18h16c.55 0 1-.45 1-1s-.45-1-1-1H4c-.55 0-1 .45-1 1s.45 1 1 1zm0-5h16c.55 0 1-.45 1-1s-.45-1-1-1H4c-.55 0-1 .45-1 1s.45 1 1 1zM3 7c0 .55.45 1 1 1h16c.55 0 1-.45 1-1s-.45-1-1-1H4c-.55 0-1 .45-1 1z"/></svg>
+          <svg class="icon icon-close" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M18.3 5.71a.996.996 0 0 0-1.41 0L12 10.59 7.11 5.7A.996.996 0 1 0 5.7 7.11L10.59 12 5.7 16.89a.996.996 0 1 0 1.41 1.41L12 13.41l4.89 4.89a.996.996 0 1 0 1.41-1.41L13.41 12l4.89-4.89c.38-.38.38-1.02 0-1.4z"/></svg>
+          <span class="visually-hidden">Menu</span>
+        </summary>
+        <nav aria-label="Main">
+          <ul class="nav-list">
+            <li><a href="../">Home</a></li>
+            <li><a href="../app/">Web app</a></li>
+            <li><a href="../download/">Download</a></li>
+            <li><a href="../privacy/" aria-current="page">Privacy</a></li>
+          </ul>
+        </nav>
+      </details>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="page-hero" aria-labelledby="page-title">
+      <div class="wrap">
+        <p class="eyebrow">Effective 9 November 2026</p>
+        <h1 id="page-title">Privacy</h1>
+        <p class="lead">Usugami does not collect, share or sell any data about you. Below is the privacy policy of the Android app, followed by how this website and the web app handle your data.</p>
+        <nav aria-label="On this page">
+          <ul class="toc">
+            <li><a href="#android-app">The Android app’s policy</a></li>
+            <li><a href="#text-recognition">Text recognition (OCR)</a></li>
+            <li><a href="#keeping-and-deleting">Deleting your data</a></li>
+            <li><a href="#on-the-web">Usugami on the web</a></li>
+            <li><a href="#web-downloads">Text recognition on the web</a></li>
+            <li><a href="#web-storage">What the web app stores</a></li>
+          </ul>
+        </nav>
+      </div>
+    </section>
+
+    <div class="section">
+      <div class="wrap doc-layout">
+        <nav class="doc-toc" aria-label="Sections of the policy">
+          <p class="label">On this page</p>
+          <ul>
+            <li><a href="#android-app">Usugami Privacy Policy</a></li>
+            <li><a href="#who-is-responsible">Who is responsible</a></li>
+            <li><a href="#what-usugami-can-access">What Usugami can access</a></li>
+            <li><a href="#what-usugami-stores">What Usugami stores on your phone</a></li>
+            <li><a href="#text-recognition">Text recognition (OCR)</a></li>
+            <li><a href="#data-collection">Data collection and sharing</a></li>
+            <li><a href="#children">Children</a></li>
+            <li><a href="#keeping-and-deleting">Keeping and deleting your data</a></li>
+            <li><a href="#changes">Changes to this policy</a></li>
+            <li><a href="#on-the-web">Usugami on the web</a></li>
+          </ul>
+        </nav>
+        <article class="prose" aria-labelledby="android-app">
+          <p class="eyebrow">The Android app’s policy</p>
+          <h2 id="android-app" class="anchor-heading">Usugami Privacy Policy</h2>
+          <p class="meta">Effective date: 9 November 2026. This is the privacy policy of the Android app, as published in <a href="https://github.com/Nath-Goa/usugami/blob/main/PRIVACY.md">PRIVACY.md</a> in Usugami’s repository. It is also inside the app.</p>
+
+          <p>Usugami is an Android app that turns images, Word documents, PowerPoint presentations, Excel workbooks and EPUB e-books into PDFs, and splits, merges, reorganizes, compresses, edits, signs and redacts PDFs. It works on your phone. It has no ads, no analytics, no tracking, no accounts and no in-app purchases, and it does not collect, share or sell any data about you.</p>
+          <p>This policy covers all three editions of Usugami: “Usugami” (the main edition), “Usugami Lite” and “Usugami OCR”. The only difference that matters for privacy is text recognition (OCR), explained below.</p>
+
+          <h3 id="who-is-responsible" class="anchor-heading">Who is responsible</h3>
+          <p>Usugami is made by Nathan Kumtakar, an independent developer. It is free and open-source software: <a href="https://github.com/Nath-Goa/usugami">https://github.com/Nath-Goa/usugami</a></p>
+          <p>Questions or concerns: open an issue at <a href="https://github.com/Nath-Goa/usugami/issues">https://github.com/Nath-Goa/usugami/issues</a>. Issues are public, so please don’t include personal details. To report a security problem privately, use “Report a vulnerability” on the repository’s Security tab.</p>
+
+          <h3 id="what-usugami-can-access" class="anchor-heading">What Usugami can access</h3>
+          <ul>
+            <li>Only the images, PDFs, Word, PowerPoint and Excel files, and EPUB books you choose. You pick them with Android’s photo picker or file picker, or you share them to Usugami from another app. Android then gives Usugami access to those files only, and to a folder you pick to save into (see Recent files below). Usugami cannot browse your photos or any other files or folders.</li>
+            <li>Usugami asks for no permissions: no storage, camera, location, contacts or microphone access.</li>
+            <li><strong>Take photo</strong> opens your phone’s own camera app, which saves just that one photo for Usugami. Usugami never uses the camera itself, and the photo stays in Usugami’s private working copies until you make it into a PDF or remove it.</li>
+            <li>Usugami has no internet permission, so Android does not let it connect to the internet, and it cannot upload your files.</li>
+            <li>When you save a PDF, it goes where you choose: the Downloads folder or a folder you pick with the system file picker. When you tap Share or Open, the PDF goes to the app you pick, and that app’s own privacy policy applies.</li>
+          </ul>
+
+          <h3 id="what-usugami-stores" class="anchor-heading">What Usugami stores on your phone</h3>
+          <ul>
+            <li>Working copies: while you work, Usugami keeps copies of the files you picked and the PDFs it makes in its private cache on your phone, where other apps can’t read them. Usugami deletes them automatically once they are no longer needed (for example, when you start over), and Android may also clear the cache when storage runs low.</li>
+            <li>Signatures: a signature you draw for “Sign PDF” is kept only while Usugami is open, in its memory and in the screen state Android keeps for it, so you can use it again. It is never saved in a file of its own, only in the PDFs you sign.</li>
+            <li>Edit PDF: the text, drawings and shapes you add to a PDF are kept the same way, until you leave the tool, and only end up in the PDF you save. Pictures you add are working copies, as above.</li>
+            <li>Settings: your last choices (such as page size, margins and compression level), stored privately on your phone.</li>
+            <li>Recent files: the name, type, size and place of the last 50 files you saved with Usugami, and when you saved them, stored privately on your phone so you can open and share them again from Home. Usugami can read the files it saved to Downloads without any permission. For a file saved with “Save as”, Usugami keeps Android’s permission to read that file while it is on the list. For files saved into a folder you picked, it keeps Android’s permission to read that folder, and what is in it, while one of them is on the list, and uses it only to open, share and check on those files. Usugami gives each permission back once no file on the list needs it.</li>
+            <li>Usugami excludes its data from Android’s cloud backup and device-to-device transfer.</li>
+          </ul>
+          <p>Nothing is stored anywhere else. Usugami has no servers.</p>
+
+          <h3 id="text-recognition" class="anchor-heading">Text recognition (OCR)</h3>
+          <p>Text recognition is optional. It only runs when you turn on “Make text searchable (OCR)” while converting images, and the recognition itself happens on your phone. Your images and the recognized text are never sent to Google or anyone else. How it works depends on the edition.</p>
+
+          <h4 id="ocr-usugami" class="anchor-heading">Usugami (the main edition)</h4>
+          <ul>
+            <li>Text recognition uses Google ML Kit, a library made by Google, and runs through Google Play services, a separate app from Google that is installed on most Android phones.</li>
+            <li>The first time you use a text language, Google Play services downloads Google’s text-recognition model for it (one model covers English, French and Spanish; Hindi has its own). This needs an internet connection at that time. Google Play services then keeps the model for later use; if it removes a model, it downloads it again the next time you use that language. Google Play services does these downloads, not Usugami, and Google’s Privacy Policy applies to them: <a href="https://policies.google.com/privacy">https://policies.google.com/privacy</a></li>
+            <li>To download and run text recognition, Google’s libraries inside Usugami talk to Google Play services on your phone. Google Play services may report to Google how these Google APIs were used (for example, whether a call succeeded).</li>
+            <li>According to Google’s ML Kit data disclosure, ML Kit may also collect diagnostic and usage information about the ML Kit feature, such as device and app information and performance metrics, and send it to Google: <a href="https://developers.google.com/ml-kit/android-data-disclosure">https://developers.google.com/ml-kit/android-data-disclosure</a></li>
+            <li>Your images and the recognized text are not part of any of this.</li>
+            <li>Usugami has no internet permission, and it disables (unregisters) the part of Google’s library that would upload ML Kit’s metrics from inside Usugami, so those metrics are dropped. Google Play services is a separate app, and what it sends is covered by Google’s policies, not by Usugami.</li>
+            <li>Everything else in Usugami (images, Word, PowerPoint, Excel and EPUB to PDF, and all the PDF tools) works without Google Play services and without internet.</li>
+          </ul>
+
+          <h4 id="ocr-usugami-ocr" class="anchor-heading">Usugami OCR</h4>
+          <ul>
+            <li>Text recognition is open source and built into the app, models included: PaddleOCR’s PP-OCRv5 models, run on your phone’s processor by Tencent’s ncnn. It works with no internet connection and doesn’t need Google Play services.</li>
+            <li>The page images are read in the app’s memory and only the recognized text is kept, as the PDF’s invisible text layer. Nothing is sent anywhere or stored anywhere else.</li>
+            <li>Usugami OCR contains no Google libraries and makes no network connections at all.</li>
+          </ul>
+
+          <h4 id="ocr-usugami-lite" class="anchor-heading">Usugami Lite</h4>
+          <ul>
+            <li>Usugami Lite has no text recognition. It contains no Google libraries and makes no network connections at all.</li>
+          </ul>
+          <p>If you want no network use of any kind, install Usugami OCR or Usugami Lite.</p>
+
+          <h3 id="data-collection" class="anchor-heading">Data collection and sharing</h3>
+          <p>Usugami does not collect personal data. It has no analytics, crash reporting, advertising IDs or accounts. The developer receives nothing from the app and cannot see what you do with it.</p>
+
+          <h3 id="children" class="anchor-heading">Children</h3>
+          <p>Usugami does not collect personal information from anyone, including children.</p>
+
+          <h3 id="keeping-and-deleting" class="anchor-heading">Keeping and deleting your data</h3>
+          <ul>
+            <li>Working copies are deleted automatically (see above).</li>
+            <li>To take a file off the Recent files list, or clear the list, use the Recent files screen (See all on Home). The files themselves stay where you saved them.</li>
+            <li>To delete everything Usugami stores on your phone, go to Settings &gt; Apps &gt; Usugami &gt; Storage and tap “Clear storage”, or uninstall Usugami.</li>
+            <li>PDFs you saved to Downloads or another folder are your files. They stay until you delete them, even if you uninstall Usugami.</li>
+            <li>In Usugami (the main edition), the text-recognition models are kept and managed by Google Play services. In Usugami OCR they are part of the app and go when you uninstall it.</li>
+          </ul>
+
+          <h3 id="changes" class="anchor-heading">Changes to this policy</h3>
+          <p>Any change to this policy is made in the file PRIVACY.md in Usugami’s public repository, so every version and change is visible in its history: <a href="https://github.com/Nath-Goa/usugami/commits/main/PRIVACY.md">https://github.com/Nath-Goa/usugami/commits/main/PRIVACY.md</a></p>
+          <p>The effective date at the top changes with each update, and app releases include the version of the policy that applies to them.</p>
+        </article>
+      </div>
+    </div>
+
+    <section class="section section-band" aria-labelledby="on-the-web">
+      <div class="wrap">
+        <article class="prose">
+          <p class="eyebrow">This website and the web app</p>
+          <h2 id="on-the-web" class="anchor-heading">Usugami on the web</h2>
+          <p class="meta">Effective date: 9 November 2026.</p>
+          <p>This part covers this website and the web app on it (Usugami in your browser). Like the Android app, they have no ads, no analytics, no tracking and no accounts, and they do not collect, share or sell any data about you.</p>
+
+          <h3 id="web-site" class="anchor-heading">This website</h3>
+          <ul>
+            <li>No cookies, analytics, ads or tracking, and nothing is loaded from other sites: no outside fonts, scripts or images.</li>
+            <li>The website is a set of static files hosted by GitHub Pages. Like any web host, GitHub receives your IP address and the details of each request (such as the page asked for and your browser) when you visit. GitHub’s privacy statement applies to that: <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement</a></li>
+            <li>Links to other sites, such as GitHub, Obtainium or F-Droid, take you to those sites, and their own privacy policies apply there.</li>
+          </ul>
+
+          <h3 id="web-app" class="anchor-heading">The web app</h3>
+          <ul>
+            <li>The web app works on your files in your browser, on your device. It never uploads them: the images, PDFs and documents you pick, and the PDFs it makes, never leave your device.</li>
+            <li>It can read only the files you pick, drop on it, paste into it or share to it. It doesn’t use your camera, location, contacts or microphone: <strong>Take photo</strong> opens your phone’s own camera app, which hands just that one photo to the web app. It saves only where you choose; with <strong>Save to folder…</strong>, your browser asks you first to let it save into the folder you picked.</li>
+            <li>It downloads only its own files, from this same website, and only as they are needed: the app itself, and the libraries a tool uses the first time you open that tool. These requests ask for the app’s files by name and carry nothing of your files.</li>
+            <li>When you save a file, your browser saves it where you choose. When you share or open a file, it goes to the app you pick, and that app’s own privacy policy applies.</li>
+          </ul>
+
+          <h3 id="web-downloads" class="anchor-heading">Text recognition (OCR) and fonts</h3>
+          <ul>
+            <li>Text recognition is optional. It only runs when you turn on “Make text searchable (OCR)” while converting images, and the recognition itself happens in your browser, on your device.</li>
+            <li>The first time you use a text language, the web app downloads the text-recognition engine (Tesseract) and the data for that language from this same website: about 5 to 8 MB, depending on the language. This needs an internet connection at that time. Your browser then keeps them in its cache for later use; if it removes them, they are downloaded again the next time you use that language.</li>
+            <li>Your images and the recognized text never leave your device. They are not sent to this website, to Google or to anyone else. Only the recognized text is kept, as the PDF’s invisible text layer.</li>
+            <li>Fonts work the same way: the first time a tool needs a font to write text into a PDF (for example Word to PDF, Add page numbers, Add watermark, Edit PDF or text recognition), the web app downloads it from this same website, and your browser keeps it in its cache. Your text is not sent anywhere.</li>
+          </ul>
+
+          <h3 id="web-storage" class="anchor-heading">What the web app stores on your device</h3>
+          <ul>
+            <li>Working copies: while you work, the files you picked and the PDFs the web app makes are kept only in the page’s memory, not in your browser’s storage. They are gone when you start over, leave the tool or close the page.</li>
+            <li>Signatures: a signature you draw for “Sign PDF” is kept only in the page’s memory while the web app is open, so you can use it again. It is never saved in your browser’s storage or in a file of its own, only in the PDFs you sign.</li>
+            <li>Edit PDF: the text, drawings, shapes and pictures you add to a PDF are kept the same way, until you leave the tool, and only end up in the PDF you save.</li>
+            <li>Settings: your language, your appearance (System, Light or Dark), your last choices in the tools (such as page size, margins, compression level and text language), and the Usugami watermark switch with its size and opacity. They are kept in your browser’s local storage on your device. This website’s pages read the appearance setting to match the app’s theme, and never write anything.</li>
+            <li>Recent files: copies of the last 50 files you saved with the web app, with their names, types and sizes and when you saved them, kept in your browser’s storage (IndexedDB) on your device so you can open and share them again from Home. A browser can’t open a file it has saved to your device again, so the web app keeps its own copy, in this browser only. Removing a file from the list, or clearing the list, deletes its copy. Files you only share aren’t listed.</li>
+            <li>Offline copies: the web app’s service worker keeps copies of the site’s own files (the app, its libraries, fonts and text-recognition data, as they are used) in your browser’s cache, so the web app works without an internet connection. They are the same files for everyone and contain nothing of yours.</li>
+            <li>Shared files: when you share files to the installed web app from another app, your browser hands them to its service worker, which keeps them in your browser’s cache only until the web app has read them, and then deletes them. If the web app is closed before it reads them, they are deleted the next time you share files to it (once they are an hour old), or when you clear this site’s data.</li>
+          </ul>
+          <p>Nothing is stored anywhere else, and nothing is sent to the developer or anyone else. The web app has no servers of its own: this website only serves its files.</p>
+
+          <h3 id="web-deleting" class="anchor-heading">Deleting it</h3>
+          <ul>
+            <li>Working copies and Edit PDF’s additions go by themselves when you leave the tool or close the page, and a signature when you close or reload the page.</li>
+            <li>To take a file off Recent files, or empty it, use the Recent files screen (See all on Home) and <strong>Remove from list</strong> or <strong>Clear list</strong>. The files you saved stay where you saved them.</li>
+            <li>To delete everything the web app stores (settings, Recent files and offline copies), clear this site’s data in your browser’s settings. Files you saved to your device stay until you delete them.</li>
+          </ul>
+
+          <h3 id="web-collection" class="anchor-heading">Data collection</h3>
+          <p>The web app and this website do not collect personal information from anyone, including children. The developer receives nothing and cannot see what you do with them.</p>
+
+          <h3 id="questions" class="anchor-heading">Questions</h3>
+          <p>Open an issue at <a href="https://github.com/Nath-Goa/usugami/issues">https://github.com/Nath-Goa/usugami/issues</a>. Issues are public, so please don’t include personal details.</p>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap footer-grid">
+      <div class="footer-brand">
+        <img src="../assets/img/icon.svg" width="40" height="40" alt="" loading="lazy">
+        <p><strong>Usugami</strong> A light app for light PDFs.</p>
+      </div>
+      <nav class="footer-nav" aria-label="More about Usugami">
+        <div class="footer-group">
+          <p class="footer-label">Android app</p>
+          <ul class="footer-links">
+            <li><a href="https://github.com/Nath-Goa/usugami">Source code</a></li>
+            <li><a href="https://github.com/Nath-Goa/usugami/releases">Releases</a></li>
+            <li><a href="https://github.com/Nath-Goa/usugami/discussions">Questions and ideas</a></li>
+            <li><a href="https://github.com/Nath-Goa/usugami/issues">Report a problem</a></li>
+          </ul>
+        </div>
+        <div class="footer-group">
+          <p class="footer-label">This website and the web app</p>
+          <ul class="footer-links">
+            <li><a href="https://github.com/Nath-Goa/usugami-website">Website source code</a></li>
+            <li><a href="https://github.com/Nath-Goa/usugami-website/blob/main/THIRD_PARTY_NOTICES.md">Third-party notices</a></li>
+            <li><a href="../privacy/">Privacy</a></li>
+          </ul>
+        </div>
+      </nav>
+      <ul class="footer-promise" aria-label="This website">
+        <li>No cookies</li>
+        <li>No tracking</li>
+        <li>No ads</li>
+      </ul>
+      <p class="footer-legal">Usugami (the Android app, this website and the web app) is free software under the <a href="https://github.com/Nath-Goa/usugami/blob/main/LICENSE">GNU General Public License, version 3 or later</a> (GPL-3.0-or-later). Copyright © 2026 Nathan Kumtakar. The web app includes libraries, fonts and data made by other people, under their own licenses: see the <a href="https://github.com/Nath-Goa/usugami-website/blob/main/THIRD_PARTY_NOTICES.md">third-party notices</a>.</p>
+      <!-- Language switcher: shown once a translation exists (see docs/website.md). -->
+      <nav class="lang-switch" aria-label="Language" hidden>
+        <ul class="footer-links">
+          <li><a href="../privacy/" hreflang="en" lang="en" aria-current="true">English</a></li>
+          <!-- <li><a href="../fr/privacy/" hreflang="fr" lang="fr">Français</a></li> -->
+          <!-- <li><a href="../es/privacy/" hreflang="es" lang="es">Español</a></li> -->
+          <!-- <li><a href="../hi/privacy/" hreflang="hi" lang="hi">हिन्दी</a></li> -->
+        </ul>
+      </nav>
+    </div>
+  </footer>
+</body>
+</html>

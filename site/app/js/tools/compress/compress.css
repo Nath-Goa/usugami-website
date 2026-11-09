@@ -1,0 +1,113 @@
+/* Compress PDF and Flatten PDF (batch-screen.js): one column in the app's order, its parts 16 px
+   apart. On wide screens one PDF stays in a column of readable width, and several are listed in
+   the kit's grid of cards under what goes for all of them. */
+
+.compress-page {
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.compress-progress {
+  flex: none;
+  margin-bottom: var(--space-4);
+}
+
+.compress-progress[hidden] {
+  display: none;
+}
+
+.compress-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+/* OutlinedButton: as wide as its words, at the start. */
+.compress-add {
+  align-self: flex-start;
+}
+
+/* What goes for every PDF: the app's Column, its parts 16 dp apart, 8 dp for several PDFs. */
+.compress-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.compress-options--many {
+  gap: var(--space-2);
+}
+
+/* titleMedium */
+.compress-heading {
+  margin: 0;
+  color: var(--on-surface);
+  font-size: 1rem;
+  font-weight: 500;
+  line-height: 1.5rem;
+  letter-spacing: 0.009375em;
+}
+
+/* bodySmall, onSurfaceVariant: the note under the levels. */
+.compress-note {
+  margin: 0;
+  color: var(--on-surface-variant);
+  font-size: 0.75rem;
+  line-height: 1rem;
+  letter-spacing: 0.025em;
+}
+
+/* bodyMedium, onSurfaceVariant: Flatten PDF's line saying what it does. */
+.compress-text {
+  margin: 0;
+  color: var(--on-surface-variant);
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  letter-spacing: 0.015625em;
+}
+
+/* Off for a moment (PDFs being opened or made) while keeping the focus: looks as off as disabled. */
+.compress-run[aria-disabled="true"],
+.compress-add[aria-disabled="true"],
+.compress-content .ui-empty[aria-disabled="true"] {
+  cursor: default;
+  color: color-mix(in srgb, var(--on-surface) 38%, transparent);
+}
+
+.compress-run.ui-btn--filled[aria-disabled="true"] {
+  background: color-mix(in srgb, var(--on-surface) 12%, transparent);
+  box-shadow: none;
+}
+
+.compress-add.ui-btn--outlined[aria-disabled="true"] {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--on-surface) 12%, transparent);
+}
+
+.compress-content .ui-empty[aria-disabled="true"] .ui-empty-icon,
+.compress-content .ui-empty[aria-disabled="true"] .ui-empty-detail,
+.compress-content .ui-empty[aria-disabled="true"] .ui-empty-drop {
+  color: inherit;
+}
+
+.compress-run[aria-disabled="true"]::before,
+.compress-add[aria-disabled="true"]::before,
+.compress-content .ui-empty[aria-disabled="true"]::before {
+  display: none;
+}
+
+@media (min-width: 840px) {
+  .compress-content--empty,
+  .compress-content--one {
+    width: 100%;
+    max-width: 640px;
+    margin-inline: auto;
+  }
+
+  /* The choice for all keeps the width it has for one PDF; the cards take the screen. */
+  .compress-content--many > .compress-options {
+    max-width: 640px;
+  }
+}

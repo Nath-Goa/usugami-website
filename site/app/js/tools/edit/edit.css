@@ -1,0 +1,608 @@
+/* Edit PDF (EditPdfOptions.kt, EditPreview.kt): the app's PdfToolScreen column on phones; on wide
+   screens the pages in a column on the left, the page in the middle and the chosen item's controls
+   on the right. */
+
+.edit-screen {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+.edit-main {
+  flex: 1;
+}
+
+.edit-loading {
+  margin-bottom: var(--space-4);
+}
+
+.edit-body,
+.edit-layout,
+.edit-work,
+.edit-side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.edit-layout > *,
+.edit-work > *,
+.edit-side > * {
+  min-width: 0;
+}
+
+.edit-card:focus {
+  outline: none;
+}
+
+.edit-card:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* ---- The row of tools ---- */
+
+.edit-tools {
+  display: flex;
+  gap: 0;
+  margin-inline: -4px;
+}
+
+.edit-tool {
+  position: relative;
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+  padding: 6px 2px;
+  border: 0;
+  border-radius: var(--radius-m);
+  background: none;
+  color: var(--on-surface-variant);
+  font: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.edit-tool-pill {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 32px;
+  border-radius: var(--radius-full);
+  transition: background-color var(--ui-short, 150ms) linear;
+}
+
+.edit-tool-label {
+  max-width: 100%;
+  margin-top: 4px;
+  overflow: hidden;
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1rem;
+  letter-spacing: 0.03em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.edit-tool.is-on {
+  color: var(--on-secondary-container);
+}
+
+.edit-tool.is-on .edit-tool-pill {
+  background: var(--secondary-container);
+}
+
+@media (hover: hover) {
+  .edit-tool:hover:not(:disabled) .edit-tool-pill {
+    background: color-mix(in srgb, var(--on-surface) 8%, transparent);
+  }
+
+  .edit-tool.is-on:hover:not(:disabled) .edit-tool-pill {
+    background: color-mix(in srgb, var(--on-secondary-container) 8%, var(--secondary-container));
+  }
+}
+
+.edit-tool:active:not(:disabled) .edit-tool-pill {
+  background: color-mix(in srgb, var(--on-surface) 12%, transparent);
+}
+
+.edit-tool:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
+.edit-tool:disabled {
+  color: color-mix(in srgb, var(--on-surface) 38%, transparent);
+  cursor: default;
+}
+
+/* ---- The page ---- */
+
+.edit-canvas-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.edit-hintrow {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  min-height: 48px;
+}
+
+.edit-hint {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  color: var(--on-surface-variant);
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+
+.edit-adding {
+  margin-bottom: var(--space-2);
+}
+
+.edit-stage {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  padding-block: 4px;
+}
+
+.edit-frame {
+  position: relative;
+  flex: none;
+  overflow: hidden;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 1px 3px 1px rgb(0 0 0 / 0.15);
+}
+
+.edit-frame:focus {
+  outline: none;
+}
+
+.edit-frame:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+}
+
+.edit-viewport {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--surface-high);
+}
+
+/* Zoomed in, a swipe pans the page and stops at its edges rather than scrolling the screen on. */
+.edit-viewport.is-zoomed {
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.edit-sheet {
+  position: relative;
+  background: transparent;
+  /* A swipe that starts off the items scrolls; a touch on one drags it (the screen decides as the
+     touch starts), and two fingers zoom the page. */
+  touch-action: pan-x pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.edit-stage.is-drawing .edit-sheet {
+  /* While drawing, a stroke that starts on the page draws, instead of scrolling. */
+  touch-action: none;
+}
+
+.edit-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+.edit-frame:not(.is-drawn) .edit-canvas {
+  opacity: 0;
+}
+
+.edit-nodes {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* Each item, as a screen reader and the keyboard find it; the page draws its look (and its focus). */
+.edit-node {
+  position: absolute;
+  min-width: 4px;
+  min-height: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.edit-node:focus {
+  outline: none;
+}
+
+.edit-nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0 var(--space-2);
+  min-height: 48px;
+  margin-top: 4px;
+}
+
+.edit-pagenav,
+.edit-zoom {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+.edit-zoom {
+  margin-inline-start: auto;
+}
+
+.edit-nav-label {
+  min-width: 3.5em;
+  color: var(--on-surface-variant);
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25rem;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.edit-pagenav .edit-nav-label {
+  min-width: 5.5em;
+}
+
+/* ---- What a filled box does ---- */
+
+.edit-cover {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.edit-cover[hidden] {
+  display: none;
+}
+
+.edit-cover-icon {
+  display: flex;
+  flex: none;
+  color: var(--primary);
+}
+
+.edit-cover p {
+  margin: 0;
+  color: var(--on-surface-variant);
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+
+/* ---- The chosen item's controls ---- */
+
+.edit-props,
+.edit-props-item,
+.edit-props-pen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.edit-props[hidden],
+.edit-props-item[hidden],
+.edit-props-pen[hidden] {
+  display: none;
+}
+
+.edit-props {
+  animation: edit-in var(--ui-medium, 250ms) cubic-bezier(0.2, 0, 0, 1);
+}
+
+@keyframes edit-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+.edit-props-head {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+/* titleSmall */
+.edit-props-title {
+  display: -webkit-box;
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--on-surface);
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.25rem;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.edit-nudges {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-1);
+}
+
+.edit-fill {
+  padding-block: 4px;
+}
+
+/* ---- Colours ---- */
+
+.edit-colors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.edit-swatch {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  padding: 6px;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  background: none;
+  cursor: pointer;
+  transition: border-color var(--ui-short, 150ms) linear;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.edit-swatch.is-checked {
+  border-color: var(--primary);
+}
+
+.edit-swatch:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.edit-swatch-dot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: var(--swatch);
+  /* So black shows on the dark theme. */
+  box-shadow: inset 0 0 0 1px var(--outline-variant);
+  color: #ffffff;
+}
+
+/* Dark on light colours (yellow, white), so the check shows on every one. */
+.edit-swatch--yellow .edit-swatch-dot,
+.edit-swatch--white .edit-swatch-dot {
+  color: #000000;
+}
+
+.edit-swatch-dot .icon {
+  opacity: 0;
+  transform: scale(0.6);
+  transition: opacity var(--ui-short, 150ms) linear, transform var(--ui-short, 150ms) cubic-bezier(0.2, 0, 0, 1);
+}
+
+.edit-swatch.is-checked .edit-swatch-dot .icon {
+  opacity: 1;
+  transform: none;
+}
+
+/* ---- The row of pages ---- */
+
+.edit-strip-box[hidden] {
+  display: none;
+}
+
+.edit-strip {
+  display: flex;
+  gap: var(--space-2);
+  margin-inline: -20px;
+  padding: 4px 20px;
+  overflow-x: auto;
+  scroll-padding-inline: 20px;
+  scrollbar-width: thin;
+}
+
+.edit-strip-page {
+  position: relative;
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  width: 72px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--outline-variant);
+  border-radius: var(--radius-m);
+  background: var(--surface);
+  color: var(--on-surface);
+  font: inherit;
+  cursor: pointer;
+  transition: border-color var(--ui-short, 150ms) linear, box-shadow var(--ui-short, 150ms) linear;
+}
+
+.edit-strip-page.is-selected {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+.edit-strip-page:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.edit-strip-thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 92px;
+  overflow: hidden;
+  background: var(--surface-container);
+}
+
+.edit-strip-thumb canvas {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  background: #ffffff;
+}
+
+.edit-strip-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.25rem;
+}
+
+.edit-strip-page.is-selected .edit-strip-number {
+  color: var(--primary);
+}
+
+.edit-strip-dot {
+  display: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--primary);
+}
+
+.edit-strip-page.is-marked .edit-strip-dot {
+  display: block;
+}
+
+/* ---- The text dialog ---- */
+
+.edit-text-sheet .ui-sheet-body {
+  padding-top: var(--space-2);
+}
+
+.edit-text-field textarea {
+  min-height: 3.5em;
+  max-height: 9.5em;
+  resize: vertical;
+}
+
+/* ---- Wide screens: pages, page, controls side by side ---- */
+
+@media (min-width: 840px) {
+  .edit-main {
+    max-width: 1320px;
+  }
+
+  /* "Choose PDF" as wide as the other tools' column, not the editor's. */
+  .edit-body > .ui-empty {
+    max-width: 760px;
+    margin-inline: auto;
+  }
+
+  .edit-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 340px;
+    grid-template-rows: auto 1fr;
+    grid-template-areas:
+      "work card"
+      "work side";
+    align-items: start;
+    gap: var(--space-4) var(--space-6);
+  }
+
+  .edit-layout.has-strip {
+    grid-template-columns: 104px minmax(0, 1fr) 320px;
+    grid-template-areas:
+      "strip work card"
+      "strip work side";
+  }
+
+  .edit-card {
+    grid-area: card;
+  }
+
+  .edit-strip-box {
+    grid-area: strip;
+    position: sticky;
+    top: 72px;
+    align-self: start;
+  }
+
+  .edit-work {
+    grid-area: work;
+    gap: var(--space-2);
+  }
+
+  .edit-side {
+    grid-area: side;
+    position: sticky;
+    top: 72px;
+  }
+
+  .edit-strip {
+    flex-direction: column;
+    align-items: center;
+    max-height: calc(100vh - 168px);
+    max-height: calc(100dvh - 168px);
+    margin: 0;
+    padding: 4px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    scroll-padding-block: 8px;
+  }
+
+  .edit-tools {
+    width: 100%;
+    max-width: 560px;
+    margin-inline: auto;
+  }
+
+  .edit-screen > .ui-bottombar {
+    padding-inline: max(var(--space-6), calc((100% - 1320px) / 2 + var(--space-6)));
+  }
+}
+
+@media (min-width: 840px) and (max-width: 1099px) {
+  .edit-layout.has-strip {
+    grid-template-columns: 96px minmax(0, 1fr) 280px;
+  }
+
+  .edit-layout {
+    grid-template-columns: minmax(0, 1fr) 280px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .edit-props {
+    animation: none;
+  }
+}

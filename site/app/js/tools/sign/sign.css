@@ -1,0 +1,660 @@
+/* Sign PDF (js/tools/sign/): the signature card, the page strip, the preview to place the
+   signature on, and the pad to sign on. Material 3 as the app draws it (SignOptions.kt,
+   SignaturePad.kt), from the tokens in assets/css/tokens.css. The pad and the preview are white
+   like paper in both themes, so black ink always shows. */
+
+.sign-page,
+.sign-pad-dialog {
+  /* Paper, and the check mark on an ink swatch: the same in light and dark. */
+  --sign-paper: #ffffff;
+  --sign-on-ink: #ffffff;
+  --sign-gap: 4px;
+}
+
+.sign-page {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.sign-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+}
+
+.sign-title {
+  margin: 0 0 var(--space-2);
+  color: var(--on-surface);
+  font-size: 1rem;
+  font-weight: 500;
+  line-height: 1.5rem;
+}
+
+.sign-note,
+.sign-hint {
+  margin: var(--space-2) 0 0;
+  color: var(--on-surface-variant);
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+
+.sign-enter {
+  animation: sign-enter var(--ui-medium, 250ms) var(--ui-ease-enter, ease-out);
+}
+
+@keyframes sign-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+
+/* ---- The signature's card: "Draw your signature", or the signature to change ---- */
+
+.sign-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 48px;
+  margin: 0;
+  padding: var(--space-3);
+  border: 0;
+  border-radius: var(--radius-m);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--outline-variant);
+  color: var(--on-surface);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.sign-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: currentColor;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--ui-short, 150ms) linear;
+}
+
+@media (hover: hover) {
+  .sign-card:hover::before {
+    opacity: 0.08;
+  }
+}
+
+.sign-card:focus-visible::before,
+.sign-card:active::before {
+  opacity: 0.1;
+}
+
+.sign-card--draw {
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-5);
+  text-align: center;
+}
+
+.sign-card-icon,
+.sign-card-edit {
+  display: flex;
+  color: var(--primary);
+}
+
+.sign-card-label {
+  font-size: 1rem;
+  line-height: 1.5rem;
+}
+
+.sign-card-ink {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  height: 72px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-s);
+  background: var(--sign-paper);
+}
+
+.sign-card-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.sign-card-edit {
+  flex: none;
+  margin-inline-start: var(--space-3);
+}
+
+/* ---- The pages in a row ---- */
+
+.sign-strip {
+  position: relative;
+  display: flex;
+  gap: var(--space-2);
+  margin: calc(-1 * var(--space-1));
+  padding: var(--space-1);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+}
+
+.sign-strip-page {
+  position: relative;
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: 72px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--radius-m);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--outline-variant);
+  color: var(--on-surface);
+  font: inherit;
+  cursor: pointer;
+  transition: box-shadow var(--ui-short, 150ms) linear;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.sign-strip-page.is-selected {
+  box-shadow: inset 0 0 0 2px var(--primary);
+}
+
+.sign-strip-page::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: currentColor;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--ui-short, 150ms) linear;
+}
+
+@media (hover: hover) {
+  .sign-strip-page:hover::after {
+    opacity: 0.08;
+  }
+}
+
+.sign-strip-page:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.sign-strip-thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 92px;
+  margin: 2px 2px 0;
+  overflow: hidden;
+  border-radius: calc(var(--radius-m) - 2px) calc(var(--radius-m) - 2px) 0 0;
+}
+
+.sign-strip-thumb canvas {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.sign-strip-number {
+  padding: var(--space-1);
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.25rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.sign-strip-page.is-selected .sign-strip-number {
+  color: var(--primary);
+}
+
+/* ---- Placing the signature ---- */
+
+.sign-place {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.sign-place .sign-title {
+  margin-bottom: calc(var(--space-2) - var(--space-4));
+}
+
+.sign-preview-wrap {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+.sign-preview {
+  position: relative;
+  flex: none;
+  width: 100%;
+  aspect-ratio: 595 / 842;
+  background: var(--sign-paper);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 2px 6px 2px rgb(0 0 0 / 0.15);
+  cursor: pointer;
+  /* A swipe that starts off the signature scrolls the screen. */
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.sign-preview-page,
+.sign-preview-page canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.sign-mark {
+  position: absolute;
+  top: 0;
+  left: 0;
+  color: var(--primary);
+  border-radius: 3px;
+  cursor: grab;
+  touch-action: none;
+  will-change: transform;
+}
+
+[dir="rtl"] .sign-mark {
+  right: auto;
+  left: 0;
+}
+
+/* A press this close to the signature still picks it up. */
+.sign-mark::before {
+  content: "";
+  position: absolute;
+  inset: -16px;
+}
+
+.sign-mark.is-dragging {
+  cursor: grabbing;
+}
+
+/* A tap or a nudge glides it to its new place; a drag follows the pointer exactly. */
+.sign-mark.is-gliding {
+  transition: transform var(--ui-short, 150ms) cubic-bezier(0.2, 0, 0, 1);
+}
+
+.sign-mark:focus {
+  outline: none;
+}
+
+.sign-mark:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+}
+
+.sign-mark-frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.sign-mark-ink {
+  position: absolute;
+  inset: var(--sign-gap);
+  pointer-events: none;
+}
+
+.sign-mark-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.sign-place .sign-hint {
+  margin-top: calc(var(--space-2) - var(--space-4));
+  text-align: center;
+}
+
+.sign-controls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* "Size" beside its slider, as the app's row; the value is read out, not shown. */
+.sign-size.ui-slider {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.sign-size .ui-slider-head {
+  flex: none;
+}
+
+.sign-size .ui-slider-label {
+  font-size: 1rem;
+  font-weight: 400;
+  line-height: 1.5rem;
+}
+
+.sign-size .ui-slider-value {
+  display: none;
+}
+
+.sign-size .ui-slider-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.sign-nudges {
+  display: flex;
+  justify-content: center;
+  margin-top: calc(-1 * var(--space-3));
+}
+
+/* Side by side on wide screens: the PDF, signature, page and name beside the preview. */
+@media (min-width: 840px) {
+  .sign-layout {
+    width: 100%;
+    max-width: 640px;
+    margin-inline: auto;
+  }
+
+  .sign-layout.has-place {
+    max-width: none;
+    grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
+    grid-template-rows: auto auto auto auto auto 1fr;
+    grid-template-areas:
+      "file place"
+      "signature place"
+      "pages place"
+      "controls place"
+      "name place"
+      ". place";
+    column-gap: var(--space-6);
+    align-items: start;
+  }
+
+  .sign-layout.has-place .sign-file { grid-area: file; }
+  .sign-layout.has-place .sign-signature { grid-area: signature; }
+  .sign-layout.has-place .sign-pages { grid-area: pages; }
+  .sign-layout.has-place .sign-name { grid-area: name; }
+  .sign-layout.has-place .sign-controls-box { grid-area: controls; }
+
+  .sign-nudges {
+    justify-content: flex-start;
+    margin-top: calc(-1 * var(--space-2));
+    margin-inline-start: -12px;
+  }
+
+  .sign-layout.has-place .sign-place-box {
+    grid-area: place;
+    position: sticky;
+    top: 72px;
+  }
+}
+
+/* ---- The pad: full screen on phones ---- */
+
+.sign-pad-dialog.ui-dialog {
+  padding: 0;
+}
+
+.sign-pad-surface {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  background: var(--surface);
+  color: var(--on-surface);
+  animation: sign-pad-in var(--ui-medium, 250ms) var(--ui-ease-enter, ease-out);
+}
+
+@keyframes sign-pad-in {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+}
+
+.sign-pad-dialog.is-closing .sign-pad-surface {
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity 150ms var(--ui-ease-exit, ease-in), transform 150ms var(--ui-ease-exit, ease-in);
+}
+
+.sign-pad-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 64px;
+  padding: calc(var(--space-2) + env(safe-area-inset-top, 0px)) max(var(--space-1), env(safe-area-inset-right, 0px)) var(--space-2) max(var(--space-1), env(safe-area-inset-left, 0px));
+}
+
+.sign-pad-title {
+  min-width: 0;
+  margin: 0;
+  padding-inline-start: var(--space-1);
+  overflow: hidden;
+  font-size: 1.375rem;
+  font-weight: 400;
+  line-height: 1.75rem;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.sign-pad-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-height: 0;
+  padding: var(--space-2) max(20px, env(safe-area-inset-right, 0px)) var(--space-2) max(20px, env(safe-area-inset-left, 0px));
+}
+
+.sign-pad-hint {
+  flex: none;
+  margin: 0;
+  color: var(--on-surface-variant);
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
+/* As wide as the screen; pad.js keeps it short enough for the room left. */
+.sign-pad-area {
+  display: flex;
+  flex: none;
+  justify-content: center;
+}
+
+.sign-pad {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  aspect-ratio: 2 / 1;
+  overflow: hidden;
+  border-radius: var(--radius-m);
+  background: var(--sign-paper);
+  touch-action: none;
+}
+
+.sign-pad::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--outline);
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.sign-pad-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.sign-pad-row {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.sign-pad-ink-label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.25rem;
+}
+
+.sign-pad-spacer {
+  flex: 1;
+}
+
+.sign-swatches {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.sign-swatch {
+  display: flex;
+  width: 52px;
+  height: 52px;
+  margin: 0;
+  padding: 4px;
+  border: 2px solid transparent;
+  border-radius: var(--radius-full);
+  background: none;
+  cursor: pointer;
+  transition: border-color var(--ui-short, 150ms) linear;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.sign-swatch.is-selected {
+  border-color: var(--primary);
+}
+
+.sign-swatch:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.sign-swatch-dot {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-full);
+  background: var(--sign-swatch);
+  /* So black shows on the dark theme. */
+  box-shadow: 0 0 0 1px var(--outline-variant);
+  color: var(--sign-on-ink);
+}
+
+.sign-swatch-dot .icon {
+  opacity: 0;
+  transform: scale(0.6);
+  transition: opacity var(--ui-short, 150ms) linear, transform var(--ui-short, 150ms) var(--ui-ease-enter, ease-out);
+}
+
+.sign-swatch.is-selected .sign-swatch-dot .icon {
+  opacity: 1;
+  transform: none;
+}
+
+.sign-pad-actions {
+  display: flex;
+  flex: none;
+  padding: 10px max(20px, env(safe-area-inset-right, 0px)) calc(10px + env(safe-area-inset-bottom, 0px)) max(20px, env(safe-area-inset-left, 0px));
+}
+
+.sign-pad-done {
+  flex: 1;
+}
+
+/* A phone turned sideways: less around the pad, so the pad has more room. */
+@media (max-height: 480px) {
+  .sign-pad-bar {
+    min-height: 48px;
+    padding-top: calc(var(--space-1) + env(safe-area-inset-top, 0px));
+    padding-bottom: 0;
+  }
+
+  .sign-pad-body {
+    gap: var(--space-2);
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
+  .sign-pad-actions {
+    padding-top: var(--space-2);
+    padding-bottom: calc(var(--space-2) + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+/* A dialog in the middle of a large screen. */
+@media (min-width: 840px) and (min-height: 600px) {
+  .sign-pad-dialog.ui-dialog {
+    padding: var(--space-6) var(--space-4);
+  }
+
+  .sign-pad-surface {
+    width: min(760px, 100%);
+    height: auto;
+    max-height: 100%;
+    border-radius: var(--radius-xl);
+    background: var(--surface-high);
+    box-shadow: var(--shadow-high);
+    animation-name: sign-pad-pop;
+  }
+
+  @keyframes sign-pad-pop {
+    from {
+      opacity: 0;
+      transform: scale(0.9);
+    }
+  }
+
+  .sign-pad-bar {
+    padding: var(--space-3) var(--space-3) 0;
+  }
+
+  .sign-pad-body {
+    padding: var(--space-2) var(--space-5);
+  }
+
+  .sign-pad-actions {
+    justify-content: flex-end;
+    padding: var(--space-3) var(--space-5) var(--space-5);
+  }
+
+  .sign-pad-done {
+    flex: none;
+    min-width: 160px;
+  }
+}

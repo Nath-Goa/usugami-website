@@ -1,0 +1,105 @@
+/* Rotate PDF (index.js): "All pages" and its buttons, the list of pages each with its own buttons,
+   and Reset pages. */
+
+.rotate-all-row {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin-inline-end: calc(-1 * var(--space-1));
+}
+
+.rotate-all-title {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The list scrolls inside the screen past 450 dp, so a long PDF doesn't push the file name far down. */
+.rotate-list {
+  display: grid;
+  gap: var(--space-2);
+  max-height: 450px;
+  margin: -4px;
+  padding: 4px;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  list-style: none;
+  scrollbar-width: thin;
+}
+
+@media (min-width: 840px) {
+  .rotate-list {
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    max-height: max(450px, 60vh);
+  }
+}
+
+/* An outlined card: the page, its number and how it is turned, and its two buttons. */
+.rotate-card {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: var(--space-2);
+  border-radius: var(--radius-m);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--outline-variant);
+}
+
+.rotate-thumb {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 55px;
+  height: 72px;
+  margin-inline-end: var(--space-3);
+}
+
+/* Turned by the short way round, in Motion.MEDIUM (none with reduced motion). */
+.rotate-turn {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  transition: transform var(--ui-medium) cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.rotate-turn.is-far {
+  transition: none;
+}
+
+.rotate-turn > canvas {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  box-shadow: 0 0 0 1px var(--outline-variant);
+}
+
+.rotate-placeholder {
+  display: inline-flex;
+  color: var(--primary);
+}
+
+.rotate-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* bodyLarge */
+.rotate-page {
+  font-size: 1rem;
+  line-height: 1.5rem;
+}
+
+/* bodySmall in the primary colour */
+.rotate-turned {
+  display: block;
+  color: var(--primary);
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+
+.rotate-reset-row {
+  display: flex;
+  margin-block: calc(-1 * var(--space-2));
+}
