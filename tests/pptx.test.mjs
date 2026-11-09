@@ -1,11 +1,9 @@
 // Tests for PowerPoint to PDF (site/app/js/engine/office/pptx.js): the presentations the app's
-// OfficeConverterDeviceTest builds, the app's own deck.pptx fixture (from the Android project, when
-// it is there), and more: backgrounds, master and layout shapes, placeholders, bullets and numbers,
-// autofit, rotation, pictures, tables, damaged and hostile files, progress, cancelling and a large
-// deck. PDFs are read back with pdf.js (text, positions, sizes, pictures) and rendered to pixels.
-import { existsSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
-import { withPage, assert, saveOutput } from './harness.mjs';
+// OfficeConverterDeviceTest builds, the app's own deck.pptx fixture (copied into tests/fixtures/),
+// and more: backgrounds, master and layout shapes, placeholders, bullets and numbers, autofit,
+// rotation, pictures, tables, damaged and hostile files, progress, cancelling and a large deck.
+// PDFs are read back with pdf.js (text, positions, sizes, pictures) and rendered to pixels.
+import { withPage, assert, saveOutput, fixture } from './harness.mjs';
 
 let passed = 0;
 function check(name, condition, detail = '') {
@@ -14,8 +12,11 @@ function check(name, condition, detail = '') {
 }
 const near = (expected, actual, tolerance = 1.5) => typeof actual === 'number' && Math.abs(expected - actual) <= tolerance;
 
-/** The app's fixture (made by its tools/make_office_fixtures.py with python-pptx's default template). */
-const DECK = 'C:/Users/Nathan/OneDrive/Desktop/pdfer/app/src/androidTest/assets/deck.pptx';
+/**
+ * The app's fixture (made by its tools/make_office_fixtures.py with python-pptx's default template),
+ * a copy of pdfer/app/src/androidTest/assets/deck.pptx, so its checks run wherever the site is.
+ */
+const DECK = 'deck.pptx';
 
 /** Loads the modules and the helpers that write presentations into the page as window.T. */
 async function setup(page, url) {
@@ -1030,19 +1031,15 @@ async function smartArt(page) {
 
 // ---------------------------------------------------------------------------------------------
 
-const deckBytes = existsSync(DECK) ? await readFile(DECK) : null;
+const deckBytes = await fixture(DECK);
 
 await withPage(async (page, url) => {
   await setup(page, url);
   await slidesInOrder(page);
   await keep(page, 'slidesInOrder');
-  if (deckBytes) {
-    const pdf = await deckFixture(page, deckBytes);
-    await keep(page, 'deck');
-    await deckPixels(page, pdf);
-  } else {
-    console.log('  (the app\'s deck.pptx isn\'t here: its checks are skipped)');
-  }
+  const pdf = await deckFixture(page, deckBytes);
+  await keep(page, 'deck');
+  await deckPixels(page, pdf);
   const tests = {
     slideNumbers, connectorsGroupsAndSavedPictures, placeholdersAndColourMaps, directionSymbolsAnchoring, verticalText,
     tablesAndMergedCells, groupFillAndNumbering, damagedPartsAndNesting, refusedFiles, autofit, backgroundsAndMasters,
@@ -1058,16 +1055,18 @@ console.log(`chromium: ${passed} checks passed`);
 
 for (const browser of ['firefox', 'webkit']) {
   const before = passed;
-  // Firefox writes each XML error it meets to the console; the damaged-file checks stay in Chromium.
+  // Firefox writes each XML error DOMParser meets to the console: those (and only those) are let
+  // through there, so the damaged-file checks run in every browser.
   await withPage(async (page, url) => {
     await setup(page, url);
     await slidesInOrder(page);
-    if (deckBytes) await deckFixture(page, deckBytes, browser);
+    await deckFixture(page, deckBytes, browser);
     await connectorsGroupsAndSavedPictures(page);
     await tablesAndMergedCells(page);
+    await damagedPartsAndNesting(page);
     await autofit(page);
     await progressCancelAndLargeDecks(page);
-  }, { browser });
+  }, { browser, allowConsole: browser === 'firefox' ? [/XML Parsing Error/] : [] });
   console.log(`${browser}: ${passed - before} checks passed`);
 }
 console.log(`pptx: all ${passed} checks passed`);

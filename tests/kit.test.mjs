@@ -4,13 +4,15 @@
 // Screenshots go to .tmp/kit/screens/ to be looked at.
 import { readFile, mkdir, access } from 'node:fs/promises';
 import { join } from 'node:path';
+import { deflateSync, crc32 } from 'node:zlib';
 import { withPage, assert, root } from './harness.mjs';
 import { PDFDocument, PDFName, PDFNumber, PDFDict, rgb, degrees, StandardFonts } from '../site/app/vendor/pdf-lib/pdf-lib.esm.min.js';
 import { zipSync, unzipSync, strToU8 } from '../site/app/vendor/fflate/fflate.esm.js';
 
 const shots = join(root, '.tmp', 'kit', 'screens');
 await mkdir(shots, { recursive: true });
-const appAssets = 'C:/Users/Nathan/OneDrive/Desktop/pdfer/app/src/androidTest/assets';
+// The Android app's test images, beside this repository; tests that need them skip without them.
+const appAssets = join(root, '..', 'pdfer', 'app', 'src', 'androidTest', 'assets');
 
 const exists = (p) => access(p).then(() => true, () => false);
 const b64 = (bytes) => Buffer.from(bytes).toString('base64');
@@ -61,13 +63,51 @@ async function fixtures() {
   const xlsx = zipSync({ '[Content_Types].xml': ct('application/vnd.ms-excel.sheet.macroEnabled.main+xml'), 'xl/workbook.xml': strToU8('<w/>') });
   const epub = zipSync({ mimetype: [strToU8('application/epub+zip'), { level: 0 }], 'META-INF/container.xml': strToU8('<container/>'), 'OEBPS/book.opf': strToU8('<package/>') });
   const bare = zipSync({ 'word/document.xml': strToU8('<w:document/>') });
+  // The main part named only by [Content_Types].xml (no word/document.xml): compressed, then stored.
+  const wordCt = ct('application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml');
+  const onlyTypes = zipSync({ '[Content_Types].xml': wordCt, 'main.xml': strToU8('<w:document/>') });
+  const onlyTypesStored = zipSync({ '[Content_Types].xml': [wordCt, { level: 0 }], 'main.xml': strToU8('<w:document/>') });
   const other = zipSync({ 'notes.txt': strToU8('hello') });
   const images = {};
   for (const n of ['clear.webp', 'photo.webp', 'drawing.bmp', 'drawing.gif', 'turned.avif', 'turned.heic']) {
     const p = join(appAssets, 'images', n);
     if (await exists(p)) images[n] = new Uint8Array(await readFile(p));
   }
-  return { plain, many, encrypted, protectedPdf, certificate, damaged, docx, pptx, xlsx, epub, bare, other, images, miscounted: await miscountedPdf(), marked: await markedPdf() };
+  return { plain, many, encrypted, protectedPdf, certificate, damaged, docx, pptx, xlsx, epub, bare, onlyTypes, onlyTypesStored, other, images, miscounted: await miscountedPdf(), marked: await markedPdf(), scan: await scanPdf() };
+}
+
+/** A PNG of `w` x `h` pixels, stripes of colour (a stand-in for a scanned page). */
+function stripesPng(w, h) {
+  const chunk = (type, data) => {
+    const head = Buffer.alloc(8);
+    head.writeUInt32BE(data.length, 0);
+    head.write(type, 4, 'latin1');
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(Buffer.concat([Buffer.from(type, 'latin1'), data])) >>> 0, 0);
+    return Buffer.concat([head, data, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0);
+  ihdr.writeUInt32BE(h, 4);
+  ihdr[8] = 8; ihdr[9] = 2;
+  const raw = Buffer.alloc((w * 3 + 1) * h);
+  for (let y = 0; y < h; y++) {
+    const row = y * (w * 3 + 1);
+    for (let x = 0; x < w; x++) {
+      raw[row + 1 + x * 3] = (x * 7 + y) & 255;
+      raw[row + 2 + x * 3] = (y * 3) & 255;
+      raw[row + 3 + x * 3] = ((x ^ y) * 5) & 255;
+    }
+  }
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+}
+
+/** Four A4 pages, each one large picture, as a scanned PDF is. */
+async function scanPdf() {
+  const doc = await PDFDocument.create();
+  const png = await doc.embedPng(stripesPng(1240, 1754));
+  for (let i = 0; i < 4; i++) doc.addPage([595, 842]).drawImage(png, { x: 0, y: 0, width: 595, height: 842 });
+  return doc.save();
 }
 
 /** Three pages (red, green, blue) under a page tree that says it holds five: the tools find three. */
@@ -161,6 +201,23 @@ const check = (name, cond, detail = '') => assert(cond, name + (detail ? ` (${de
 // files.js
 
 async function testFiles(page, fx) {
+  // fflate is loaded only once a ZIP comes: files.js tells Office files and EPUBs apart without it
+  // where it can (names, stored entries), and with it for files read by toFileItems.
+  const zipLoaded = () => page.evaluate(() => performance.getEntriesByType('resource').some((e) => /vendor\/fflate\//.test(e.name)));
+  check('fflate is not loaded at start', !(await zipLoaded()));
+  // Nor pdf.js: pdfdoc.js loads it when a PDF is first opened (a tool shows without waiting for it).
+  check('pdf.js is not loaded until a PDF is opened', !(await page.evaluate(() => performance.getEntriesByType('resource').some((e) => /pdf\.min\.mjs/.test(e.name)))));
+  const kinds = () => page.evaluate(() => {
+    const { fileKind } = kit.files;
+    return { onlyTypes: fileKind({ name: 'x.bin', bytes: fx.onlyTypes }), onlyTypesStored: fileKind({ name: 'x.bin', bytes: fx.onlyTypesStored }), docx: fileKind({ name: 'r.zip', bytes: fx.docx }), epub: fileKind({ name: 'b.zip', bytes: fx.epub }) };
+  });
+  let z = await kinds();
+  check('without fflate: names and stored entries tell', z.onlyTypes === 'other' && z.onlyTypesStored === 'docx' && z.docx === 'docx' && z.epub === 'epub', JSON.stringify(z));
+  const viaItems = await page.evaluate(async () => (await kit.files.toFileItems([new File([fx.onlyTypes], 'x.bin')])).map((i) => kit.files.fileKind(i)));
+  check('a ZIP read by toFileItems loads fflate and is told by its [Content_Types].xml', viaItems.join() === 'docx' && (await zipLoaded()), viaItems.join());
+  z = await kinds();
+  check('with fflate: compressed [Content_Types].xml read too', z.onlyTypes === 'docx' && z.onlyTypesStored === 'docx' && z.docx === 'docx' && z.epub === 'epub', JSON.stringify(z));
+
   const r = await page.evaluate(() => {
     const { fileKind, imageType, kindOfType, kindOfName, chosenKind } = kit.files;
     const k = (name, bytes, type = '') => fileKind({ name, type, bytes });
@@ -294,6 +351,30 @@ async function testPick(page, fx, { cancel = true } = {}) {
     const one = await page.evaluate(async () => (await window.picked).map((f) => f.type));
     check('a photo picked arrives', one.join() === 'image/png', one.join());
   }
+  // A cancel followed late by the files (Firefox, as Playwright drives it, on a busy page sends
+  // change up to half a second after cancel): the files still arrive.
+  await page.evaluate(() => { window.pickOptions = { accept: 'pdf' }; });
+  [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.click('#pick')]);
+  await chooser.element().evaluate((i) => i.dispatchEvent(new Event('cancel')));
+  await page.evaluate(() => { const end = performance.now() + 800; while (performance.now() < end) { /* busy */ } });
+  await chooser.setFiles([{ name: 'Late.pdf', mimeType: 'application/pdf', buffer: Buffer.from(fx.plain) }]);
+  picked = await page.evaluate(async () => (await window.picked).map((f) => f.name));
+  check('files that come late after a cancel are taken', picked.join() === 'Late.pdf', picked.join());
+  // EPUB: "binary data" offered too on Android, as the app's picker (some providers don't know EPUB).
+  await page.evaluate(() => { window.pickOptions = { accept: 'epub' }; });
+  [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.click('#pick')]);
+  const epubAccept = await chooser.element().evaluate((i) => i.accept);
+  await chooser.setFiles([{ name: 'book.epub', mimeType: 'application/epub+zip', buffer: Buffer.from(fx.epub) }]);
+  await page.evaluate(async () => { await window.picked; });
+  await page.evaluate(() => Object.defineProperty(navigator, 'userAgent', { configurable: true, get: () => 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36' }));
+  [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.click('#pick')]);
+  const androidAccept = await chooser.element().evaluate((i) => i.accept);
+  await chooser.setFiles([{ name: 'book.bin', mimeType: 'application/octet-stream', buffer: Buffer.from(fx.epub) }]);
+  picked = await page.evaluate(async () => (await window.picked).map((f) => f.name + ':' + kit.files.fileKind(f)));
+  await page.evaluate(() => delete navigator.userAgent);
+  check('the EPUB picker offers binary data on Android only', !epubAccept.includes('octet-stream') && epubAccept.includes('application/epub+zip')
+    && androidAccept.split(',').includes('application/octet-stream') && androidAccept.includes('.epub'), `${epubAccept} | ${androidAccept}`);
+  check('an e-book picked as binary data is an EPUB by its content', picked.join() === 'book.bin:epub', picked.join());
   const leftover = await page.evaluate(() => document.querySelectorAll('input[type=file]').length);
   check('the picker input is removed', leftover === 0);
   await page.evaluate(() => document.getElementById('pick').remove());
@@ -361,6 +442,38 @@ async function testControls(page) {
   check('switch row flips', !s.c && s.aria === 'false' && s.role === 'switch' && s.name === 'Merge all images into one PDF', JSON.stringify(s));
   await page.keyboard.press('Space');
   check('Space flips the focused switch', await page.evaluate(() => sw.checked && log.slice(-2).join() === 'sw:false,sw:true'));
+  await page.evaluate(() => sw.setLabel('One PDF per image'));
+  s = await page.evaluate(() => ({ shown: sw.querySelector('.ui-switch-label').textContent, name: document.getElementById(sw.switch.getAttribute('aria-labelledby')).textContent, c: sw.checked }));
+  check('switch row setLabel renames the switch', s.shown === 'One PDF per image' && s.name === 'One PDF per image' && s.c, JSON.stringify(s));
+
+  // 48 px to tap: a segment just above and below its 40 px, and chips on wrapped rows each their own.
+  s = await page.evaluate(() => {
+    const at = (x, y) => document.elementFromPoint(x, y)?.closest('.ui-segment, .ui-chip');
+    // Room around it, as a screen leaves (here the chips under it would reach up to it).
+    seg.style.margin = '16px 0';
+    const b = seg.querySelector('.ui-segment');
+    const r = b.getBoundingClientRect();
+    const cx = r.left + r.width / 2;
+    const segTaps = [at(cx, r.top - 3) === b, at(cx, r.bottom + 3) === b, r.height];
+    seg.style.margin = '';
+    const narrow = kit.ui.chips({ label: 'Mode', value: 'a', options: ['Every page', 'Page ranges', 'Odd and even pages', 'Every N pages', 'Size'].map((label, i) => ({ value: 'abcde'[i], label })) });
+    narrow.style.width = '220px';
+    document.getElementById('controls').prepend(narrow);
+    const list = [...narrow.querySelectorAll('.ui-chip')];
+    const rows = [...new Set(list.map((c) => Math.round(c.getBoundingClientRect().top)))];
+    const second = list.find((c) => Math.round(c.getBoundingClientRect().top) === rows[1]);
+    const first = list[0].getBoundingClientRect();
+    const sr = second.getBoundingClientRect();
+    const out = {
+      seg: segTaps,
+      rows: rows.length, gap: Math.round(sr.top - first.bottom),
+      chipTaps: [at(first.left + 8, first.bottom + 7) === list[0], at(sr.left + 8, sr.top - 7) === second],
+    };
+    narrow.remove();
+    return out;
+  });
+  check('segmented buttons are 48 px to tap', s.seg[0] && s.seg[1] && s.seg[2] >= 40, JSON.stringify(s));
+  check('wrapped chip rows are 48 px apart, each chip tapped on its own', s.rows >= 2 && s.gap === 16 && s.chipTaps.every(Boolean), JSON.stringify(s));
 
   // Slider: keys move it, and a screen reader hears the formatted value.
   await page.focus('#controls .ui-slider-input');
@@ -411,6 +524,20 @@ async function testDialogs(page, { wide }) {
   check('a destructive dialog starts on the safe button', (await page.evaluate(() => document.activeElement.textContent)) === 'Keep');
   await page.click('dialog[open] .ui-btn:has-text("Remove")');
   check('confirm resolves true', await page.evaluate(() => window.answer) === true);
+  await page.waitForTimeout(250);
+  // A message that is controls (Settings' list of choices) isn't read out whole as the description.
+  await page.evaluate(() => {
+    const list = document.createElement('div');
+    list.setAttribute('role', 'listbox');
+    list.textContent = 'System default Light Dark';
+    window.answer = kit.ui.alertDialog({ title: 'Appearance', message: list, confirm: 'Cancel', describe: false });
+  });
+  d = await page.evaluate(() => ({ desc: document.querySelector('dialog.ui-dialog[open]').getAttribute('aria-describedby') }));
+  check('describe: false leaves the dialog without a description', d.desc === null, JSON.stringify(d));
+  // Back closes the dialog on top first (the router asks closeTopOverlay), as Android's does.
+  d = await page.evaluate(async () => ({ closed: kit.ui.closeTopOverlay(), answer: await window.answer, again: kit.ui.closeTopOverlay() }));
+  check('closeTopOverlay dismisses the dialog on top, then finds nothing', d.closed === true && d.answer === false && d.again === false, JSON.stringify(d));
+  await page.waitForTimeout(250);
 
   // Bottom sheet: from the bottom on phones, in the middle on wide screens.
   await page.evaluate(() => {
@@ -431,6 +558,26 @@ async function testDialogs(page, { wide }) {
   await page.waitForTimeout(300);
   check('Escape closes the sheet', await page.evaluate(() => !document.querySelector('dialog[open]') && log.includes('sheet closed')));
   if (!wide) {
+    // Its handle is a button for screen readers on touch screens (no Escape there), out of the
+    // Tab order, so the focus still starts on the sheet's first control.
+    await page.evaluate(() => { window.sheet = kit.ui.bottomSheet({ title: 'Handle', content: [kit.ui.switchRow({ label: 'One', checked: true })], onClose: () => log.push('handle closed') }); });
+    await page.waitForTimeout(350);
+    d = await page.evaluate(() => {
+      const hb = sheet.el.querySelector('.ui-sheet-handle');
+      const r = hb.getBoundingClientRect();
+      return { tag: hb.tagName, name: hb.getAttribute('aria-label'), tab: hb.tabIndex, w: r.width, focus: document.activeElement.getAttribute('role') };
+    });
+    check('the sheet handle is a Close button', d.tag === 'BUTTON' && d.name === 'Close' && d.tab === -1 && d.w >= 48 && d.focus === 'switch', JSON.stringify(d));
+    await page.evaluate(() => sheet.el.querySelector('.ui-sheet-handle').click());
+    await page.waitForTimeout(300);
+    check('the handle closes the sheet', await page.evaluate(() => !document.querySelector('dialog[open]') && log.includes('handle closed')));
+    // Back (closeTopOverlay) closes a sheet too.
+    await page.evaluate(() => { window.sheet = kit.ui.bottomSheet({ title: 'Back', content: 'Body', onClose: () => log.push('back closed') }); });
+    await page.waitForTimeout(100);
+    check('closeTopOverlay closes a sheet', await page.evaluate(() => kit.ui.closeTopOverlay()));
+    await page.waitForTimeout(300);
+    check('the sheet is gone after Back', await page.evaluate(() => !document.querySelector('dialog[open]') && log.includes('back closed')));
+
     // Swiping the handle down closes it.
     await page.evaluate(() => { window.sheet = kit.ui.bottomSheet({ title: 'Swipe me', content: 'Body', onClose: () => log.push('swiped') }); });
     await page.waitForTimeout(350);
@@ -447,6 +594,20 @@ async function testDialogs(page, { wide }) {
   }
 
   // Progress dialog: only after its delay; Cancel says "Cancelling…".
+  // With no line to show, just the bar: no empty slot (and gap) under it, as the app's for one PDF.
+  d = await page.evaluate(() => {
+    const one = kit.ui.progressDialog({ title: 'Working on your PDF…', delay: 0 });
+    const body = one.el.querySelector('.ui-dialog-body');
+    const bar = body.querySelector('.ui-progress');
+    const r = { room: body.getBoundingClientRect().bottom - bar.getBoundingClientRect().bottom, text: getComputedStyle(one.el.querySelector('.ui-progress-text')).display };
+    one.update(null, 'PDF 1 of 2');
+    r.label = getComputedStyle(one.el.querySelector('.ui-progress-label')).color === getComputedStyle(body).color;
+    r.textAfter = getComputedStyle(one.el.querySelector('.ui-progress-text')).display;
+    one.close();
+    return r;
+  });
+  check('progress dialog without lines is its bar alone; "PDF 1 of 2" in the dialog text colour', Math.abs(d.room) < 0.5 && d.text === 'none' && d.textAfter !== 'none' && d.label, JSON.stringify(d));
+  await page.waitForFunction(() => !document.querySelector('dialog[open]'));
   await page.evaluate(() => {
     window.pd = kit.ui.progressDialog({ title: 'Working on your PDFs…', onCancel: () => log.push('cancel') });
     pd.update(0.25, 'PDF 2 of 5', 'Report.pdf');
@@ -458,6 +619,18 @@ async function testDialogs(page, { wide }) {
     return { vis: getComputedStyle(surf).visibility, label: surf.querySelector('.ui-progress-label').textContent, live: surf.querySelector('.ui-progress-label').getAttribute('aria-live'), detail: surf.querySelector('.ui-progress-detail').textContent, now: surf.querySelector('[role=progressbar]').getAttribute('aria-valuenow') };
   });
   check('progress dialog waits, then shows', early === 'hidden' && d.vis === 'visible' && d.label === 'PDF 2 of 5' && d.live === 'polite' && d.detail === 'Report.pdf' && d.now === '25', JSON.stringify({ early, ...d }));
+  // Cancel takes the focus once the dialog shows (it can't while the dialog is invisible).
+  check('Cancel has the focus once the progress dialog shows', await page.evaluate(() => document.activeElement?.textContent === 'Cancel' && !!document.activeElement.closest('.ui-progress-dialog')));
+  // A third line (the page being made), not read out; the others stay as they are.
+  await page.evaluate(() => pd.update(0.5, undefined, undefined, 'Page 3'));
+  d = await page.evaluate(() => {
+    const step = document.querySelector('.ui-progress-dialog .ui-progress-step');
+    return { step: step.textContent, hidden: step.hidden, live: step.getAttribute('aria-live'), label: document.querySelector('.ui-progress-label').textContent };
+  });
+  check('progress dialog: a step line under the others, not live', d.step === 'Page 3' && !d.hidden && d.live === null && d.label === 'PDF 2 of 5', JSON.stringify(d));
+  await page.evaluate(() => pd.setStep(null));
+  check('setStep(null) hides it', await page.evaluate(() => document.querySelector('.ui-progress-step').hidden));
+  check('closeTopOverlay leaves the progress dialog', await page.evaluate(() => !kit.ui.closeTopOverlay() && !!document.querySelector('dialog[open]:not(.is-closing)')));
   if (!wide) await page.screenshot({ path: join(shots, 'progress-phone.png') });
   await page.keyboard.press('Escape');
   check('Escape doesn\'t cancel work', await page.evaluate(() => !!document.querySelector('dialog[open]') && !log.includes('cancel')));
@@ -493,6 +666,37 @@ async function testDialogs(page, { wide }) {
   check('typing clears the error and allows Open PDF', d.err === '' && !d.ok, JSON.stringify(d));
   await page.keyboard.press('Enter');
   check('Enter gives the password', (await page.evaluate(() => window.pw)) === 'x');
+  await page.waitForTimeout(250);
+
+  // A long file name in a snackbar wraps inside the bar, at phone width.
+  await page.evaluate(() => { window.longSnack = kit.ui.snackbar('Saved to Downloads as PXL_20261109_153012345.PORTRAIT_compressed.pdf'); });
+  await page.waitForTimeout(400);
+  d = await page.evaluate(() => {
+    const bar = window.longSnack.getBoundingClientRect();
+    const text = window.longSnack.querySelector('.ui-snackbar-text').getBoundingClientRect();
+    return { bar: [bar.left, bar.right], text: [text.left, text.right] };
+  });
+  check('a long name in a snackbar stays inside it', d.text[0] >= d.bar[0] - 0.5 && d.text[1] <= d.bar[1] + 0.5, JSON.stringify(d));
+  await page.evaluate(() => window.longSnack.dismiss());
+  await page.waitForTimeout(250);
+
+  if (!wide) {
+    // 400 % zoom (320 x 256): the password dialog scrolls whole, its field in view.
+    const size = page.viewportSize();
+    await page.setViewportSize({ width: 320, height: 256 });
+    await page.evaluate(() => { window.pw = kit.ui.passwordDialog({ fileName: 'statement.pdf' }); });
+    await page.waitForTimeout(400);
+    d = await page.evaluate(() => {
+      const input = document.querySelector('dialog[open] input');
+      const r = input.getBoundingClientRect();
+      const body = document.querySelector('dialog[open] .ui-dialog-body');
+      return { top: r.top, bottom: r.bottom, vh: innerHeight, body: body.clientHeight, bodyScroll: body.scrollHeight, focus: document.activeElement === input };
+    });
+    check('a very short window: the password field is in view', d.top >= 0 && d.bottom <= d.vh && d.body >= d.bodyScroll - 1 && d.focus, JSON.stringify(d));
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(250);
+    await page.setViewportSize(size);
+  }
 }
 
 async function testCardsAndDrop(page) {
@@ -544,6 +748,60 @@ async function testCardsAndDrop(page) {
     document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
   });
   await page.waitForFunction(() => log.includes('dropped:Pasted.pdf'));
+
+  // A zone taken off the page for a while (a result screen in its place, with no zone of its own)
+  // takes a paste again once it is back: a paste meanwhile finds nothing and loses nothing.
+  await page.evaluate(() => {
+    const cards = document.getElementById('cards');
+    window.away = document.createElement('div');
+    window.away.id = 'away';
+    cards.replaceWith(window.away);
+    window.cardsShelved = cards;
+    window.pasteNamed = (name) => {
+      const dt = new DataTransfer();
+      dt.items.add(new File([fx.plain], name, { type: 'application/pdf' }));
+      document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+    };
+    window.pasteNamed('While away.pdf');
+  });
+  await page.waitForTimeout(200);
+  await page.evaluate(() => {
+    window.away.replaceWith(window.cardsShelved);
+    window.pasteNamed('Back again.pdf');
+  });
+  await page.waitForFunction(() => log.includes('dropped:Back again.pdf'), null, { timeout: 3000 }).catch(() => {});
+  r = await page.evaluate(() => ({ back: log.includes('dropped:Back again.pdf'), away: log.includes('dropped:While away.pdf') }));
+  check('a zone back on the page takes a paste again', r.back && !r.away, JSON.stringify(r));
+
+  // A drop zone inside another: the inner one takes the files, and the outer one lets go of its
+  // highlight too (Merge's empty card on its page).
+  r = await page.evaluate(() => {
+    window.log = [];
+    const outer = document.createElement('div');
+    outer.id = 'outer';
+    const inner = kit.ui.emptyState({ title: 'Add PDFs', onFiles: (items) => log.push('inner:' + items.length), accept: 'pdf' });
+    outer.append(inner);
+    kit.ui.dropZone(outer, { accept: 'pdf', onFiles: (items) => log.push('outer:' + items.length) });
+    document.getElementById('cards').append(outer);
+    const dt = new DataTransfer();
+    dt.items.add(new File([fx.plain], 'Nested.pdf', { type: 'application/pdf' }));
+    inner.dispatchEvent(new DragEvent('dragenter', { dataTransfer: dt, bubbles: true, cancelable: true }));
+    const during = [outer.classList.contains('is-dragover'), inner.classList.contains('is-dragover')];
+    inner.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+    return { during, after: [outer.classList.contains('is-dragover'), inner.classList.contains('is-dragover')] };
+  });
+  await page.waitForFunction(() => log.length >= 1);
+  await page.waitForTimeout(100);
+  const nestedLog = await page.evaluate(() => log.join());
+  check('nested drop zones: the inner takes the files, both let go', r.during.every(Boolean) && !r.after[0] && !r.after[1] && nestedLog === 'inner:1', JSON.stringify({ ...r, nestedLog }));
+
+  // A menu left open when the screen goes (Back) is taken away with it.
+  await page.click('#cards [aria-label="More options"]');
+  r = await page.evaluate(() => ({ open: !!document.querySelector('.ui-menu'), closed: kit.ui.closeMenu(), left: !!document.querySelector('.ui-menu, .ui-menu-scrim'), again: kit.ui.closeMenu() }));
+  check('closeMenu takes the menu and its scrim away', r.open && r.closed && !r.left && !r.again, JSON.stringify(r));
+  await page.click('#cards [aria-label="More options"]');
+  r = await page.evaluate(() => ({ closed: kit.ui.closeTopOverlay(), left: !!document.querySelector('.ui-menu, .ui-menu-scrim'), focus: document.activeElement?.getAttribute('aria-label') }));
+  check('closeTopOverlay closes an open menu first, focus back on its button', r.closed && !r.left && r.focus === 'More options', JSON.stringify(r));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -582,6 +840,23 @@ async function testPdfDoc(page, fx) {
     try { await p; return 'drawn'; } catch (e) { return e.name; }
   });
   check('a thumbnail no longer wanted is dropped', r === 'CancelledError', r);
+
+  // pdf.js keeps nothing of a page drawn (its operator list, its decoded images, full size for a
+  // scanned page) once the thumbnail is made: the pages are cleaned up.
+  r = await page.evaluate(async () => {
+    const src = await kit.pdfdoc.openPdf({ name: 'scan.pdf', bytes: fx.scan });
+    for (let i = 0; i < src.pageCount; i++) await src.thumbnail(i, 112);
+    await src.render(0, { cssWidth: 300 });
+    const doc = await src.pdfjs();
+    const kept = [];
+    for (let i = 0; i < src.pageCount; i++) {
+      const p = await doc.getPage(i + 1);
+      kept.push(p._intentStates?.size ?? 0);
+    }
+    src.close();
+    return { pages: src.pageCount, kept };
+  });
+  check('drawn pages keep nothing in pdf.js', r.pages === 4 && r.kept.every((n) => n === 0), JSON.stringify(r));
 
   // A PDF with a password: asked for, a wrong one said in the dialog, the right one opens it.
   for (const [label, key, pw] of [['pdf-lib encrypted', 'encrypted', 'test123'], ['the app\'s protected.pdf', 'protectedPdf', 'test123']]) {
@@ -638,6 +913,10 @@ async function testPdfDoc(page, fx) {
   r = await page.evaluate(async () => { const m = await window.many; return { sources: m.sources.map((s) => s.name), failed: m.failed.map((f) => f.item.name) }; });
   check('openPdfs', r.sources.join() === 'a.pdf' && r.failed.join() === 'bad.pdf,worse.pdf', JSON.stringify(r));
   await snackWith(page, "bad.pdf, worse.pdf: Couldn't open these PDFs. They may be damaged or unsupported.");
+  await clearSnacks(page);
+  // Many: the first three named and the others counted (NameList.kt), so the message stays short.
+  await page.evaluate(() => kit.pdfdoc.reportFileProblems(['1.pdf', '2.pdf', '3.pdf', '4.pdf', '5.pdf', '6.pdf'].map((name) => ({ name, error: new Error('x') }))));
+  await snackWith(page, "1.pdf, 2.pdf, 3.pdf and 3 more: Couldn't open these PDFs. They may be damaged or unsupported.");
   await clearSnacks(page);
 }
 
@@ -984,6 +1263,29 @@ async function testPageGrid(page, { wide }) {
   await page.waitForTimeout(500);
   let r = await page.evaluate(() => ({ canvases: grid.querySelectorAll('canvas').length, asked: thumbsAsked.size, tiles: grid.querySelectorAll('.ui-page-tile').length, role: grid.getAttribute('role') }));
   check('only the pages near the screen are drawn', r.tiles === 60 && r.canvases > 0 && r.canvases < 60 && r.asked < 60 && r.role === 'list', JSON.stringify(r));
+  // Tiles off screen skip layout, given the height a tile on screen has; the list holds only its
+  // items (the move hint is a hidden description).
+  r = await page.evaluate(() => {
+    const tiles = grid.querySelectorAll('.ui-page-tile');
+    const hint = grid.querySelector('.ui-visually-hidden');
+    const desc = document.getElementById(tiles[0].querySelector('.ui-page').getAttribute('aria-describedby'));
+    return {
+      cv: getComputedStyle(tiles[59]).contentVisibility, est: parseFloat(grid.style.getPropertyValue('--ui-tile-h')), real: tiles[0].getBoundingClientRect().height,
+      last: tiles[59].getBoundingClientRect().height, hintHidden: hint.hidden, desc: desc?.textContent,
+      children: [...grid.children].every((c) => c.hidden || c.getAttribute('role') === 'listitem'),
+    };
+  });
+  check('tiles off screen: content-visibility, sized as one on screen', (r.cv === 'auto' || r.cv === undefined) && Math.abs(r.est - r.real) <= 1 && Math.abs(r.last - r.real) <= 1, JSON.stringify(r));
+  check('the move hint: a hidden description, the list only items', r.hintHidden && r.desc === 'To move it, press Ctrl and an arrow key, or drag it.' && r.children, JSON.stringify(r));
+  r = await page.evaluate(() => {
+    const g = kit.pagegrid.pageGrid({ count: 3, thumbnail: () => new Promise(() => {}), selectable: true, selected: new Set() });
+    document.body.append(g);
+    const out = { hint: [...g.children].filter((c) => !c.hidden && c.getAttribute('role') !== 'listitem').length, text: g.innerText.includes('To move it'), desc: g.querySelector('.ui-page').hasAttribute('aria-describedby') };
+    g.destroy();
+    g.remove();
+    return out;
+  });
+  check('a grid whose pages can\'t move says nothing of moving them', r.hint === 0 && !r.text && !r.desc, JSON.stringify(r));
   await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
   await page.waitForFunction(() => grid.querySelectorAll('.ui-page-tile')[59].querySelector('canvas'), null, { timeout: 8000 });
   r = await page.evaluate(() => ({ first: !!grid.querySelectorAll('.ui-page-tile')[0].querySelector('canvas'), last: !!grid.querySelectorAll('.ui-page-tile')[59].querySelector('canvas') }));
@@ -1204,7 +1506,10 @@ async function testOutput(page, fx, { wide }) {
     details: document.querySelector('.ui-result-details').textContent, extra: document.querySelector('.ui-result-extra')?.textContent,
     note: document.querySelector('.ui-result-note')?.textContent, unsaved: document.querySelector('.ui-result-unsaved').textContent,
     start: document.querySelector('.ui-result-startover')?.textContent,
+    // Its content is the page's one main landmark, where Skip to content leads.
+    mains: [...document.querySelectorAll('main, [role="main"]')].map((m) => (m.contains(document.querySelector('.ui-result-heading')) ? m.id : 'other')),
   }));
+  check('result screen: its content is the main landmark', r.mains.join('|') === 'content', JSON.stringify(r.mains));
   check('result screen for one PDF', r.title === 'Done' && r.back && r.heading === 'Your PDF is ready' && r.focus === 'ui-result-heading'
     && r.buttons.join('|') === 'Open|Share|Save to Downloads|Save as…' && r.start === 'Start over', JSON.stringify(r));
   check('its details', /^3 pages · \d/.test(r.details) && /^Compressed from .+ \(75% smaller\)$/.test(r.extra) && r.note === 'The new PDF has no password.'
@@ -1225,11 +1530,19 @@ async function testOutput(page, fx, { wide }) {
   check('Start over asks while unsaved', (await page.textContent('dialog[open] .ui-dialog-title')) === 'Start over?');
   await page.click('dialog[open] .ui-btn:has-text("Cancel")');
   await page.waitForTimeout(200);
-  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('.ui-result-actions >> text=Save to Downloads')]);
+  // Pressed with the keyboard: the button is off while it saves, and the focus comes back to it.
+  await page.focus('.ui-result-actions .ui-btn:has-text("Save to Downloads")');
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.keyboard.press('Enter')]);
   const got = await readDownload(dl);
   check('Save to Downloads: right name and bytes', dl.suggestedFilename() === 'Report_compressed.pdf' && Buffer.compare(Buffer.from(got), Buffer.from(fx.plain)) === 0, dl.suggestedFilename());
-  await snackWith(page, 'Saved to Downloads as Report_compressed.pdf');
-  await page.waitForTimeout(400);
+  // A PDF tool's wording (PdfToolsViewModel.saveToDownloads), for one PDF too.
+  await snackWith(page, 'Saved to Downloads');
+  check('Save to Downloads says so as the PDF tools do', (await page.evaluate(() => window.snacks())).includes('Saved to Downloads'), JSON.stringify(await page.evaluate(() => window.snacks())));
+  await page.waitForFunction(() => [...document.querySelectorAll('.ui-result-actions .ui-btn')].some((b) => b.textContent === 'Save to Downloads' && !b.disabled), null, { timeout: 5000 });
+  await page.waitForTimeout(300);
+  r = await page.evaluate(() => ({ focus: document.activeElement?.textContent, tag: document.activeElement?.tagName }));
+  check('the focus stays on Save to Downloads while and after it saves', r.focus === 'Save to Downloads' && r.tag === 'BUTTON', JSON.stringify(r));
+  await page.waitForTimeout(100);
   r = await page.evaluate(() => ({ hidden: document.querySelector('.ui-result-unsaved').hidden, saved: result.isSaved() }));
   check('saved: the note goes', r.hidden && r.saved, JSON.stringify(r));
   await page.click('.ui-result-actions >> text=Save as…');
@@ -1264,10 +1577,14 @@ async function testOutput(page, fx, { wide }) {
   check('a file\'s own Save offers both', (await page.evaluate(() => [...document.querySelectorAll('.ui-menu .ui-menu-item')].map((b) => b.textContent).join('|'))) === 'Save to Downloads|Save as…');
   const [one] = await Promise.all([page.waitForEvent('download'), page.click('.ui-menu >> text=Save to Downloads')]);
   check('a file saved on its own', one.suggestedFilename() === 'Report_split_2.pdf');
+  // A file's own Save names it (saveOneToDownloads).
+  await snackWith(page, 'Saved to Downloads as Report_split_2.pdf');
   await page.waitForFunction(() => !document.querySelectorAll('.ui-result-saved')[1].hidden);
   check('it is marked saved, the others not', await page.evaluate(() => [...document.querySelectorAll('.ui-result-saved')].map((s) => s.hidden).join() === 'true,false,true' && !result.isSaved()));
+  await clearSnacks(page);
   await page.click('.ui-result-actions >> text=Save to folder…');
-  await snackWith(page, 'Saved 3 PDFs to the folder');
+  // The PDF tools say "Saved" (PdfToolsViewModel.saveToFolder).
+  await page.waitForFunction(() => window.snacks().includes('Saved'));
   r = await page.evaluate(() => Object.keys(folderFiles));
   check('Save to folder: a name taken gets (1)', r.join('|') === 'Report_split_1.pdf|Report_split_1 (1).pdf|Report_split_2.pdf|Report_split_3.pdf', r.join('|'));
   await page.click('.ui-result-actions >> text=Save to folder…');
@@ -1289,6 +1606,17 @@ async function testOutput(page, fx, { wide }) {
   await page.click('.ui-result-actions >> text=Share all');
   check('Share all', (await page.evaluate(() => window.shared.at(-1).length)) === 3);
   await clearSnacks(page);
+  // Images to PDF's wording (MainViewModel): the count of PDFs, to Downloads and to the folder.
+  await page.evaluate(() => {
+    window.folderFiles = {};
+    window.result = kit.output.showResult(document.getElementById('root'), { files: window.parts.map((p) => ({ ...p })), zipName: 'Images', wording: 'images' });
+  });
+  await Promise.all([page.waitForEvent('download'), page.click('.ui-result-actions >> text=Save to Downloads')]);
+  await snackWith(page, 'Saved 3 PDFs to Downloads');
+  await clearSnacks(page);
+  await page.click('.ui-result-actions >> text=Save to folder…');
+  await snackWith(page, 'Saved 3 PDFs to the folder');
+  await clearSnacks(page);
 
   // Without share or pickers (Firefox, say): what the browser can do, and nothing else.
   await page.evaluate(() => {
@@ -1303,6 +1631,41 @@ async function testOutput(page, fx, { wide }) {
   const [direct] = await Promise.all([page.waitForEvent('download'), page.click('[aria-label="Save Report_split_1.pdf"]')]);
   check('Save goes straight to Downloads without a picker', direct.suggestedFilename() === 'Report_split_1.pdf');
   await clearSnacks(page);
+
+  // Hundreds of PDFs (Split, every page): the first rows at once, the others a batch at a time,
+  // all there in the end, each with its pages counted.
+  r = await page.evaluate(async () => {
+    // Only the last one's pages are left to count (with pdf.js).
+    const files = Array.from({ length: 260 }, (_, i) => ({ name: `Part_${i + 1}.pdf`, bytes: fx.plain, type: 'application/pdf', ...(i < 259 ? { pageCount: 3 } : {}) }));
+    window.result = kit.output.showResult(document.getElementById('root'), { files, zipName: 'Parts' });
+    const atOnce = document.querySelectorAll('.ui-result-file').length;
+    const t0 = performance.now();
+    while (document.querySelectorAll('.ui-result-file').length < 260 && performance.now() - t0 < 10000) await new Promise((res) => setTimeout(res, 50));
+    const rows = [...document.querySelectorAll('.ui-result-file')];
+    return { atOnce, all: rows.length, last: rows.at(-1).querySelector('.ui-result-name').textContent, saveButtons: document.querySelectorAll('.ui-result-row-buttons [aria-label^="Save "]').length, files: result.files.length };
+  });
+  check('hundreds of rows: a screenful at once, then all of them', r.atOnce > 0 && r.atOnce < 260 && r.all === 260 && r.last === 'Part_260.pdf' && r.saveButtons === 260 && r.files === 260, JSON.stringify(r));
+  await page.waitForFunction(() => /^3 pages/.test(document.querySelectorAll('.ui-result-details')[259]?.textContent ?? ''), null, { timeout: 20000 });
+  await page.evaluate(() => result.destroy());
+
+  // A ZIP opened from Recent files is downloaded, and the list stays as it is (the app's open
+  // only shows a file).
+  r = await page.evaluate(async () => {
+    const recent = await import('./js/core/recent.js');
+    await recent.clearRecent?.();
+    const zip = { name: 'Old.zip', bytes: new Uint8Array([0x50, 0x4b, 5, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), type: 'application/zip' };
+    await recent.addRecent({ ...zip, size: zip.bytes.length });
+    await new Promise((res) => setTimeout(res, 20));
+    await recent.addRecent({ name: 'New.pdf', bytes: fx.plain, type: 'application/pdf', size: fx.plain.length });
+    const before = (await recent.listRecent()).map((f) => f.name + '@' + f.savedAt);
+    window.zipToOpen = zip;
+    return { before, hasClear: typeof recent.clearRecent === 'function' };
+  });
+  const [zdown] = await Promise.all([page.waitForEvent('download'), page.evaluate(() => kit.output.openFile(window.zipToOpen))]);
+  await page.waitForTimeout(300);
+  const after = await page.evaluate(async () => (await (await import('./js/core/recent.js')).listRecent()).map((f) => f.name + '@' + f.savedAt));
+  check('a ZIP opened is downloaded without going on Recent files again', zdown.suggestedFilename() === 'Old.zip'
+    && JSON.stringify(after.filter((n) => /^(Old\.zip|New\.pdf)@/.test(n))) === JSON.stringify(r.before.filter((n) => /^(Old\.zip|New\.pdf)@/.test(n))), JSON.stringify({ before: r.before, after }));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1376,6 +1739,35 @@ async function testBatch(page) {
   check('Add PDFs', await page.evaluate(() => log.at(-1) === 'add'));
   await page.evaluate(() => { levels[2] = 2; levels[3] = 2; blist.refreshChoices(); });
   check('refreshChoices', (await page.evaluate(() => [...blist.querySelectorAll('.ui-segmented')].map((s) => s.value).join())) === '2,2');
+  // Typing in a card's name while PDFs are added (and the list is laid out again with the same
+  // cards) goes on in that field: the card is never taken out of the page.
+  await page.click('.ui-batch-item:nth-child(2) .ui-field-input');
+  await page.keyboard.press('End');
+  await page.keyboard.type('ab');
+  await page.evaluate(() => {
+    blist.setItems(items);
+    items = [...items, { id: 4, name: 'delta.pdf', detail: '1 page · 1 kB' }];
+    names[4] = 'delta_compressed';
+    blist.setItems(items);
+  });
+  await page.keyboard.type(' cd');
+  r = await page.evaluate(() => ({
+    focus: document.activeElement.getAttribute('aria-label'), cards: blist.querySelectorAll('.ui-file-card').length,
+    value: blist.querySelectorAll('.ui-field-input')[1].value, log: log.filter((l) => l.startsWith('remove')).length,
+  }));
+  check('adding PDFs while a name is typed keeps the focus in it', r.focus === 'File name for gamma.pdf' && r.cards === 3 && r.value === 'My gammaab cd' && r.log === 1, JSON.stringify(r));
+  // A card added before the others, and one taken away, leave the field typed in where it is.
+  await page.evaluate(() => {
+    items = [{ id: 5, name: 'first.pdf', detail: '1 page · 1 kB' }, ...items.filter((i) => i.id !== 2)];
+    names[5] = 'first_compressed';
+    blist.setItems(items);
+  });
+  await page.keyboard.type('!');
+  r = await page.evaluate(() => ({
+    focus: document.activeElement.getAttribute('aria-label'), order: [...blist.querySelectorAll('.ui-file-name')].map((n) => n.textContent).join(),
+  }));
+  check('cards added before and removed around the field keep its focus', r.focus === 'File name for gamma.pdf' && r.order === 'first.pdf,gamma.pdf,delta.pdf'
+    && (await page.evaluate(() => names[3])) === 'My gammaab cd!', JSON.stringify(r));
 
   // runBatch: "PDF 2 of 4" and the name, failures named, the others still made.
   await page.evaluate(() => {
@@ -1410,6 +1802,38 @@ async function testBatch(page) {
   await page.click('dialog[open] .ui-btn:has-text("Cancel")');
   r = await page.evaluate(async () => { const x = await window.runs; return { out: x.outputs.length, cancelled: x.cancelled, open: !!document.querySelector('dialog[open]:not(.is-closing)') }; });
   check('Cancel stops the batch with nothing made', r.out === 0 && r.cancelled && !r.open, JSON.stringify(r));
+  // onProgress(done, null): how many isn't known yet (a Word document's pages): no end for one
+  // file, this file's start for several. onStep: the third line, cleared for the next file.
+  r = await page.evaluate(async () => {
+    const seen = [];
+    const look = () => {
+      const bar = document.querySelector('.ui-progress-dialog [role=progressbar]');
+      const step = document.querySelector('.ui-progress-dialog .ui-progress-step');
+      return { endless: bar.classList.contains('is-indeterminate'), now: bar.getAttribute('aria-valuenow'), step: step.hidden ? null : step.textContent };
+    };
+    await kit.batch.runBatch([{ name: 'w.docx' }], async (item, i, { onProgress, onStep }) => {
+      onProgress(3, null);
+      onStep('Page 3');
+      seen.push(look());
+      return { name: 'w.pdf', bytes: new Uint8Array(1) };
+    }, { delay: 0 });
+    await new Promise((res) => setTimeout(res, 250));
+    await kit.batch.runBatch([{ name: 'a.docx' }, { name: 'b.docx' }], async (item, i, { onProgress, onStep }) => {
+      seen.push(look());
+      onProgress(2, null);
+      if (i === 0) onStep('Page 2');
+      seen.push(look());
+      return { name: item.name + '.pdf', bytes: new Uint8Array(1) };
+    }, { delay: 0 });
+    return seen;
+  });
+  check('runBatch: a count not known yet, and the step line', JSON.stringify(r) === JSON.stringify([
+    { endless: true, now: null, step: 'Page 3' },
+    { endless: false, now: '0', step: null }, { endless: false, now: '0', step: 'Page 2' },
+    { endless: false, now: '50', step: null }, { endless: false, now: '50', step: null },
+  ]), JSON.stringify(r));
+  await page.waitForTimeout(250);
+
   // One file works as the tools do for one: its own message.
   r = await page.evaluate(async () => {
     const x = await kit.batch.runBatch([{ name: 'only.pdf' }], async () => { throw new kit.errors.UserError('pdf_import_failed'); }, { delay: 0 });
@@ -1425,6 +1849,115 @@ async function testBatch(page) {
   await snackWith(page, "Couldn't process 2 files: x.pdf, y.pdf. Check the files and free storage.");
   check('named failures together', r === 2);
   await clearSnacks(page);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Tab never leaves the focus under the sticky top bar or bottom bar (WCAG 2.2 Focus Not Obscured).
+
+async function testFocusClear(page) {
+  await page.evaluate(() => {
+    const screen = document.createElement('div');
+    const page = document.createElement('div');
+    page.className = 'page';
+    for (let i = 0; i < 24; i++) page.append(kit.ui.button({ label: 'Button ' + (i + 1), variant: 'outlined' }), document.createElement('br'));
+    screen.append(kit.ui.topBar({ title: 'Merge PDF', onBack: () => {} }), page, kit.ui.bottomBar(kit.ui.button({ label: 'Merge PDFs' })));
+    mount(screen);
+    window.scrollTo(0, 0);
+    document.querySelector('.ui-topbar button').focus();
+  });
+  const hidden = [];
+  // From the back arrow: 24 buttons, then the bar's button.
+  for (let i = 0; i < 25; i++) {
+    await page.keyboard.press('Tab');
+    const r = await page.evaluate(() => {
+      const f = document.activeElement.getBoundingClientRect();
+      const top = document.querySelector('.ui-topbar').getBoundingClientRect();
+      const bottom = document.querySelector('.ui-bottombar').getBoundingClientRect();
+      const inBar = document.activeElement.closest('.ui-topbar, .ui-bottombar');
+      return { name: document.activeElement.tagName + ':' + document.activeElement.textContent.slice(0, 30), under: !inBar && (f.top < top.bottom - 1 || f.bottom > bottom.top + 1) };
+    });
+    if (r.under) hidden.push(r.name);
+  }
+  check('Tab never leaves the focus under the top or bottom bar', hidden.length === 0, hidden.join(', '));
+  await page.evaluate(() => window.scrollTo(0, 0));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Desktops: the main button ends where the screen's content column ends (--ui-column), and the
+// empty state has one width whatever the column a tool gives it.
+
+async function testDesktopColumns(page) {
+  const r = await page.evaluate(() => {
+    const screen = document.createElement('div');
+    screen.style.setProperty('--ui-column', '640px');
+    const wide = document.createElement('div');
+    wide.style.width = '1056px';
+    wide.append(kit.ui.emptyState({ title: 'Choose PDF', onClick: () => {} }));
+    const bare = kit.ui.bottomBar(kit.ui.button({ label: 'Split PDF' }));
+    const set = kit.ui.bottomBar(kit.ui.button({ label: 'Compress PDF' }));
+    screen.append(wide, set);
+    const other = document.createElement('div');
+    other.append(screen, bare);
+    mount(other);
+    const right = (bar) => bar.querySelector('.ui-btn').getBoundingClientRect().right;
+    const box = (el) => el.getBoundingClientRect();
+    return { set: right(set), setBar: [box(set).left, box(set).right], bare: right(bare), bareEdge: box(bare).right - 32, empty: box(wide.querySelector('.ui-empty')).width };
+  });
+  const middle = (r.setBar[0] + r.setBar[1]) / 2;
+  check('the main button ends at the content column (--ui-column)', Math.abs(r.set - (middle + 320)) <= 1 && Math.abs(r.bare - r.bareEdge) <= 1, JSON.stringify(r));
+  check('the empty state is 640 px wide at most on desktops', r.empty <= 640.5, JSON.stringify(r));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Memory (Chromium, through the DevTools protocol): a screen taken off the page without being
+// cleaned up (its drop zone not detached, its result screen not destroyed, unsaved) is let go
+// with everything it holds, and top bars don't pile up listeners on the document.
+
+async function testMemory(page) {
+  const cdp = await page.context().newCDPSession(page);
+  const scrollListeners = async () => {
+    const { result } = await cdp.send('Runtime.evaluate', { expression: 'document' });
+    const { listeners } = await cdp.send('DOMDebugger.getEventListeners', { objectId: result.objectId });
+    await cdp.send('Runtime.releaseObject', { objectId: result.objectId });
+    return listeners.filter((l) => l.type === 'scroll').length;
+  };
+  const before = await scrollListeners();
+  await page.evaluate(async () => {
+    const big = new Uint8Array(32 * 1024 * 1024);
+    big[1] = 1;
+    const screen = document.createElement('div');
+    const holder = document.createElement('div');
+    const src = await kit.pdfdoc.openPdf({ name: 'many.pdf', bytes: fx.many });
+    const grid = kit.pagegrid.pageGrid({ count: src.pageCount, thumbnail: (i, w, o) => src.thumbnail(i, w, o), selectable: true, selected: new Set() });
+    screen.append(
+      kit.ui.topBar({ title: 'Compress PDF', onBack: () => big.length }),
+      kit.ui.segmented({ label: 'Level', value: 1, options: [{ value: 0, label: 'Less' }, { value: 1, label: 'Recommended' }], onChange: () => big.length }),
+      kit.ui.emptyState({ title: 'Choose PDF', onFiles: () => big.length }),
+      grid, holder);
+    mount(screen);
+    kit.output.showResult(holder, { files: [{ name: 'Kept.pdf', bytes: big, type: 'application/pdf', pageCount: 1 }], onBack: () => big.length });
+    holder.prepend(kit.ui.topBar({ title: 'Done', onBack: () => big.length }));
+    window.leftScreen = new WeakRef(screen);
+    window.leftBytes = new WeakRef(big);
+    window.leftSrc = src;
+  });
+  await page.waitForTimeout(400);
+  await page.evaluate(() => window.scrollTo(0, 40));
+  const during = await scrollListeners();
+  await page.evaluate(() => {
+    // Left as a screen is when the router moves on: taken off the page, nothing more.
+    document.getElementById('root').replaceChildren();
+    window.leftSrc.close();
+    window.leftSrc = null;
+  });
+  await page.waitForTimeout(400);
+  for (let i = 0; i < 3; i++) await cdp.send('HeapProfiler.collectGarbage');
+  await page.waitForTimeout(100);
+  for (let i = 0; i < 2; i++) await cdp.send('HeapProfiler.collectGarbage');
+  const alive = await page.evaluate(() => ({ screen: !!window.leftScreen.deref(), bytes: !!window.leftBytes.deref() }));
+  check('a screen left without cleaning up is let go, with what it held', !alive.screen && !alive.bytes, JSON.stringify(alive));
+  check('top bars share one scroll listener', during <= before + 1 && (await scrollListeners()) <= before + 1, JSON.stringify({ before, during }));
+  await cdp.detach();
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1469,6 +2002,10 @@ async function gallery(page, name) {
     await page.waitForTimeout(150);
     await page.screenshot({ path: join(shots, `gallery-${name}-${scheme}.png`), fullPage: true });
   }
+  // Pages sit on white in both themes, as the app's PdfThumbnail.
+  await page.emulateMedia({ colorScheme: 'dark' });
+  const paper = await page.evaluate(() => getComputedStyle(document.querySelector('.ui-file-thumb')).backgroundColor);
+  check('the thumbnail box of a file is white in the dark theme too', paper === 'rgb(255, 255, 255)', paper);
   await page.emulateMedia({ colorScheme: 'light' });
   // Nothing sticks out sideways at this width.
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
@@ -1476,6 +2013,26 @@ async function gallery(page, name) {
   // Touch targets: buttons are at least 48 px to tap (40 px drawn, 4 px more each side).
   const small = await page.evaluate(() => [...document.querySelectorAll('.ui-icon-btn')].filter((b) => b.getBoundingClientRect().height < 48).length);
   check('icon buttons are 48 px', small === 0, String(small));
+
+  // Windows contrast themes drop shadows and fills: outlines and the choice are drawn another way.
+  if (page.context().browser().browserType().name() === 'chromium') {
+    await page.emulateMedia({ forcedColors: 'active' });
+    await page.waitForTimeout(100);
+    const f = await page.evaluate(() => {
+      const css = (sel) => getComputedStyle(document.querySelector(sel));
+      const segs = [...document.querySelectorAll('.ui-segment')];
+      const on = getComputedStyle(segs.find((s) => s.classList.contains('is-selected'))).backgroundColor;
+      const off = getComputedStyle(segs.find((s) => !s.classList.contains('is-selected'))).backgroundColor;
+      return {
+        on, off, filled: css('.ui-btn--filled').borderTopWidth, outlined: css('.ui-btn--outlined').borderTopWidth,
+        empty: css('.ui-empty').borderTopWidth, file: css('.ui-file-card').borderTopWidth, segmented: css('.ui-segmented').borderTopWidth,
+        chip: getComputedStyle(document.querySelector('.ui-chip--filter.is-selected')).backgroundColor,
+      };
+    });
+    await page.screenshot({ path: join(shots, `gallery-${name}-forced.png`), fullPage: true });
+    await page.emulateMedia({ forcedColors: 'none' });
+    check('forced colours: the chosen segment stands out, outlines are borders', f.on !== f.off && ['filled', 'outlined', 'empty', 'file', 'segmented'].every((k) => parseFloat(f[k]) >= 1) && f.chip === f.on, JSON.stringify(f));
+  }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1507,6 +2064,8 @@ await withPage(async (page, url) => {
   await step('page grid', () => testPageGrid(page, { wide: false }));
   await step('touch reordering', () => testTouchReorder(page));
   await step('output', () => testOutput(page, fx, { wide: false }));
+  await step('memory', () => testMemory(page));
+  await step('focus clear of the bars', () => testFocusClear(page));
   await step('batch', () => testBatch(page));
   await step('gallery', () => gallery(page, 'phone'));
 }, { viewport: PHONE });
@@ -1519,6 +2078,7 @@ await withPage(async (page, url) => {
   await step('kit additions', () => testKitMore(page, { wide: true, timing: true }));
   await step('page grid', () => testPageGrid(page, { wide: true }));
   await step('output', () => testOutput(page, fx, { wide: true }));
+  await step('desktop columns', () => testDesktopColumns(page));
   await step('gallery', () => gallery(page, 'desktop'));
 }, { viewport: DESKTOP, mobile: false });
 
@@ -1537,6 +2097,7 @@ for (const browser of ['firefox', 'webkit']) {
     await step(`${browser}: kit additions`, () => testKitMore(page, { wide: false }));
     await step(`${browser}: page grid`, () => testPageGrid(page, { wide: false }));
     await step(`${browser}: gallery`, () => gallery(page, `phone-${browser}`));
+    if (browser === 'firefox') await step(`${browser}: focus clear of the bars`, () => testFocusClear(page));
   }, { browser, viewport: PHONE });
 }
 

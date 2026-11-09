@@ -25,7 +25,19 @@ The engine behind Redact PDF, ported from the app's `data/Redaction.kt` (Redacto
 Everything runs in the page (main thread), yielding to the browser with core/dom.js's `yieldToUI()`
 between pages and inside long encodes, so the screen paints and takes input; files are never
 uploaded. pdf.js documents it opens are closed with `loadingTask.destroy()` (pdf.js 6's document has
-no `destroy()`).
+no `destroy()`), and the pages it draws are cleaned up once drawn (`page.cleanup()`), so their
+decoded images don't stay in memory.
+
+**What is read.** As in the app, Find text and the pictures read what the screen's previews show
+(PdfToolsEngine.previewView): pdf.js opens a PdfSource's `viewBytes` with its `viewPassword`, the PDF
+without its password, Usugami's own mark and a damaged page tree (core/pdfdoc.js). The new PDF is
+made from the PDF itself (`bytes`, `password`), read by pdf-lib with the mark taken off in memory
+(pdf-common's `loadPdf`) and its page tree mended (cleanup.js `repairPageTree`, as the app's
+PdfToolsEngine.inspect does when a PDF is opened). A plain FileItem has no view: it is read as it is,
+or, when its page tree has to be mended or it carries the mark, from a copy without them made the
+same way. So an old mark is neither found nor kept in the pictures (the result screen puts on the
+mark the setting asks for), and a page tree that loops, miscounts, has a page without its type or a
+lone page in its place is redacted like any other.
 
 ## Boxes and coordinates
 
@@ -44,7 +56,8 @@ the other with it.
 
 ### `findText(input, query, hooks?) → Promise<Found[]>`
 
-- `input`: `{ name?, bytes: Uint8Array, password? }` (a FileItem with a password, or a PdfSource).
+- `input`: `{ name?, bytes: Uint8Array, password?, viewBytes?, viewPassword? }` (a FileItem with a
+  password, or a PdfSource: pdf.js then reads its `viewBytes`, see What is read).
 - `query`: what to find; blank (after trimming) gives `[]`.
 - `hooks`: `{ onProgress?(done, total), signal?: AbortSignal }` (one step per page).
 - Returns `Found[]`, one entry **per line of each match**, in page order:
@@ -102,19 +115,22 @@ showResult(root, { files: [out] });
 
 ### `pageFrames(source) → Promise<Frame[]>`
 
-Every page's frame. `source` is a pdf.js document (`await pdfSource.pdfjs()`) or an input. A page
-pdf.js can't find (a page tree that loops) throws `UserError('pdf_import_failed')`.
+Every page's frame. `source` is a pdf.js document (`await pdfSource.pdfjs()`) or an input (its view
+is read, see What is read). A page pdf.js can't find throws `UserError('pdf_import_failed')`.
 
 ### `renderPreview(pdf, pageIndex, cssWidth, { signal?, pixelRatio? }) → Promise<HTMLCanvasElement>`
 
 Draws a page of a pdf.js document exactly as the redacted picture will show it (annotations and
 filled-in fields included, which a plain thumbnail may leave out), `cssWidth` CSS pixels wide, sharp
 at the device's pixel ratio. The canvas has `canvas.frame` (the page's frame) and its CSS width set.
-Boxes drawn over it cover exactly what they will hide.
+Boxes drawn over it cover exactly what they will hide. The page is cleaned up once drawn
+(`page.cleanup()`, deferred by pdf.js while another drawing of it is under way), so pdf.js doesn't
+keep its decoded images until the PDF is closed; drawing it again reads it again.
 
 ### `readPageTexts(input) → Promise<string[]>`
 
-Each page's text as Find text reads it (folded: accents dropped, spaces single). For checks and tests.
+Each page's text as Find text reads it (folded: accents dropped, spaces single), from the input's
+view. For checks and tests.
 
 ## Box helpers (the app's `core/Redaction.kt`)
 
@@ -151,7 +167,7 @@ page and the chosen box across rotation, and clears them all when the PDF change
 | Key | English (strings.xml / common.js) | When |
 | --- | --- | --- |
 | `redact_find_failed` | Couldn't search this PDF. | Find text can't read the PDF |
-| `pdf_import_failed` | Couldn't open that PDF. It may be damaged or unsupported. (common.js) | Redact can't open the PDF, or its page tree is damaged (no catalog, a loop, no `/Kids`, a page without its type or in the tree's place) |
+| `pdf_import_failed` | Couldn't open that PDF. It may be damaged or unsupported. (common.js) | Redact can't open the PDF, or it has no pages to speak of (no catalog, a page tree without `/Kids`), or pdf.js and pdf-lib find a different number of pages |
 | `redact_page_failed` | This page can't be shown, so it can't be redacted. | A page with a box can't be drawn |
 
 Also `PasswordError` (ask for the password: `wrong` says whether one was given), `CancelledError`
@@ -179,13 +195,15 @@ to {1} boxes.").
   draws them into a copy first). A sticky note without an appearance stream gets no icon in the picture
   (Android/PDFBox draws a default one).
 - Text positions come from pdf.js's glyphs (exact advances) rather than PDFBox's; line and word
-  grouping follows PDFBox's rules. The bidirectional reordering has no explicit embeddings.
+  grouping follows PDFBox's rules (the average letter width starting again where the font or its
+  size changes, as PDFTextStripper does). The bidirectional reordering has no explicit embeddings.
+- A font's space width, which tells a word break from letter spacing, is the width of a space of
+  that font once one has been drawn on the page, else a quarter of an em. PDFBox takes it from the
+  font's own widths (0.278 em for Helvetica, 0.6 for Courier), which pdf.js only hands over with
+  `fontExtraProperties`; where words are drawn without a space between them, a gap may then be read
+  as a word break here that PDFBox reads as letter spacing.
 - Standard 14 fonts without a font box use those fonts' published boxes (pdf.js keeps none).
 - The saved PDF has an Info dictionary with only `Producer: Usugami` (pdf-common's `savePdf` sets
   it); the app removes Info entirely. Nothing of the original Info stays.
 - A page with an unreadable content stream that shares resources with a redacted page keeps those
   resources (it might draw them), exactly as in the app.
-- A damaged page tree that pdf-lib reads otherwise than viewers do (it loops, lacks `/Kids`, has a
-  page without its type, or a lone page in the tree's place) fails with `pdf_import_failed`; the app
-  mends such a tree when the PDF is opened and redacts it. Split, Delete pages and the other organize
-  tools mend it here too (cleanup.js `repairPageTree`).

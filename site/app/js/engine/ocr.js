@@ -16,21 +16,11 @@ import { UserError, CancelledError, checkCancelled } from '../core/errors.js';
 import { download, filesFor, startWorker } from './ocr/loader.js';
 import { preparePicture, reducedCopy, canvasPpm, toPpm } from './ocr/picture.js';
 import { linesFromBlocks, readingScore } from './ocr/lines.js';
+import { OCR_LANGUAGES } from './ocr/languages.js';
 
 export { addTextLayer, printable } from './ocr/text-layer.js';
 export { ocrScale } from './ocr/scale.js';
-
-/** The languages text recognition offers (the app's OcrLanguage), in its order. */
-export const OCR_LANGUAGES = ['en', 'fr', 'es', 'hi'];
-
-/** The string key naming each language in "Text language" (strings.xml). */
-export const OCR_LANGUAGE_NAMES = { en: 'ocr_english', fr: 'ocr_french', es: 'ocr_spanish', hi: 'ocr_hindi' };
-
-/** Text recognition starts on the app's language (README), English when it has no model for it. */
-export function defaultOcrLanguage(appLanguage) {
-  const code = String(appLanguage ?? '').toLowerCase().split(/[-_]/)[0];
-  return OCR_LANGUAGES.includes(code) ? code : 'en';
-}
+export { OCR_LANGUAGES, OCR_LANGUAGE_NAMES, defaultOcrLanguage } from './ocr/languages.js';
 
 /**
  * A page read with less mean confidence than this (0 to 100) is tried turned too: a page
@@ -94,18 +84,7 @@ export async function createRecognizer(lang, { onProgress, signal } = {}) {
   const adopt = (w) => {
     const native = w.worker;
     if (native) {
-      // tesseract.js rethrows a failed job's error in its message handler after rejecting the
-      // job's promise, where nothing can catch it; the promise carries the error already.
-      const handle = native.onmessage;
-      if (typeof handle === 'function') {
-        native.onmessage = function onmessage(event) {
-          try {
-            handle.call(this, event);
-          } catch {
-            // Reported through the job's promise.
-          }
-        };
-      }
+      // A failed job only rejects its promise (startWorker gives tesseract.js an errorHandler).
       // A worker that dies (out of memory, say) answers nothing more.
       native.addEventListener('error', (event) => {
         event.preventDefault?.();

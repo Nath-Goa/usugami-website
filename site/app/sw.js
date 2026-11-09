@@ -8,16 +8,27 @@
 // (vendor/tesseract, 4.8 to 8.4 MB a language) and tool screens, so a tool, a font or a text
 // language used once works offline afterwards. Other sites' requests are never answered or kept
 // here, nor are Range requests.
+//
+// Code belongs to one version of the site: the shell and the code kept as it is used (modules,
+// styles, strings, libraries) are kept per version, and a new version fetches again the code the
+// last one had kept, so offline the app never mixes files of two versions. Fonts and text
+// recognition's language data don't change between versions and stay.
 
 // The deploy workflow replaces 'dev' with the commit being published.
 const VERSION = 'dev';
 
 const SHELL_CACHE = `usugami-shell-${VERSION}`;
+const CODE_CACHE = `usugami-code-${VERSION}`;
 const RUNTIME_CACHE = 'usugami-runtime';
 const SHARE_CACHE = 'usugami-share';
 
+// The codes of locales/languages.js's LANGUAGES (tests/shell.test.mjs checks they agree): the
+// strings the app loads at start are kept in each, so it opens offline in the language chosen.
+const LANGUAGES = ['en'];
+
 // Relative to this file (site/app/): what the app needs to start and show its own screens (every
-// module main.js and the shell's screens import, which tests/shell.test.mjs checks), and the kit.
+// module main.js and the shell's screens import, and what the modules listed here import, which
+// tests/shell.test.mjs checks), and the kit.
 const SHELL = [
   './',
   'index.html',
@@ -25,6 +36,8 @@ const SHELL = [
   '../assets/css/tokens.css',
   'css/app.css',
   'css/components.css',
+  // The result screen's watermark card (core/output.js loads it).
+  'css/mark.css',
   'js/main.js',
   'js/core/dom.js',
   'js/core/i18n.js',
@@ -42,14 +55,11 @@ const SHELL = [
   'js/core/pdfdoc.js',
   'js/core/pagegrid.js',
   'js/core/output.js',
+  'js/core/result-mark.js',
   'js/core/batch.js',
-  // What core/files.js reads image files with (it tells images by their content).
+  'js/engine/mark-layout.js',
+  // What core/files.js tells image files by (by their content) and the types it picks.
   'js/engine/images/image-type.js',
-  'js/engine/images/decode.js',
-  'js/engine/images/image-meta.js',
-  'js/engine/images/image-transform.js',
-  'js/engine/images/heif-decode.js',
-  'js/engine/images/image-canvas.js',
   'js/screens/home.js',
   'js/screens/recent.js',
   'js/screens/settings.js',
@@ -61,10 +71,8 @@ const SHELL = [
   'vendor/fflate/fflate.esm.js',
   'vendor/VERSIONS.json',
   'locales/languages.js',
-  'locales/en/common.js',
-  'locales/en/kit.js',
-  // Loaded at start with the kit's strings; kept when it is first used if the site doesn't have it yet.
-  'locales/en/mark.js',
+  // The common, kit and mark strings, loaded at start, in every language.
+  ...LANGUAGES.flatMap((code) => [`locales/${code}/common.js`, `locales/${code}/kit.js`, `locales/${code}/mark.js`]),
   'icons/icon.svg',
   'icons/icon-192.png',
   'icons/icon-512.png',
@@ -75,28 +83,72 @@ const SHELL = [
 
 const scope = () => self.registration.scope;
 
+/**
+ * Whether `url` is data the same for every version (fonts, text recognition's languages), kept in
+ * RUNTIME_CACHE across versions; anything else of this site is code, kept per version.
+ */
+function isData(url) {
+  const base = scope();
+  if (!url.startsWith(base)) return false;
+  const rest = url.slice(base.length).split(/[?#]/)[0];
+  return rest.startsWith('fonts/') || rest.startsWith('vendor/tesseract/lang/');
+}
+
+/** Fetches `urls` into `cache`, a few at a time; one that fails is left out. */
+async function keepAll(cache, urls) {
+  const queue = urls.slice();
+  const one = async () => {
+    for (let url = queue.shift(); url; url = queue.shift()) {
+      try {
+        // Checked with the server (a 304 costs nothing), not taken blindly from the HTTP cache.
+        const request = new Request(url, { cache: 'no-cache' });
+        const response = await fetch(request);
+        if (response.ok && response.status === 200) await cache.put(request, response);
+      } catch {
+        // Kept when it is next used instead.
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: 6 }, one));
+}
+
+/** The code earlier versions kept as it was used: fetched again for this version. */
+async function earlierCode() {
+  const urls = new Set();
+  for (const name of await caches.keys()) {
+    const old = (name.startsWith('usugami-code-') && name !== CODE_CACHE) || name === RUNTIME_CACHE;
+    if (!old) continue;
+    const cache = await caches.open(name);
+    for (const request of await cache.keys()) {
+      if (request.method === 'GET' && !isData(request.url) && !new URL(request.url).search) urls.add(request.url);
+    }
+  }
+  return [...urls];
+}
+
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
-    const cache = await caches.open(SHELL_CACHE);
-    // One by one: a file missing from the site doesn't stop the others being kept.
-    await Promise.all(SHELL.map(async (path) => {
-      try {
-        const request = new Request(new URL(path, scope()), { cache: 'reload' });
-        const response = await fetch(request);
-        if (response.ok) await cache.put(request, response);
-      } catch {
-        // Kept when it is first used instead.
-      }
-    }));
+    const shell = await caches.open(SHELL_CACHE);
+    // One by one: a file missing from the site doesn't stop the others being kept. 'no-cache'
+    // checks each with the server, so a file the page has just loaded isn't downloaded again.
+    await keepAll(shell, SHELL.map((path) => new URL(path, scope()).href));
+    // The tools used before still open offline after an update, in this version.
+    const shellUrls = new Set((await shell.keys()).map((r) => r.url));
+    await keepAll(await caches.open(CODE_CACHE), (await earlierCode()).filter((url) => !shellUrls.has(url)));
     await self.skipWaiting();
   })());
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
-    // The shells of older versions go; files kept as they were used stay for offline use.
+    // Older versions' shells and code go; fonts and language data stay.
     for (const name of await caches.keys()) {
-      if (name.startsWith('usugami-shell-') && name !== SHELL_CACHE) await caches.delete(name);
+      if ((name.startsWith('usugami-shell-') && name !== SHELL_CACHE) || (name.startsWith('usugami-code-') && name !== CODE_CACHE)) await caches.delete(name);
+    }
+    // Code kept by the versions before code had a cache of its own goes too.
+    const runtime = await caches.open(RUNTIME_CACHE);
+    for (const request of await runtime.keys()) {
+      if (!isData(request.url)) await runtime.delete(request);
     }
     await self.clients.claim();
   })());
@@ -143,7 +195,8 @@ async function networkFirst(request, event) {
   }
   if (keepable(request, response)) {
     const copy = response.clone();
-    const keeping = caches.open(RUNTIME_CACHE).then((cache) => cache.put(request, copy)).catch(() => {});
+    const name = isData(request.url) ? RUNTIME_CACHE : CODE_CACHE;
+    const keeping = caches.open(name).then((cache) => cache.put(request, copy)).catch(() => {});
     try {
       event.waitUntil(keeping);
     } catch {
@@ -153,18 +206,32 @@ async function networkFirst(request, event) {
   return response;
 }
 
+/** Whether a navigation to `url` is the app's own page (its folder, index.html, any query). */
+function isAppPage(url) {
+  const base = new URL(scope());
+  const u = new URL(url);
+  if (!u.pathname.startsWith(base.pathname)) return false;
+  const rest = u.pathname.slice(base.pathname.length);
+  return rest === '' || rest === 'index.html';
+}
+
 async function fromCache(request) {
   const navigation = request.mode === 'navigate';
-  // Any copy kept will do offline, whatever headers it was asked for with.
+  // Only the app's page is answered with the shell: its files are relative to it, so served at
+  // another address (app/tool/split, say) it would load nothing.
+  if (navigation && !isAppPage(request.url)) return null;
+  // Any copy kept will do offline, whatever headers it was asked for with. The shell first: it is
+  // always this version's.
   const options = { ignoreSearch: navigation, ignoreVary: true };
-  for (const name of [RUNTIME_CACHE, SHELL_CACHE]) {
+  const names = [SHELL_CACHE, CODE_CACHE, RUNTIME_CACHE];
+  for (const name of names) {
     const cache = await caches.open(name);
     const hit = await cache.match(request, options);
     if (hit) return hit;
   }
   if (navigation) {
-    // The app is one page: its shell answers for any of its addresses.
-    for (const name of [RUNTIME_CACHE, SHELL_CACHE]) {
+    // ./ and index.html are the same page.
+    for (const name of names) {
       const cache = await caches.open(name);
       const hit = (await cache.match(new URL('./', scope()).href)) ?? (await cache.match(new URL('index.html', scope()).href));
       if (hit) return hit;

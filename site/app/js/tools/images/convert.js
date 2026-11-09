@@ -7,11 +7,41 @@ import { t, tp, getLanguage } from '../../core/i18n.js';
 import { bottomSheet, switchRow, textField, segmented, button, progressDialog, alertDialog, uid } from '../../core/ui.js';
 import { UserError, CancelledError, checkCancelled } from '../../core/errors.js';
 import { baseName, withSuffix, uniqueName } from '../../core/names.js';
-import { buildImagesPdf } from '../../engine/images/build-pdf.js';
 import { loadImage } from '../../engine/images/decode.js';
-import { loadPdf, savePdf } from '../../engine/pdf-common.js';
-import { createRecognizer, addTextLayer, defaultOcrLanguage, ocrScale, OCR_LANGUAGES, OCR_LANGUAGE_NAMES } from '../../engine/ocr.js';
+import { defaultOcrLanguage, OCR_LANGUAGES, OCR_LANGUAGE_NAMES } from '../../engine/ocr/languages.js';
+import { ocrScale } from '../../engine/ocr/scale.js';
 import { DEFAULT_NAME, shownSize } from './model.js';
+
+/**
+ * What making a PDF needs, loaded once a PDF is made (the PDF writer, its fonts and the OCR engine
+ * are about 1 MB), not before the tool shows; preloadConvert() starts it early.
+ */
+let engines = null;
+function loadEngines() {
+  engines ??= Promise.all([
+    import('../../engine/images/build-pdf.js'),
+    import('../../engine/pdf-common.js'),
+    import('../../engine/ocr.js'),
+  ]).then(([build, common, ocr]) => ({
+    buildImagesPdf: build.buildImagesPdf,
+    loadPdf: common.loadPdf,
+    savePdf: common.savePdf,
+    createRecognizer: ocr.createRecognizer,
+    addTextLayer: ocr.addTextLayer,
+  })).catch((e) => {
+    engines = null;
+    throw e;
+  });
+  return engines;
+}
+
+/**
+ * Starts loading what making a PDF needs, without waiting for it: call once the tool shows, so the
+ * PDF can be made at once later. A failure here is only met (and said) when a PDF is made.
+ */
+export function preloadConvert() {
+  loadEngines().catch(() => {});
+}
 
 const COMPRESSIONS = ['less', 'recommended', 'extreme'];
 const PAGE_SIZE_LABEL = { fit: 'size_fit', a4: 'size_a4', letter: 'size_letter', legal: 'size_legal', a3: 'size_a3', a5: 'size_a5' };
@@ -86,7 +116,7 @@ export function openConvertSheet(model, onCreate) {
     actions: [adding, createButton],
   });
   let open = true;
-  sheet.closed.then(() => { open = false; });
+  const closed = sheet.closed.then(() => { open = false; });
 
   function importing() {
     // A photo just taken is still to go through the crop screen while its page is looked for.
@@ -121,6 +151,8 @@ export function openConvertSheet(model, onCreate) {
     },
     close: () => sheet.close(),
     get open() { return open; },
+    /** Resolves once the sheet has closed, however it was closed. */
+    closed,
   };
 }
 
@@ -137,7 +169,7 @@ async function readingPicture(page, signal) {
  * <name>_searchable.pdf; one without any text stays as it is. If reading fails, every file stays as
  * it was and the failure is said (ocr_failed).
  */
-async function addTextLayers(files, recognizer, { dialog, signal, say }) {
+async function addTextLayers(files, recognizer, { dialog, signal, say, loadPdf, savePdf, addTextLayer }) {
   const total = files.reduce((n, f) => n + f.pageCount, 0);
   dialog.setTitle(t('ocr_reading'));
   dialog.update(0, tp('progress_pages', total, 0, total), null);
@@ -203,11 +235,13 @@ export function ocrProblemDialog(key) {
  * Makes the PDFs of the pages as they are now (MainViewModel.convert), with the progress dialog and
  * Cancel. Resolves with { files, name } (the name the sheet had, for a ZIP of them), or null when
  * no PDF was made (cancelled, failed, or text recognition unavailable: said or asked as the app does).
+ * What goes wrong (or OCR's "No text was recognized") is said once the progress dialog has closed:
+ * a message announced while it is up is never heard, the rest of the screen being inert.
  * @param {import('./model.js').ImagesModel} model
  * @param {{ merge: boolean, fileName: string, compression: string, ocrLanguage: string|null }} choice
  * @param {{ say(text: string), signal?: AbortSignal }} hooks  signal: the screen has gone, the work stops
  */
-export async function convert(model, choice, { say, signal: gone }) {
+export async function convert(model, choice, { say: sayNow, signal: gone }) {
   const snapshot = model.items;
   if (!model.canConvert() || gone?.aborted) return null;
   const { merge, fileName, compression, ocrLanguage } = choice;
@@ -221,9 +255,14 @@ export async function convert(model, choice, { say, signal: gone }) {
   const count = snapshot.length;
   const dialog = progressDialog({ title: t('creating_pdf'), onCancel: () => controller.abort() });
   dialog.update(0, tp('progress_images', count, 0, count));
+  /** What to say once the dialog has gone. */
+  const said = [];
+  const say = (text) => { said.push(text); };
   let recognizer = null;
   let problem = null;
   try {
+    const { buildImagesPdf, createRecognizer, loadPdf, savePdf, addTextLayer } = await loadEngines();
+    checkCancelled(signal);
     if (ocrLanguage) {
       // Before any PDF work, so a missing recognizer is said straight away.
       dialog.setTitle(t('ocr_downloading'));
@@ -250,7 +289,7 @@ export async function convert(model, choice, { say, signal: gone }) {
       signal,
       onProgress: (done, total) => dialog.update(done / total, tp('progress_images', total, done, total)),
     });
-    if (recognizer) files = await addTextLayers(files, recognizer, { dialog, signal, say });
+    if (recognizer) files = await addTextLayers(files, recognizer, { dialog, signal, say, loadPdf, savePdf, addTextLayer });
     model.lastChoices = null;
     return { files, name: fileName };
   } catch (e) {
@@ -270,6 +309,7 @@ export async function convert(model, choice, { say, signal: gone }) {
     recognizer?.terminate();
     await dialog.close();
     model.setConverting(false);
+    for (const text of said) sayNow(text);
     if (problem) await ocrProblemDialog(problem);
   }
 }

@@ -11,7 +11,7 @@ import {
   segmented, uid,
 } from '../../core/ui.js';
 import { pickFiles } from '../../core/files.js';
-import { openPdf, reportFileProblems } from '../../core/pdfdoc.js';
+import { openPdf, reportFileProblems, preloadPdfJs } from '../../core/pdfdoc.js';
 import { showResult } from '../../core/output.js';
 import { batchList, runBatch, BatchChoices } from '../../core/batch.js';
 import { CancelledError, UserError } from '../../core/errors.js';
@@ -56,6 +56,8 @@ function eitherSignal(a, b) {
  *   own (Compress PDF's level): { options: [{ value, label }], all, title, forAllTitle, note, forAllNote }
  */
 export async function mountPdfBatchTool(ctx, spec) {
+  // pdf.js (about 460 kB) loads while a PDF is being chosen; pdfdoc.js imports it only on demand.
+  preloadPdfJs();
   await ensureCss(new URL('./compress.css', import.meta.url));
 
   /** The PDFs picked, in order: { id, src } (src a PdfSource). */
@@ -63,13 +65,18 @@ export async function mountPdfBatchTool(ctx, spec) {
   let choices = new BatchChoices([], spec.choice?.all ?? 0);
   let importing = 0;
   let adding = Promise.resolve();
+  // Changes when the PDFs being opened are abandoned (Start over), so those still opening stay out
+  // (the app's importGeneration); `importStop`, aborted then and when the screen goes, closes a
+  // password question they still ask.
+  let generation = 0;
+  let importStop = new AbortController();
   let processing = false;
   let closed = false;
   let resultEl = null;
   let lastResult = null;
   let stepPushed = false;
-  // Stops the run when the screen goes (the run's own Cancel is the progress dialog's).
-  let leaving = null;
+  // Aborted when the screen goes: stops a run (whose own Cancel is the progress dialog's).
+  const leaving = new AbortController();
 
   // The engine is loaded while the PDFs are picked, so it is there when the button is pressed.
   let enginePromise = null;
@@ -92,7 +99,8 @@ export async function mountPdfBatchTool(ctx, spec) {
   const progress = linearProgress({ value: null, label: t('web_opening_pdfs') });
   progress.classList.add('compress-progress');
   const content = h('div', { class: 'compress-content' });
-  const page = h('div', { class: 'page compress-page' }, progress, content);
+  // The screen's main part, which "Skip to content" goes to (past the top bar).
+  const page = h('main', { class: 'page compress-page', 'data-main': '' }, progress, content);
   const runButton = button({ label: t(spec.action), onClick: () => run(), cls: 'compress-run' });
   const bottom = bottomBar(runButton);
 
@@ -233,6 +241,9 @@ export async function mountPdfBatchTool(ctx, spec) {
       ensureList().setItems(sources.map(itemFor));
       list.refreshChoices();
       place(content, [options, list, addButton]);
+      // Back to one PDF, its card and name are made afresh, with the name it may have been given in
+      // the list meanwhile (the app composes OutputNameField anew).
+      single = null;
     }
     // Files dropped or pasted on the screen are added too (the empty state takes its own).
     if (count && !detachDrop) detachDrop = dropZone(page, { accept: 'pdf', multiple: true, onFiles: (items) => add(items) });
@@ -262,21 +273,8 @@ export async function mountPdfBatchTool(ctx, spec) {
     setOff(runButton, !!importing || processing);
   };
 
-  /**
-   * Snackbars show above the bottom bar while it is there, as the app's Scaffold puts them (the
-   * bar's own room for the phone's gesture bar is counted by the snackbar already).
-   */
-  const liftSnackbars = (on) => {
-    const style = document.documentElement.style;
-    if (!on) {
-      style.removeProperty('--snackbar-offset');
-      return;
-    }
-    const computed = getComputedStyle(bottom);
-    const extra = parseFloat(computed.paddingBottom) - parseFloat(computed.paddingTop);
-    style.setProperty('--snackbar-offset', `${Math.max(0, bottom.offsetHeight - Math.max(0, extra))}px`);
-  };
-
+  // Snackbars show above the bottom bar while it is there, as the app's Scaffold puts them: the
+  // kit lifts them above any .ui-bottombar on screen.
   const showEditing = () => {
     if (closed) return;
     if (resultEl) {
@@ -288,7 +286,6 @@ export async function mountPdfBatchTool(ctx, spec) {
     if (single) single.name.setValue(nameOf(single.id));
     list?.refreshNames();
     arrange();
-    liftSnackbars(true);
   };
 
   // ---- Files ----
@@ -302,10 +299,13 @@ export async function mountPdfBatchTool(ctx, spec) {
   /** Adds `items` once those being added before are in (a drop while opening others waits its turn). */
   const add = (items) => {
     if (closed || !items?.length) return adding;
+    const gen = generation;
+    const signal = importStop.signal;
     importing++;
     arrange();
-    adding = adding.then(() => addNow(items)).catch(() => {}).finally(() => {
-      importing--;
+    adding = adding.then(() => addNow(items, gen, signal)).catch(() => {}).finally(() => {
+      // Abandoned, they no longer count: Start over has set the count for those to come.
+      if (gen === generation) importing--;
       arrange();
     });
     return adding;
@@ -315,16 +315,20 @@ export async function mountPdfBatchTool(ctx, spec) {
    * Opens `items` one after another, each joining the list as soon as it is open (a locked one
    * asks for its password in turn; cancelled, it is left out quietly). Those that can't be opened
    * are left out and named once all are tried; one picked alone is told about without its name.
+   * Abandoned (Start over, or the screen gone), the rest are left out and nothing is said, as the
+   * app's import abandoned by startOver.
    */
-  const addNow = async (items) => {
+  const addNow = async (items, gen, signal) => {
+    const gone = () => closed || gen !== generation;
     const failed = [];
     for (const item of items) {
-      if (closed) return;
+      if (gone()) return;
       try {
-        // A PDF whose password was given on Choose a tool carries it.
-        const src = await openPdf(item, item.password != null ? { password: item.password } : {});
+        // A PDF whose password was given on Choose a tool carries it, tried first; abandoning takes
+        // a password question still open away with it.
+        const src = await openPdf(item, { signal });
         if (!src) continue;
-        if (closed) {
+        if (gone()) {
           src.close();
           return;
         }
@@ -336,7 +340,7 @@ export async function mountPdfBatchTool(ctx, spec) {
         failed.push({ name: item.name, error });
       }
     }
-    if (closed || !failed.length) return;
+    if (gone() || !failed.length) return;
     if (items.length === 1) snackbar(failed[0].error instanceof UserError ? t(failed[0].error.key, ...failed[0].error.args) : t('pdf_import_failed'));
     else reportFileProblems(failed);
   };
@@ -351,11 +355,21 @@ export async function mountPdfBatchTool(ctx, spec) {
   };
 
   const startOver = () => {
+    // A PDF still being opened belongs to the PDFs put away: it is abandoned rather than added once
+    // open, and picking is on again at once (PdfToolsViewModel.startOver).
+    abandonImports();
     for (const s of sources) s.src.close();
     sources = [];
     choices = choices.following([]);
     lastResult = null;
     arrange();
+  };
+
+  const abandonImports = () => {
+    generation++;
+    importStop.abort();
+    importStop = new AbortController();
+    importing = 0;
   };
 
   // ---- Making the PDFs ----
@@ -377,7 +391,6 @@ export async function mountPdfBatchTool(ctx, spec) {
     const results = new Array(taken.length);
     let made;
     let mod;
-    leaving = new AbortController();
     const stop = leaving.signal;
     try {
       try {
@@ -400,7 +413,6 @@ export async function mountPdfBatchTool(ctx, spec) {
       );
     } finally {
       processing = false;
-      leaving = null;
       refreshButton();
     }
     if (closed || !made || made.cancelled) return;
@@ -438,7 +450,6 @@ export async function mountPdfBatchTool(ctx, spec) {
   /** Shows the result; `onReady` (only for a run just made) once its PDFs have the watermark the setting asks for. */
   const showOutputs = (onReady) => {
     resultEl?.destroy();
-    liftSnackbars(false);
     resultEl = showResult(ctx.root, {
       ...lastResult,
       onReady,
@@ -458,13 +469,15 @@ export async function mountPdfBatchTool(ctx, spec) {
   };
 
   showEditing();
+  // Opened on the result's step (a reload there): the result is gone, so its history step goes too.
+  if (ctx.step) ctx.popStep?.();
   if (ctx.files?.length) add(ctx.files);
 
   return {
     unmount() {
       closed = true;
-      leaving?.abort();
-      liftSnackbars(false);
+      leaving.abort();
+      importStop.abort();
       detachDrop?.();
       empty.detachDrop?.();
       resultEl?.destroy();
@@ -483,11 +496,18 @@ export async function mountPdfBatchTool(ctx, spec) {
       } else if (step === 'result' && !resultEl && lastResult) {
         stepPushed = true;
         showOutputs();
+      } else if (step === 'result' && !resultEl) {
+        // Forward to a result put away (Start over) or lost with a reload: there is none to show.
+        ctx.popStep?.();
       }
     },
     /** For tests: the PDFs listed and what each has. */
     get state() {
       return sources.map((s) => ({ id: s.id, name: s.src.name, outputName: nameOf(s.id), choice: choices.choiceOf(s.id) }));
+    },
+    /** For tests: resolves once the PDFs being opened are in, or left out (abandoned ones too). */
+    get settled() {
+      return adding;
     },
   };
 }

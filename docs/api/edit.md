@@ -70,7 +70,7 @@ Throws:
 | `watermark_no_font` | This phone has no font for some of these characters. Try different text. (web: `web_watermark_no_font`, "This device has…") | A text has characters no bundled font nor the browser can draw (`canDrawText`). Checked before anything is drawn. |
 | `edit_picture_failed` | Couldn't read that picture. | A picture can't be decoded any more. |
 | `web_fonts_unavailable` | Usugami couldn't load its fonts. Check your connection and try again. | From the text engine, offline before the fonts were saved for offline use. |
-| `pdf_import_failed` | Couldn't open that PDF. It may be damaged or unsupported. | pdf-lib can't read the PDF (`pdf-common.js`). |
+| `pdf_import_failed` | Couldn't open that PDF. It may be damaged or unsupported. | pdf-lib can't read the PDF (`pdf-common.js`), or its page tree loops or is damaged (also from `shownPageSizes`). |
 | `PasswordError` | — | The password is missing or wrong. |
 | `CancelledError` | — | `signal` aborted. |
 
@@ -199,6 +199,7 @@ canDrawText(text)                       // PageText.canDraw: false when some cha
 const layout = await textLayout(text, color)   // or textLayoutSync once the fonts are loaded
 // { lines: [{ text, layout }], width, ascent, lineHeight, height } at REFERENCE (100 pt)
 drawText(target, item, layout)          // on a PdfCanvas or a 2D context
+textLayoutNow(text, color)              // textLayoutSync if the fonts are loaded already, else null (loads nothing)
 ```
 As PageText: Noto Sans (the text engine's sans-serif) at 100 pt, lines left-aligned, each
 `lineHeight` apart, the first baseline `ascent` below the top; scripts reaching past the main font
@@ -237,6 +238,13 @@ preview and the PDF draw through the same code, so they match.
 
 ## The screen (`tools/edit/`)
 
+Loading: `index.js` loads only the light parts with the screen (`engine/edit/history.js`,
+`engine/edit/layout.js`), so "Choose PDF" shows without pdf-lib, fontkit or the text engine. The
+engine (`engine/edit.js`), the page (`stage.js`) and the controls (`controls.js`) load just after
+the screen shows (`loadEditor()`, exported by index.js) and are waited for once a PDF is chosen; if
+they can't be fetched, `web_tool_load_failed` names the tool. The content is the screen's
+`<main data-main>`, which the skip link goes to.
+
 `mount(ctx)` (core contract): top bar "Edit PDF"; "Choose PDF" (pick, drop or paste; a PDF handed
 over in `ctx.files` opens at once, with `item.password`); then the PDF's card (Remove asks "Discard
 your changes?" when something was added), the row of pages (more than one page; edited ones marked),
@@ -248,8 +256,14 @@ shows "Working on your PDF…" (Cancel), then the kit's result screen, a history
 (`ctx.pushStep('result')`): Back to editing and the browser's (or a phone's) Back return to the
 items, as the app's result screen does; a reload on that step takes the step back. A PDF is opened
 with the screen's AbortSignal (`openPdf(item, { password, signal })`), so a password dialog still
-open closes when the user leaves. Wide screens (≥ 840 px): pages in a column on the left, the page
-in the middle, the card and controls on the right.
+open closes when the user leaves; leaving while the PDF is made stops it and takes its progress
+dialog away at once. A failure is said once the progress dialog has gone (a screen reader hears
+nothing outside a modal dialog). While a PDF opens, Choose PDF is off with `aria-disabled` (it keeps
+the focus; a cancelled password dialog gives it back there). Removing the PDF or starting over also
+resets the style (sizes, colours, widths) to the defaults, as the app's options start each PDF
+afresh. Wide screens (≥ 840 px): pages in a column on the left, the page in the middle, the card and
+controls on the right. Numbers (the zoom, the sliders' points) are formatted in the app's language
+(`formatNumber`), not the browser's.
 
 The handle: `unmount()`, `hasUnsavedWork()` (something added, the PDF being made, or a result not
 saved), `onStep(step)`, and `inspect()` (for tests: `{ page, size, mode, zoom, selected, canUndo,
@@ -259,13 +273,22 @@ Touches, pen and mouse (`stage.js`): a touch on an item chooses it and dragging 
 8 px, mouse 3 px, so a tap doesn't move it); the chosen item's handles (within 18 px) resize it; a tap
 elsewhere lets go; a swipe that starts off the items scrolls the screen (or the zoomed page); two
 fingers zoom; in Draw/Highlight a finger, pen or mouse draws (points 2 px apart on the screen,
-coalesced events for smoothness), and the page doesn't scroll. Ctrl/⌘ + wheel zooms about the mouse;
+coalesced events for smoothness), and the page doesn't scroll. A press never scrolls a zoomed page:
+the item follows the finger exactly, as EditPreview.kt (only an item chosen with the keyboard or a
+screen reader is scrolled into view). The drawing hint is the app's `edit_hint_draw` on touch
+screens and `web_edit_hint_draw` (mouse wording) where the main pointer is fine. Ctrl/⌘ + wheel zooms about the mouse;
 a mouse drag off the items pans a zoomed page. Zoom 100–600 %: the part showing is drawn again sharp.
 
 Keys (computers): Delete/Backspace removes the chosen item, arrows move it a step (Shift: 1 pt),
 Ctrl+Z undoes, Ctrl+Y or Ctrl+Shift+Z redoes, Escape stops drawing or lets go, Page Up/Down change
-page. Each item is a button (named as `describeKey`, `aria-pressed` when chosen) placed over it, so
+page. Only fields text is typed in keep these keys for themselves: on a slider (which keeps the
+focus after a mouse drag) Ctrl+Z, Ctrl+Y, Delete and Escape work as anywhere, while its arrows, Page
+Up/Down, Home and End stay its own. A move button pressed up to an edge of the page is off with
+`aria-disabled` and keeps the focus; the item's controls made again (Filled turned on or off) keep
+the focus on the control it was on. Each item is a button (named as `describeKey`, `aria-pressed` when chosen) placed over it, so
 Tab finds it and Enter chooses it; a new item and an item clicked with the mouse get the focus.
+The page keeps what pdf.js decoded only for the page showing: another page shown, or the editor
+closed, lets pdf.js free the others (`page.cleanup()`).
 The row of tools is a toolbar, the colours and pages radio groups (arrow keys).
 
 `controls.js` also exports `toolbar`, `colorSwatches({ value, onSelect })`, `properties(hooks)`,

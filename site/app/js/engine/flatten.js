@@ -4,6 +4,7 @@
 // Flattening.kt (with PDFBox's form flattening and appearance drawing it relies on).
 import { loadPdf, savePdf } from './pdf-common.js';
 import { UserError, CancelledError, checkCancelled } from '../core/errors.js';
+import { namesArg } from '../core/names.js';
 import {
   N, get, getDict, getArray, getName, getNum, getBool, resolve, rectOf, matrixOf, fmt, copyDict,
   latin1, streamData, PDFDict, PDFArray, PDFStream, PDFRef, PDFBool,
@@ -14,6 +15,7 @@ import {
 import { constructAppearance } from './flatten/annotations.js';
 import { placementMatrix, pageArea } from './flatten/placement.js';
 import { fontsUsed } from './flatten/content.js';
+import { viewerPages } from './flatten/pages.js';
 
 const FLAG_INVISIBLE = 1;
 
@@ -285,7 +287,8 @@ function removeFields(env, tree, keep) {
 }
 
 /**
- * Flattens the open document `doc` in place: returns { droppedDynamicXfa, keptFields }. Throws
+ * Flattens the open document `doc` in place: returns { droppedDynamicXfa, keptFields, pageCount }
+ * (its pages as viewers find them; a damaged page tree is mended first). Throws
  * UserError('flatten_nothing') when it has no form fields and no annotations but links, and
  * UserError('flatten_xfa_only') when its only form is a dynamic XFA form, which has no fields.
  * @param {import('../lib/pdf-lib.js').PDFDocument} doc
@@ -296,12 +299,9 @@ export async function flattenDocument(doc, { onProgress, signal } = {}) {
   const env = environment(doc);
   const { ctx, acroForm } = env;
   const catalog = doc.catalog;
-  let pages;
-  try {
-    pages = doc.getPages();
-  } catch {
-    throw new UserError('pdf_import_failed');
-  }
+  // The pages viewers find, a damaged page tree mended first, as the app mends it when the PDF is
+  // picked (UserError('pdf_import_failed') when it has none to find).
+  const pages = viewerPages(doc);
   const tree = fieldTree(ctx, acroForm);
   const hasXfa = !!acroForm && acroForm.get(N('XFA')) !== undefined;
   // A dynamic XFA form draws the pages itself; its AcroForm part, if it has one, is a stand-in.
@@ -353,7 +353,7 @@ export async function flattenDocument(doc, { onProgress, signal } = {}) {
     bakeAnnotations(env, page, items, bake);
   }
   onProgress?.(total, total);
-  return { droppedDynamicXfa: dynamicXfa, keptFields };
+  return { droppedDynamicXfa: dynamicXfa, keptFields, pageCount: pages.length };
 }
 
 /** The file name a flattened PDF gets: the name asked for, or the original's with "_flattened". */
@@ -407,7 +407,7 @@ export async function flattenPdf(input, optionsOrHooks = {}, maybeHooks) {
     name: outputName(input, options),
     bytes,
     type: 'application/pdf',
-    pageCount: doc.getPageCount(),
+    pageCount: result.pageCount,
     keptFields: result.keptFields,
     droppedDynamicXfa: result.droppedDynamicXfa,
   };
@@ -447,7 +447,7 @@ export function flattenNotes(outcomes) {
     }
     for (const group of groups.values()) {
       const text = group.length === 1 ? group[0].one : { key: group[0].many, args: [] };
-      messages.push({ key: 'file_problem', args: [group.map((g) => g.name).join(', '), text] });
+      messages.push({ key: 'file_problem', args: [namesArg(group.map((g) => g.name)), text] });
     }
   };
   const reasons = [];
@@ -462,7 +462,7 @@ export function flattenNotes(outcomes) {
   }
   sayOf(reasons);
   const named = (key, names) => {
-    if (names.length) messages.push({ key, count: names.length, args: [names.length, names.join(', ')] });
+    if (names.length) messages.push({ key, count: names.length, args: [names.length, namesArg(names)] });
   };
   named('batch_nothing_to_flatten', nothing);
   named('batch_failed', failed);

@@ -80,3 +80,36 @@
     align-items: stretch;
   }
 }
+
+/* Off while PDFs open, but still in the focus order (a password dialog gives it back there): looks
+   as off as disabled. */
+.stamps-content .ui-btn[aria-disabled="true"],
+.stamps-content .ui-empty[aria-disabled="true"] {
+  cursor: default;
+  color: color-mix(in srgb, var(--on-surface) 38%, transparent);
+}
+
+.stamps-content .ui-btn--outlined[aria-disabled="true"] {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--on-surface) 12%, transparent);
+}
+
+.stamps-content .ui-empty[aria-disabled="true"] .ui-empty-icon,
+.stamps-content .ui-empty[aria-disabled="true"] .ui-empty-detail,
+.stamps-content .ui-empty[aria-disabled="true"] .ui-empty-drop {
+  color: inherit;
+}
+
+.stamps-content .ui-btn[aria-disabled="true"]::before,
+.stamps-content .ui-empty[aria-disabled="true"]::before {
+  display: none;
+}
+
+/* The main button ends where the column above it ends (the kit reads --ui-column on wide screens):
+   the page's whole content with PDFs, the empty card's 560 px without. */
+.stamps-bottombar {
+  --ui-column: calc(var(--content-max) - 2 * var(--space-6));
+}
+
+.stamps-bottombar--empty {
+  --ui-column: 560px;
+}

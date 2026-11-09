@@ -5,7 +5,7 @@
 .redact-screen {
   /* The page and its boxes are the PDF's own colours, not the theme's: a white sheet, and boxes
      dark but see-through, outlined black, as the app draws them. */
-  --redact-paper: #ffffff;
+  --redact-paper: var(--paper, #ffffff);
   --redact-ink: #000000;
   --redact-cover: rgb(0 0 0 / 0.55);
   /* The chosen box's frame and handle sit on that white sheet in either theme: the app's red of
@@ -22,6 +22,32 @@
 
 .redact-opening {
   flex: none;
+}
+
+/* Choose PDF while a PDF opens: off, and looking it, but keeping the focus (aria-disabled). */
+.redact-page .ui-empty[aria-disabled="true"] {
+  cursor: default;
+  color: color-mix(in srgb, var(--on-surface) 38%, transparent);
+}
+
+.redact-page .ui-empty[aria-disabled="true"] .ui-empty-icon,
+.redact-page .ui-empty[aria-disabled="true"] .ui-empty-detail,
+.redact-page .ui-empty[aria-disabled="true"] .ui-empty-drop {
+  color: inherit;
+}
+
+.redact-page .ui-empty[aria-disabled="true"]::before {
+  display: none;
+}
+
+/* The PDF's card takes the focus from Choose PDF once it opens: a frame only for the keyboard. */
+.redact-side > .ui-file-card:focus {
+  outline: none;
+}
+
+.redact-side > .ui-file-card:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
 .redact-layout,

@@ -19,6 +19,12 @@ export const IMAGE_MIME = {
   avif: 'image/avif',
 };
 
+/**
+ * The image types the file picker offers (ImageStore.pickableTypes), as an accept attribute. Kept
+ * here, in a module with no imports, so the app can name them without loading the decoders.
+ */
+export const IMAGE_ACCEPT = 'image/jpeg,image/png,image/webp,image/bmp,image/x-ms-bmp,image/gif,image/heic,image/heif,image/avif,.jpg,.jpeg,.png,.webp,.bmp,.gif,.heic,.heif,.avif';
+
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
 /** The sizes the header of a BMP file's picture can have, one per version of the format. */

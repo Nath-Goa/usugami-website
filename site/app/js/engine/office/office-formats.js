@@ -1,8 +1,8 @@
 // Measurements, numbering, symbols, columns, tab stops, page breaks, groups and table styles of
 // Word, PowerPoint and Excel files: a port of the app's core/OfficeFormats.kt (its OfficeColors
-// part is colors.js). Pure functions: no DOM, nothing to load.
+// part is colors.js). Pure functions: no DOM, nothing to load. (The converter screens import this
+// module before a file is picked, so it must not pull in the text engine and its fonts.)
 import { trim, toIntOrNull, toDoubleOrNull, toInt, roundToInt, digitOf } from './xlsx-numbers-kt.js';
-import { linesThatFit } from '../text/layout.js';
 
 const f = Math.fround;
 
@@ -522,14 +522,33 @@ export class TabStops {
 // ---------------------------------------------------------------------------------------------
 // PageBreaking
 
-/** Where a paragraph of text is split between two pages (the text engine's port, shared). */
+/** Bottoms are measured in floating point: a line this little past the space left still fits. */
+const BREAK_EPS = 1e-6;
+
+/**
+ * Where a paragraph of text is split between two pages: OfficeFormats.kt's PageBreaking, the same
+ * rule as the text engine's linesThatFit (text/layout.js), ported here so this module loads nothing.
+ */
 export const PageBreaking = Object.freeze({
   /**
    * How many of a paragraph's lines go on this page when `space` is left, given each line's bottom
-   * measured from the paragraph's top. See docs/api/text.md.
+   * measured from the paragraph's top (`lineBottoms`, increasing). Like Word's widow and orphan
+   * control (when `avoidSingleLines`): a single first line isn't left alone at the bottom of the
+   * page, and a single last line isn't carried alone to the next one. 0: the whole paragraph moves
+   * to the next page. With `force` (nothing else is on the page) at least one line stays. Lines
+   * that follow on from lines laid out before them (`keepFirst` false) or go on in lines laid out
+   * after them (`keepLast` false) are like any other lines there: a single one is left alone.
    */
   linesThatFit(lineBottoms, space, avoidSingleLines, force, keepFirst = true, keepLast = true) {
-    return linesThatFit(Array.from(lineBottoms), space, avoidSingleLines, force, keepFirst, keepLast);
+    const bottoms = Array.from(lineBottoms);
+    const count = bottoms.length;
+    let fit = 0;
+    for (const b of bottoms) if (b <= space + BREAK_EPS) fit++;
+    if (avoidSingleLines && fit >= 1 && fit < count) {
+      if (keepLast && fit === count - 1) fit -= 1;
+      if (keepFirst && fit === 1) fit = 0;
+    }
+    return force ? Math.max(fit, Math.min(1, count)) : fit;
   },
 });
 

@@ -8,7 +8,10 @@ The site in `site/`, which is what GitHub Pages serves, includes libraries, font
 images made by other people. This file lists each of them with its version, source, copyright and
 license, and says where its license text is:
 
-- next to the files in `site/`, served with the site (for example `site/app/vendor/pdfjs/LICENSE`);
+- next to the files in `site/`, served with the site (for example `site/app/vendor/pdfjs/LICENSE.txt`).
+  `npm run vendor` adds `.txt` to the license files packages ship without an extension
+  (`LICENSE`, `LICENSE_FOXIT`...), so browsers show them instead of downloading them; their text is
+  unchanged;
 - in [licenses/](licenses/), for texts the packages don't ship themselves, and in
   [licenses/Apache-2.0.txt](licenses/Apache-2.0.txt) for the Apache License 2.0.
 
@@ -51,7 +54,7 @@ by @cantoo/pdf-lib 2.11.1's build:
 | [html-entities](https://github.com/mdevils/html-entities) | Copyright (c) 2021 Dulin Marat | MIT | [licenses/html-entities.txt](licenses/html-entities.txt) |
 | [node-html-better-parser](https://github.com/Sharcoux/node-html-parser) | Copyright 2019 Tao Qiufeng | MIT | [licenses/node-html-better-parser.txt](licenses/node-html-better-parser.txt) |
 | [tslib](https://github.com/microsoft/tslib) | Copyright (c) Microsoft Corporation | 0BSD | [licenses/tslib.txt](licenses/tslib.txt) |
-| fflate | see section 3 | MIT | `site/app/vendor/fflate/LICENSE` |
+| fflate | see section 3 | MIT | `site/app/vendor/fflate/LICENSE.txt` |
 | [@pdf-lib/standard-fonts](https://github.com/Hopding/standard-fonts): metrics of the 14 standard PDF fonts, made from Adobe's Core 14 AFM files | Copyright (c) 2018 Andrew Dillon; AFM files Copyright Adobe Systems Incorporated | MIT; Adobe's AFM terms | [licenses/pdf-lib-standard-fonts.txt](licenses/pdf-lib-standard-fonts.txt) |
 | PNG decoder and encoder ported from [UPNG.js](https://github.com/photopea/UPNG.js) (by way of [@pdf-lib/upng](https://github.com/Hopding/upng)) | Copyright (c) 2017 Photopea | MIT | [licenses/UPNG.js.txt](licenses/UPNG.js.txt) |
 | Base64 code from [base64-arraybuffer](https://github.com/niklasvh/base64-arraybuffer) | Copyright (c) 2012 Niklas von Hertzen | MIT | [licenses/base64-arraybuffer.txt](licenses/base64-arraybuffer.txt) |
@@ -69,7 +72,7 @@ PDFs. `npm run vendor` bundles it with its dependencies into one file:
 
 - Source: https://github.com/cantoo-scribe/fontkit (a fork of https://github.com/foliojs/fontkit)
 - Copyright (c) 2014-present Devon Govett
-- License: MIT. Text: `site/app/vendor/fontkit/LICENSE`
+- License: MIT. Text: `site/app/vendor/fontkit/LICENSE.txt`
 
 The bundle also contains, in the versions locked in `package-lock.json`, the parts below. Their
 license texts, with fontkit's, are also in `site/app/vendor/fontkit/fontkit.esm.min.js.LICENSE.txt`,
@@ -82,7 +85,7 @@ packages esbuild reports bundling.
 | [dfa](https://github.com/devongovett/dfa) 1.2.0 | Devon Govett | MIT | [licenses/dfa.txt](licenses/dfa.txt) |
 | [brotli](https://github.com/devongovett/brotli.js) 1.3.3 (the decoder, for WOFF2 fonts) | Devon Govett; decoder files Copyright 2013 Google Inc. | MIT; decoder files Apache-2.0 | [licenses/brotli.js.txt](licenses/brotli.js.txt), [licenses/Apache-2.0.txt](licenses/Apache-2.0.txt) |
 | [base64-js](https://github.com/beatgammit/base64-js) 1.5.1 | Copyright (c) 2014 Jameson Little | MIT | [licenses/base64-js.txt](licenses/base64-js.txt) |
-| fflate 0.8.3 | see section 3 | MIT | `site/app/vendor/fflate/LICENSE` |
+| fflate 0.8.3 | see section 3 | MIT | `site/app/vendor/fflate/LICENSE.txt` |
 | @cantoo/unicode-trie 1.0.5 and @cantoo/unicode-properties 1.0.5 (part of fontkit's source) | Copyright 2018, Devon Govett | MIT | [licenses/unicode-trie-and-unicode-properties.txt](licenses/unicode-trie-and-unicode-properties.txt) |
 | Character property and shaping tables generated from the [Unicode Character Database](https://www.unicode.org/ucd/) | Copyright © 1991-2026 Unicode, Inc. | Unicode-3.0 | [licenses/Unicode-3.0.txt](licenses/Unicode-3.0.txt) |
 
@@ -96,7 +99,7 @@ ZIP") and compresses data. `site/app/vendor/fflate/fflate.esm.js`.
 
 - Source: https://github.com/101arrowz/fflate
 - Copyright (c) 2026 Arjun Barrett (as written in its license file)
-- License: MIT. Text: `site/app/vendor/fflate/LICENSE`
+- License: MIT. Text: `site/app/vendor/fflate/LICENSE.txt`
 
 
 ## 4. PDF.js, with its data files and decoders
@@ -108,24 +111,25 @@ Shows pages, finds text positions and renders pages to images.
 
 - Source: https://github.com/mozilla/pdf.js (tag v6.4.299, build d0991a0d5)
 - Copyright Mozilla Foundation (the files say "Copyright 2024 Mozilla Foundation")
-- License: Apache-2.0. Text: `site/app/vendor/pdfjs/LICENSE`
+- License: Apache-2.0. Text: `site/app/vendor/pdfjs/LICENSE.txt`
 
 These files come with it, in `site/app/vendor/pdfjs/`:
 
 | Files | What they are | Copyright | License | Text |
 |---|---|---|---|---|
-| `cmaps/*.bcmap` | Character maps for Chinese, Japanese and Korean PDFs | Copyright 1990-2009 Adobe Systems Incorporated | BSD-3-Clause | `cmaps/LICENSE` |
-| `standard_fonts/Foxit*.pfb` | Fonts for PDFs that use the standard fonts without embedding them | Copyright 2014 PDFium Authors | BSD-3-Clause | `standard_fonts/LICENSE_FOXIT` |
-| `standard_fonts/LiberationSans-*.ttf` | Liberation Sans 1.07.4, for the same purpose | Copyright (c) 2007 Red Hat, Inc. | GPL-2.0 with font exceptions (the Liberation Fonts license) | `standard_fonts/LICENSE_LIBERATION` |
-| `iccs/CGATS001Compat-v2-micro.icc` | Colour profile for turning CMYK into RGB, from [Compact-ICC-Profiles](https://github.com/saucecontrol/Compact-ICC-Profiles) (revision bdd8466) | none (public domain dedication) | CC0-1.0 | `iccs/LICENSE` |
-| `wasm/openjpeg.wasm`, `wasm/openjpeg_nowasm_fallback.js` | [OpenJPEG](https://github.com/uclouvain/openjpeg), the JPEG 2000 decoder, with pdf.js's wrapper | Copyright (c) 2002-2014, Universite catholique de Louvain (UCL), Belgium, and the others named in the text; wrapper Copyright (c) 2024, Mozilla Foundation | BSD-2-Clause | `wasm/LICENSE_OPENJPEG`, `wasm/LICENSE_PDFJS_OPENJPEG` |
-| `wasm/jbig2.wasm`, `wasm/jbig2_nowasm_fallback.js` | PDFium's JBIG2 decoder, with pdf.js's wrapper | Copyright 2014 The PDFium Authors; wrapper Copyright 2026 Mozilla Foundation | BSD-3-Clause and Apache-2.0 (PDFium); Apache-2.0 (wrapper) | `wasm/LICENSE_JBIG2`, `wasm/LICENSE_PDFJS_JBIG2` |
-| `wasm/qcms_bg.wasm` | [qcms](https://github.com/FirefoxGraphics/qcms), colour management, with pdf.js's wrapper | Copyright (C) 2009-2024 Mozilla Corporation; Copyright (C) 1998-2007 Marti Maria | MIT | `wasm/LICENSE_QCMS`, `wasm/LICENSE_PDFJS_QCMS` |
-| `wasm/quickjs-eval.js`, `wasm/quickjs-eval.wasm` | [QuickJS](https://bellard.org/quickjs/), the sandbox pdf.js uses for JavaScript inside PDFs, built by [pdf.js.quickjs](https://github.com/mozilla/pdf.js.quickjs) | Copyright (c) 2017-2021 Fabrice Bellard; Copyright (c) 2017-2021 Charlie Gordon; pdf.js.quickjs Copyright (c) 2026 Mozilla Foundation | MIT | `wasm/LICENSE_QUICKJS`, `wasm/LICENSE_PDFJS_QUICKJS` (copies of [licenses/QuickJS.txt](licenses/QuickJS.txt) and [licenses/pdf.js.quickjs.txt](licenses/pdf.js.quickjs.txt)) |
+| `cmaps/*.bcmap` | Character maps for Chinese, Japanese and Korean PDFs | Copyright 1990-2009 Adobe Systems Incorporated | BSD-3-Clause | `cmaps/LICENSE.txt` |
+| `standard_fonts/Foxit*.pfb` | Fonts for PDFs that use the standard fonts without embedding them | Copyright 2014 PDFium Authors | BSD-3-Clause | `standard_fonts/LICENSE_FOXIT.txt` |
+| `standard_fonts/LiberationSans-*.ttf` | Liberation Sans 1.07.4, for the same purpose | Copyright (c) 2007 Red Hat, Inc. | GPL-2.0 with font exceptions (the Liberation Fonts license) | `standard_fonts/LICENSE_LIBERATION.txt` |
+| `iccs/CGATS001Compat-v2-micro.icc` | Colour profile for turning CMYK into RGB, from [Compact-ICC-Profiles](https://github.com/saucecontrol/Compact-ICC-Profiles) (revision bdd8466) | none (public domain dedication) | CC0-1.0 | `iccs/LICENSE.txt` |
+| `wasm/openjpeg.wasm`, `wasm/openjpeg_nowasm_fallback.js` | [OpenJPEG](https://github.com/uclouvain/openjpeg), the JPEG 2000 decoder, with pdf.js's wrapper | Copyright (c) 2002-2014, Universite catholique de Louvain (UCL), Belgium, and the others named in the text; wrapper Copyright (c) 2024, Mozilla Foundation | BSD-2-Clause | `wasm/LICENSE_OPENJPEG.txt`, `wasm/LICENSE_PDFJS_OPENJPEG.txt` |
+| `wasm/jbig2.wasm`, `wasm/jbig2_nowasm_fallback.js` | PDFium's JBIG2 decoder, with pdf.js's wrapper | Copyright 2014 The PDFium Authors; wrapper Copyright 2026 Mozilla Foundation | BSD-3-Clause and Apache-2.0 (PDFium); Apache-2.0 (wrapper) | `wasm/LICENSE_JBIG2.txt`, `wasm/LICENSE_PDFJS_JBIG2.txt` |
+| `wasm/qcms_bg.wasm` | [qcms](https://github.com/FirefoxGraphics/qcms), colour management, with pdf.js's wrapper | Copyright (C) 2009-2024 Mozilla Corporation; Copyright (C) 1998-2007 Marti Maria | MIT | `wasm/LICENSE_QCMS.txt`, `wasm/LICENSE_PDFJS_QCMS.txt` |
+| `wasm/quickjs-eval.js`, `wasm/quickjs-eval.wasm` | [QuickJS](https://bellard.org/quickjs/), the sandbox pdf.js uses for JavaScript inside PDFs, built by [pdf.js.quickjs](https://github.com/mozilla/pdf.js.quickjs) | Copyright (c) 2017-2021 Fabrice Bellard; Copyright (c) 2017-2021 Charlie Gordon; pdf.js.quickjs Copyright (c) 2026 Mozilla Foundation | MIT | `wasm/LICENSE_QUICKJS.txt`, `wasm/LICENSE_PDFJS_QUICKJS.txt` (copies of [licenses/QuickJS.txt](licenses/QuickJS.txt) and [licenses/pdf.js.quickjs.txt](licenses/pdf.js.quickjs.txt)) |
 
 pdfjs-dist 6.4.299 ships no license file for QuickJS; the two texts in `licenses/` are the ones
 pdf.js added later (commit a3beacc). `npm run vendor` copies them next to the QuickJS files under
-the names pdf.js gives them, unless pdfjs-dist ships those files itself.
+the names pdf.js gives them (with `.txt` added, like the other license files), unless pdfjs-dist
+ships those files itself.
 
 
 ## 5. Tesseract.js, its engine and language data
@@ -170,7 +174,7 @@ worker picks the one the browser supports).
 
 - Source: https://github.com/naptha/tesseract.js-core (tag v7.0.0)
 - Copyright the tesseract.js-core authors
-- License: Apache-2.0. Text: `site/app/vendor/tesseract/core/LICENSE`
+- License: Apache-2.0. Text: `site/app/vendor/tesseract/core/LICENSE.txt`
 
 It is built with Emscripten 4.0.15 (section 7) from these libraries, at the commits named in each
 text in `licenses/`:
@@ -198,7 +202,7 @@ text in `licenses/`:
   the tesseract.js project ([naptha/tessdata](https://github.com/naptha/tessdata))
 - Copyright the Tesseract authors
 - License: Apache-2.0. Text: [licenses/Apache-2.0.txt](licenses/Apache-2.0.txt), served with
-  the site as `site/app/vendor/tesseract/core/LICENSE`. (The npm packages that carry the files
+  the site as `site/app/vendor/tesseract/core/LICENSE.txt`. (The npm packages that carry the files
   declare MIT for their packaging.)
 - Changed by Usugami: in `lang/hin.traineddata.gz`, `npm run vendor` removes two settings from
   the data's config part, `classify_misfit_junk_penalty 0.125` (with the comment above it) and
@@ -219,7 +223,7 @@ Decodes HEIC photos in browsers that can't (Chrome, Firefox). `site/app/vendor/l
 - libheif-js (the Emscripten build packaged for npm): https://github.com/catdad-experiments/libheif-js,
   by Kiril Vatev.
 - License: GNU Lesser General Public License, version 3 or (at your option) any later version.
-  Text: `site/app/vendor/libheif/LICENSE` (the LGPL), which adds to the GNU GPL version 3 in
+  Text: `site/app/vendor/libheif/LICENSE.txt` (the LGPL), which adds to the GNU GPL version 3 in
   [LICENSE](LICENSE).
 
 How Usugami meets the LGPL:
@@ -293,11 +297,12 @@ Project Authors (github.com/googlei18n/noto-fonts)".
 The app's icons are Google's [Material Icons](https://github.com/google/material-design-icons),
 Round style, from the npm package @material-design-icons/svg 0.14.15
 (https://github.com/marella/material-design-icons). `tools/build-icons.mjs` copies the ones the app
-uses into `site/app/js/core/icons.js`.
+uses into `site/app/js/core/icons.js`; the website pages (`site/index.html`, `site/download/`,
+`site/privacy/`, `site/404.html`) have the ones they use written into them as inline SVG.
 
 - Copyright Google LLC
 - License: Apache-2.0. Text: [licenses/Apache-2.0.txt](licenses/Apache-2.0.txt), served with the
-  site as `site/app/vendor/material-icons/LICENSE` (the npm package's copy, which `npm run vendor`
+  site as `site/app/vendor/material-icons/LICENSE.txt` (the npm package's copy, which `npm run vendor`
   copies there)
 
 ### Download badges

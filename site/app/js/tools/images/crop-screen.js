@@ -231,23 +231,37 @@ class CropArea {
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   }
 
+  /** The handle a press at `p` takes: the nearest within reach (a corner before a side as near), or -1. */
+  handleNear(p) {
+    const quad = this.state.corners;
+    let index = -1;
+    let best = Infinity;
+    for (let i = 0; i < HANDLES; i++) {
+      const q = this.at(handleAt(quad, i));
+      const d = Math.hypot(q.x - p.x, q.y - p.y);
+      if (d < best) { best = d; index = i; }
+    }
+    return best > HANDLE_REACH ? -1 : index;
+  }
+
   bindPointer() {
     const c = this.canvas;
+    // A mouse over a handle it would take shows that it can be dragged (a web extra, as other tools'
+    // cursors); touch has no pointer to show.
+    const hover = (e) => {
+      if (this.dragging || e.pointerType !== 'mouse') return;
+      c.style.cursor = this.handleNear(this.local(e)) >= 0 ? 'grab' : '';
+    };
+    c.addEventListener('pointerleave', () => { if (!this.dragging) c.style.cursor = ''; });
     c.addEventListener('pointerdown', (e) => {
       if (this.dragging || (e.pointerType === 'mouse' && e.button !== 0)) return;
       const p = this.local(e);
       const quad = this.state.corners;
-      // The nearest handle; a corner before a side as near.
-      let index = -1;
-      let best = Infinity;
-      for (let i = 0; i < HANDLES; i++) {
-        const q = this.at(handleAt(quad, i));
-        const d = Math.hypot(q.x - p.x, q.y - p.y);
-        if (d < best) { best = d; index = i; }
-      }
-      if (best > HANDLE_REACH) return;
+      const index = this.handleNear(p);
+      if (index < 0) return;
       e.preventDefault();
       c.setPointerCapture?.(e.pointerId);
+      if (e.pointerType === 'mouse') c.style.cursor = 'grabbing';
       this.state.chosen = index;
       const q = this.at(handleAt(quad, index));
       // Where the handle is from the pointer.
@@ -257,7 +271,8 @@ class CropArea {
     });
     c.addEventListener('pointermove', (e) => {
       const d = this.dragging;
-      if (!d || e.pointerId !== d.id) return;
+      if (!d) { hover(e); return; }
+      if (e.pointerId !== d.id) return;
       e.preventDefault();
       const p = this.local(e);
       const frame = this.frame();
@@ -280,6 +295,8 @@ class CropArea {
       const [w, hgt] = this.shown();
       this.state.settle(w, hgt);
       this.onChange();
+      c.style.cursor = '';
+      if (e.type === 'pointerup') hover(e);
     };
     c.addEventListener('pointerup', end);
     c.addEventListener('pointercancel', end);

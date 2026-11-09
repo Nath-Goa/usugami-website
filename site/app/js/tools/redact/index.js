@@ -61,7 +61,8 @@ export async function mount(ctx) {
 
   const makeBar = () => topBar({ title: t('tool_redact'), onBack: () => ctx.back() });
   let bar = makeBar();
-  const page = h('div', { class: 'page redact-page', 'data-main': '' });
+  // The screen's main landmark, where Skip to content goes.
+  const page = h('main', { class: 'page redact-page', 'data-main': '' });
   const opening = linearProgress({ value: null, label: t('pdf_working') });
   opening.classList.add('redact-opening');
   opening.hidden = true;
@@ -191,6 +192,14 @@ export async function mount(ctx) {
     s.query = '';
     s.fileName = E.redactedName(source.name);
     buildLoaded(pdf);
+    // Choose PDF, pressed to get here, has gone: the focus goes to the PDF's card in its place.
+    focusIfLost(ui?.card);
+  }
+
+  /** Focuses `target` when the focus has nowhere to be (it was on something that went). */
+  function focusIfLost(target) {
+    const active = document.activeElement;
+    if (!active || active === document.body || !active.isConnected || !ctx.root.contains(active)) target?.focus?.({ preventScroll: true });
   }
 
   /** Redact PDF starts again: its boxes belong to the PDF they were drawn on. */
@@ -298,6 +307,7 @@ export async function mount(ctx) {
     runController = controller;
     const dialog = progressDialog({ title: t('pdf_working'), onCancel: () => controller.abort() });
     let out = null;
+    let failure = null;
     try {
       out = await E.redactPdf(source, boxes.map((box) => ({ pageIndex: box.page, box })), {
         signal: controller.signal,
@@ -306,14 +316,17 @@ export async function mount(ctx) {
         name: s.fileName,
       });
     } catch (e) {
-      if (!(e instanceof CancelledError) && !controller.signal.aborted && !unmounted) {
-        snackbar(e instanceof UserError ? t(e.key, ...e.args) : t('pdf_process_failed'));
-      }
+      failure = e;
     } finally {
-      dialog.close();
+      // Gone before anything else shows: while it is up the rest of the screen is inert, so a
+      // message wouldn't be heard and the result's heading couldn't take the focus.
+      await dialog.close();
       if (runController === controller) runController = null;
       s.processing = false;
       if (!unmounted) updateRun();
+    }
+    if (failure && !(failure instanceof CancelledError) && !controller.signal.aborted && !unmounted) {
+      snackbar(failure instanceof UserError ? t(failure.key, ...failure.args) : t('pdf_process_failed'));
     }
     if (!out || unmounted || s.source !== source) return;
     s.result = out;
@@ -385,8 +398,11 @@ export async function mount(ctx) {
         accept: 'pdf',
         multiple: false,
       });
-      // Picking is off while a PDF is being opened: a second pick then would be ignored.
-      empty.disabled = s.opening;
+      // Picking is off while a PDF is being opened: a second pick then would be ignored. Not with
+      // `disabled`, which would throw the keyboard focus out of the button just pressed (and the
+      // password dialog would give it back to nothing); pick() and open() check for themselves.
+      if (s.opening) empty.setAttribute('aria-disabled', 'true');
+      else empty.removeAttribute('aria-disabled');
       if (empty.parentNode !== page) {
         clear(page);
         page.append(opening, empty);
@@ -414,6 +430,8 @@ export async function mount(ctx) {
       thumbnail: source.thumbnail(0, 58).catch(() => null),
       onRemove: removePdf,
     });
+    // It takes the focus from Choose PDF once the PDF has opened.
+    card.tabIndex = -1;
 
     const note = h('p', { class: 'redact-note' }, t('redact_note'));
 
@@ -527,7 +545,7 @@ export async function mount(ctx) {
     const tail = h('div', { class: 'redact-tail' }, nameField);
 
     const el = h('div', { class: 'redact-layout' }, side, main, tail);
-    ui = { el, editor, strip, findField, findButton, stopButton, findProgress, findBusy, controls, addButton, removeAll, nameField };
+    ui = { el, card, editor, strip, findField, findButton, stopButton, findProgress, findBusy, controls, addButton, removeAll, nameField };
     renderBody();
     editor.setPdf(pdf);
     editor.showPage(s.page);

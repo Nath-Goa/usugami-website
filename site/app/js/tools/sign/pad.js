@@ -8,7 +8,7 @@ import { icon } from '../../core/icons.js';
 import { button, iconButton, uid } from '../../core/ui.js';
 import {
   Signature, PAD_WIDTH, PAD_HEIGHT, MIN_STEP, MAX_POINTS, drawSignature, inkColor,
-} from '../../engine/sign.js';
+} from '../../engine/signature.js';
 
 const INK_ORDER = ['black', 'blue'];
 // The line to sign on: black at 0x42 alpha, as the app draws it.

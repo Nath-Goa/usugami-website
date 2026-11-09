@@ -6,6 +6,7 @@ import { h, yieldToUI } from './dom.js';
 import { t, tp } from './i18n.js';
 import { fileCard, textField, segmented, button, progressDialog, snackbar, uid } from './ui.js';
 import { UserError, CancelledError } from './errors.js';
+import { listOfNames } from './names.js';
 
 /**
  * The files of a tool that works on several, each in a card: its thumbnail (item.thumbnail, a node
@@ -101,7 +102,14 @@ export function batchList({ items, nameOf, onRename, onRemove, onAdd, addLabel, 
         c.wrap.remove();
       }
     }
-    listEl.replaceChildren(...order);
+    // Only cards out of place are moved: a card taken out of the page and put back loses the
+    // focus, and typing in its name while PDFs are added must go on in it.
+    let at = listEl.firstChild;
+    for (const wrap of order) {
+      if (wrap === at) { at = at.nextSibling; continue; }
+      listEl.insertBefore(wrap, at);
+    }
+    while (at) { const next = at.nextSibling; at.remove(); at = next; }
   };
   setItems(items ?? []);
 
@@ -130,9 +138,11 @@ export function batchList({ items, nameOf, onRename, onRemove, onAdd, addLabel, 
 /**
  * Runs `work` on each item in turn, as the app makes a PDF of each file: a progress dialog ("Working
  * on your PDFs…", after 400 ms) says "PDF 2 of 5" and the file's name (item.name), with Cancel.
- * work(item, index, { signal, onProgress(done, total) | onProgress(fraction) }) returns an
- * OutputFile or several. A file that fails is passed over and the others still made; once done, the
- * failures are named in snackbars with their reasons (a UserError's key, worded for one file or, with
+ * work(item, index, { signal, onProgress(done, total) | onProgress(fraction) | onProgress(done, null),
+ * onStep(text|null) }) returns an OutputFile or several: onProgress(done, null) says the count
+ * isn't known (the bar runs without end), onStep sets a third line under the name ("Page 3",
+ * "Slide 2 of 6"), cleared as the next file starts. A file that fails is passed over and the
+ * others still made; once done, the failures are named in snackbars with their reasons (a UserError's key, worded for one file or, with
  * key + '_many', for several; others "Couldn't process …"). With one item it works as the tools do
  * for one file: "Working on your PDF…" and the error itself.
  * Options: title, report (default true), named: { errorKey: pluralKey } for errors said of the files
@@ -157,15 +167,25 @@ export async function runBatch(items, work, { title, report = true, named = {}, 
     for (let i = 0; i < total; i++) {
       if (controller.signal.aborted) throw new CancelledError();
       const item = list[i];
-      if (many) dialog.update(i / total, t('batch_progress', i + 1, total), item?.name ?? '');
-      const onProgress = (done, of) => {
+      if (many) dialog.update(i / total, t('batch_progress', i + 1, total), item?.name ?? '', null);
+      else dialog.setStep(null);
+      const onProgress = (...args) => {
+        const [done, of] = args;
+        // onProgress(done, null): how many there are isn't known yet (a Word document's pages):
+        // the bar runs without end for one file, and stays at this file's start for several.
+        if (args.length >= 2 && of == null) {
+          dialog.update(many ? i / total : null);
+          return;
+        }
         const f = of ? done / of : done;
         if (!Number.isFinite(f)) return;
         const clamped = Math.max(0, Math.min(1, f));
         dialog.update(many ? (i + clamped) / total : clamped);
       };
+      // The page, slide or chapter being made: a line of its own, not read out at each one.
+      const onStep = (text) => dialog.setStep(text ?? null);
       try {
-        const out = await work(item, i, { signal: controller.signal, onProgress });
+        const out = await work(item, i, { signal: controller.signal, onProgress, onStep });
         if (controller.signal.aborted) throw new CancelledError();
         for (const o of [].concat(out ?? [])) outputs.push(o);
       } catch (error) {
@@ -220,10 +240,10 @@ export function reportBatchFailures(failures, { many = failures.length > 1, name
       const m = t(e.key + '_many', ...e.args);
       if (m && m !== e.key + '_many') text = m;
     }
-    snackbar(t('file_problem', names.join(', '), text));
+    snackbar(t('file_problem', listOfNames(names), text));
   }
-  for (const [key, names] of byNamed) snackbar(tp(named[key], names.length, names.length, names.join(', ')));
-  if (plain.length) snackbar(tp('batch_failed', plain.length, plain.length, plain.join(', ')));
+  for (const [key, names] of byNamed) snackbar(tp(named[key], names.length, names.length, listOfNames(names)));
+  if (plain.length) snackbar(tp('batch_failed', plain.length, plain.length, listOfNames(plain)));
 }
 
 /**

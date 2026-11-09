@@ -845,11 +845,38 @@ async function large(page) {
   console.log(`  20,000 rows: ${r.count} pages in ${(r.ms / 1000).toFixed(1)} s, ${(r.size / 1024).toFixed(0)} KB, longest gap between frames ${r.longest.toFixed(0)} ms`);
 }
 
+/**
+ * Numbers are written as the device's language writes them (the app uses the phone's format
+ * locale): with no locale chosen, the browser's (navigator.language); options.locale overrides it.
+ */
+async function deviceLanguage(page, browser) {
+  const r = await page.evaluate(async () => {
+    const { workbook, number, row, MAIN, xlsx, index, pageTexts } = window.X;
+    const styles = `<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="${MAIN}"><numFmts count="1"><numFmt numFmtId="164" formatCode="#,##0.00"/></numFmts>
+      <fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>
+      <borders count="1"><border/></borders><cellXfs count="2"><xf/><xf numFmtId="164"/></cellXfs></styleSheet>`;
+    const bytes = workbook([{ name: 'Sums', body: `<sheetData>${row(1, [number('A1', 1234.5, 1)])}</sheetData>` }], { styles });
+    const own = Object.getOwnPropertyDescriptor(Navigator.prototype, 'language');
+    Object.defineProperty(Navigator.prototype, 'language', { configurable: true, get: () => 'de-DE' });
+    try {
+      const device = await pageTexts((await xlsx.convertXlsx({ name: 'Sums.xlsx', bytes }, {})).bytes);
+      const screen = await pageTexts((await index.convertOffice('excel', { name: 'Sums.xlsx', bytes }, { paper: null })).bytes);
+      const chosen = await pageTexts((await xlsx.convertXlsx({ name: 'Sums.xlsx', bytes }, { locale: 'en-US' })).bytes);
+      return { device: device[0], screen: screen[0], chosen: chosen[0] };
+    } finally {
+      Object.defineProperty(Navigator.prototype, 'language', own);
+    }
+  });
+  check(`${browser}: numbers in the browser's language when none is chosen`, r.device.includes('1.234,50') && r.screen.includes('1.234,50'), r);
+  check(`${browser}: the locale chosen overrides it`, r.chosen.includes('1,234.50'), r);
+}
+
 // ---------------------------------------------------------------------------------------------
 
 await withPage(async (page, url) => {
   await setup(page, url);
   await deviceTests(page, 'chromium');
+  await deviceLanguage(page, 'chromium');
   await refusedAndCancelled(page, 'chromium');
   await printSetup(page);
   await cells(page);
@@ -864,6 +891,7 @@ for (const browser of ['firefox', 'webkit']) {
   await withPage(async (page, url) => {
     await setup(page, url);
     await deviceTests(page, browser);
+    await deviceLanguage(page, browser);
     await refusedAndCancelled(page, browser);
   }, { browser });
 }

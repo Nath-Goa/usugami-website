@@ -3,6 +3,7 @@
 //   node tools/check-site.mjs                 the whole site
 //   node tools/check-site.mjs site/index.html site/download   only these files or folders
 //                                             (links are still resolved against the whole site)
+//   node tools/check-site.mjs --require-csp   also: every page has a Content-Security-Policy
 //
 // It fails (exit code 1) on:
 // - root-relative URLs ("/..."), which break when the site is in a sub-folder (GitHub Pages);
@@ -15,7 +16,9 @@
 // - relative links, sources and imports whose target doesn't exist (a folder needs index.html;
 //   names must match in case, as on GitHub Pages), and #anchors that don't exist on their page;
 // - inline scripts or styles a page's own Content-Security-Policy would block (it prints the
-//   hash to add when an inline script changes);
+//   hash to add when an inline script changes); a CSP <meta> that comes after what it should
+//   cover or outside <head>, has no default-src, lets the page reach another host or sends
+//   reports; and with --require-csp (CI uses it), a page without one;
 // - the same id twice on a page.
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -40,11 +43,13 @@ const TRACKERS = [
 
 /**
  * Checks the site and returns what it found.
- * @param {{ siteDir?: string, only?: string[] }} [opts] siteDir: the site folder (default site/);
- *   only: files or folders to check (default: all), absolute or relative to the working directory
+ * @param {{ siteDir?: string, only?: string[], requireCsp?: boolean }} [opts] siteDir: the site
+ *   folder (default site/); only: files or folders to check (default: all), absolute or relative
+ *   to the working directory; requireCsp: an HTML page without a Content-Security-Policy <meta>
+ *   is a problem (default false; --require-csp on the command line)
  * @returns {{ problems: { file: string, line: number, message: string }[], files: string[] }}
  */
-export function checkSite({ siteDir = join(repoRoot, 'site'), only = [] } = {}) {
+export function checkSite({ siteDir = join(repoRoot, 'site'), only = [], requireCsp = false } = {}) {
   const site = resolve(siteDir);
   const problems = [];
   const report = (file, line, message) => problems.push({ file: rel(file), line, message });
@@ -74,7 +79,7 @@ export function checkSite({ siteDir = join(repoRoot, 'site'), only = [] } = {}) 
     const text = readFileSync(file, 'utf8');
     const ext = extname(file).toLowerCase();
     const inVendor = file.startsWith(vendorDir + sep);
-    const ctx = { file, site, report, idsOf };
+    const ctx = { file, site, report, idsOf, requireCsp };
     if (ext === '.html') checkHtml(text, ctx);
     else if (ext === '.css') checkCss(text, ctx, file, 1);
     else if (ext === '.webmanifest') checkManifest(text, ctx);
@@ -128,6 +133,8 @@ function checkHtml(html, ctx) {
   }
   const csp = tags.find((t) => t.name === 'meta' && (t.attrs['http-equiv'] || '').toLowerCase() === 'content-security-policy');
   const cspDirectives = csp ? parseCsp(csp.attrs.content || '') : null;
+  if (csp) checkCspMeta(csp, cspDirectives, tags, ctx);
+  else if (ctx.requireCsp) report(file, 1, "no Content-Security-Policy <meta>: add one at the top of <head> (default-src 'self'), as the other pages have");
 
   for (const t of tags) {
     const { name, attrs, line } = t;
@@ -187,6 +194,32 @@ function parseCsp(content) {
     if (key) out[key.toLowerCase()] = values;
   }
   return out;
+}
+
+// Source expressions that let a page load only from the site itself (or from memory).
+const LOCAL_SOURCE = /^(?:'(?:self|none|unsafe-inline|unsafe-eval|wasm-unsafe-eval|unsafe-hashes|strict-dynamic|report-sample|inline-speculation-rules)'|'(?:sha256|sha384|sha512)-[A-Za-z0-9+/_=-]+'|'nonce-[^']+'|(?:blob|data|mediastream|filesystem):)$/i;
+// Directives whose values aren't sources.
+const NOT_SOURCES = new Set(['sandbox', 'upgrade-insecure-requests', 'block-all-mixed-content', 'require-trusted-types-for', 'trusted-types', 'webrtc']);
+
+/**
+ * A CSP <meta> covers only what comes after it, and only in <head>; it must start from
+ * default-src and allow no other host, so it backs up the rule of no outside requests.
+ */
+function checkCspMeta(meta, csp, tags, { file, report }) {
+  const body = tags.find((t) => t.name === 'body');
+  if (body && body.index < meta.index) report(file, meta.line, 'Content-Security-Policy <meta> is in <body>, where browsers ignore it: put it at the top of <head>');
+  const before = tags.find((t) => t.index < meta.index && (['script', 'style', 'link', 'base'].includes(t.name) || t.attrs.src !== undefined));
+  if (before) report(file, before.line, `<${before.name}> comes before the page's Content-Security-Policy <meta> (line ${meta.line}), which doesn't cover it: put the <meta> first in <head>`);
+  if (!csp['default-src']) report(file, meta.line, "Content-Security-Policy has no default-src: start it with default-src 'self'");
+  for (const [directive, values] of Object.entries(csp)) {
+    if (directive === 'report-uri' || directive === 'report-to') {
+      report(file, meta.line, `Content-Security-Policy ${directive} sends reports to a server`);
+    } else if (!NOT_SOURCES.has(directive)) {
+      for (const v of values) {
+        if (!LOCAL_SOURCE.test(v)) report(file, meta.line, `Content-Security-Policy ${directive} allows "${v}": only the site itself ('self') and blob:/data: may be sources`);
+      }
+    }
+  }
 }
 
 function allowsInline(csp, directive) {
@@ -470,8 +503,16 @@ function decodeEntities(s) {
 // ---------- Command line ----------
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const only = process.argv.slice(2).filter((a) => !a.startsWith('--'));
-  const { problems, files } = checkSite({ only });
+  const args = process.argv.slice(2);
+  const only = args.filter((a) => !a.startsWith('--'));
+  const unknown = args.filter((a) => a.startsWith('--') && a !== '--require-csp');
+  if (unknown.length) {
+    console.error(`Unknown option: ${unknown.join(' ')}
+Usage: node tools/check-site.mjs [--require-csp] [file or folder ...]`);
+    process.exit(2);
+  }
+  // --require-csp: every page must have its own Content-Security-Policy.
+  const { problems, files } = checkSite({ only, requireCsp: args.includes('--require-csp') });
   if (problems.length) {
     let last = '';
     for (const p of problems) {

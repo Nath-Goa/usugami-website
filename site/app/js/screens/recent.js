@@ -51,31 +51,55 @@ export async function openRecent(file) {
   await output.openFile(out);
 }
 
-/** Shares a listed file, as the result screen's Share does. */
+/**
+ * Shares a listed file, as the result screen's Share does. Reading its copy can take long enough
+ * for the browser to stop counting the tap: a snackbar then offers one more tap to share it.
+ */
 export async function shareRecent(file) {
   const out = await outputFile(file);
   if (!out) return lost(file);
   const output = await import('../core/output.js');
-  await output.share([out]);
+  try {
+    await output.share([out]);
+  } catch (e) {
+    if (!e?.notAllowed) throw e;
+    snackbar(t('web_recent_share_ready', file.name), {
+      action: t('share'),
+      onAction: () => failSoftly(output.share([out]), 'web_share_failed'),
+    });
+  }
 }
 
-function failSoftly(promise) {
+/**
+ * Whether this browser can share files at all (the result screen shows Share only then too). The
+ * same check as core/output.js's canShareFiles, which isn't loaded until a file is opened.
+ */
+function canShare() {
+  if (typeof navigator.share !== 'function' || typeof navigator.canShare !== 'function') return false;
+  try {
+    return navigator.canShare({ files: [new File([new Uint8Array(1)], 'Usugami.pdf', { type: 'application/pdf' })] });
+  } catch {
+    return false;
+  }
+}
+
+/** Shows what went wrong: a UserError's own words, else `fallback` (a whole sentence). */
+function failSoftly(promise, fallback = 'web_recent_open_failed') {
   promise.catch((e) => {
     console.warn(e);
-    snackbar(t('msg_unknown_error'));
+    snackbar(e?.name === 'UserError' && e.key ? t(e.key, ...(e.args ?? [])) : t(fallback));
   });
 }
 
 /**
  * A file on the list: an icon for its kind, its name, when it was saved and its size. A tap opens
- * it; its menu also shares it or takes it off the list.
+ * it; its menu also shares it (where this browser can share files) or takes it off the list.
  * @param {{ id: string, name: string, type: string, size: number, savedAt: number }} file
  */
 export function recentRow(file, now = new Date()) {
   const when = savedWhen(file.savedAt, now);
   const size = file.size >= 0 ? formatSize(file.size) : null;
   const details = size ? t('result_details', when, size) : when;
-  const label = [file.name, when, size].filter(Boolean).join(', ');
   const more = h('button', {
     type: 'button',
     class: 'recent-menu',
@@ -87,17 +111,46 @@ export function recentRow(file, now = new Date()) {
   more.addEventListener('click', () => {
     menu(more, [
       { label: t('open'), icon: 'open_in_new', onClick: () => failSoftly(openRecent(file)) },
-      { label: t('share'), icon: 'share', onClick: () => failSoftly(shareRecent(file)) },
+      canShare() ? { label: t('share'), icon: 'share', onClick: () => failSoftly(shareRecent(file), 'web_share_failed') } : null,
       { label: t('recent_remove'), icon: 'remove_circle_outline', onClick: () => removeRecent(file.id) },
-    ]);
+    ].filter(Boolean));
   });
+  // The button is named by what it shows: the file's name, then when it was saved and its size.
   return h('li', { class: 'recent-row', dataset: { id: file.id } },
-    h('button', { type: 'button', class: 'recent-open', 'aria-label': label, onClick: () => failSoftly(openRecent(file)) },
+    h('button', { type: 'button', class: 'recent-open', onClick: () => failSoftly(openRecent(file)) },
       icon(file.type === ZIP ? 'folder_zip' : 'picture_as_pdf', { size: 26 }),
-      h('span', { class: 'recent-text', 'aria-hidden': 'true' },
+      h('span', { class: 'recent-text' },
         h('span', { class: 'recent-name' }, file.name),
         h('span', { class: 'recent-detail' }, details))),
     more);
+}
+
+/**
+ * Where the focus goes when the row that had it leaves a list (its file removed): the row now in
+ * its place, else the one before, else `fallback`. Call `before()` ahead of the change and the
+ * function it returns after it.
+ * @param {HTMLElement | (() => HTMLElement|null)} list   the list (.recent-list) the rows are in,
+ *   or a function giving it (when the list itself is drawn again)
+ * @param {() => HTMLElement|null} fallback
+ */
+export function keepRowFocus(list, fallback) {
+  const listEl = () => (typeof list === 'function' ? list() : list);
+  const rows = () => Array.from(listEl()?.querySelectorAll('.recent-row') ?? []);
+  const focusedRow = document.activeElement?.closest?.('.recent-row');
+  const at = focusedRow && listEl()?.contains(focusedRow) ? rows().indexOf(focusedRow) : -1;
+  const id = focusedRow?.dataset.id;
+  const part = document.activeElement?.classList?.contains('recent-menu') ? '.recent-menu' : '.recent-open';
+  return () => {
+    if (at < 0 || listEl()?.contains(document.activeElement)) return;
+    const now = rows();
+    if (now.some((r) => r.dataset.id === id)) {
+      // Still listed (drawn again): the focus goes back to it, on the same part of the row.
+      now.find((r) => r.dataset.id === id)?.querySelector(part)?.focus();
+      return;
+    }
+    const row = now[Math.min(at, now.length - 1)];
+    (row?.querySelector('.recent-open') ?? fallback())?.focus();
+  };
 }
 
 /** Renders the Recent files screen. */
@@ -133,7 +186,8 @@ export async function mount(ctx) {
     if (mine !== seq) return;
     files = list;
     const now = new Date();
-    const focusedId = document.activeElement?.closest?.('.recent-row')?.dataset.id;
+    // The file with the focus left the list: the focus goes to the one now in its place, or the heading.
+    const refocus = keepRowFocus(listEl, () => bar.querySelector('h1'));
     listEl.replaceChildren(...files.map((f) => recentRow(f, now)));
     listEl.hidden = !files.length;
     note.hidden = !files.length;
@@ -141,10 +195,7 @@ export async function mount(ctx) {
     // Also once the list is cleared: a screen reader hears it.
     empty.textContent = files.length ? '' : t('recent_empty');
     empty.hidden = !!files.length;
-    if (focusedId && !listEl.querySelector(`[data-id="${CSS.escape(focusedId)}"]`)) {
-      // The file with the focus left the list: the focus goes to the list's next one, or the heading.
-      (listEl.querySelector('.recent-open') ?? bar.querySelector('h1'))?.focus();
-    }
+    refocus();
   };
 
   ctx.root.append(bar, h('div', { class: 'page page--narrow', 'data-main': '' }, empty, listEl, note));

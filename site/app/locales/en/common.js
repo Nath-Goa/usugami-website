@@ -179,6 +179,7 @@ export default {
   page_count: { one: '{1} page', other: '{1} pages' },
   pdf_process_failed: "Couldn't process this PDF. Check the file and free storage.",
   file_problem: '{1}: {2}',
+  names_and_more: { one: '{1} and {2} more', other: '{1} and {2} more' },
 
   // The result screen
   result_title: 'Done',
@@ -222,6 +223,8 @@ export default {
   web_try_again: 'Try again',
   web_go_home: 'Back to Home',
   web_opens_elsewhere: '(opens in a new tab)',
+  // The browser tab's title on a screen other than Home. {1} is the screen's name ("Merge PDF").
+  web_page_title: '{1} – Usugami',
   // File sizes, as Android writes them: "619 kB", "2.4 MB".
   web_size_format: '{1} {2}',
   web_size_b: 'B',
@@ -243,6 +246,10 @@ export default {
   // Recent files: the web app keeps a copy of each saved file in this browser.
   web_recent_lost_body: "Usugami can no longer open {1} in this browser. If you saved the file, you can find it in your Downloads.",
   web_recent_note: 'Usugami keeps a copy of each file on this list in this browser, on this device only. Clearing the list deletes the copies.',
+  // Opening a listed file failed in an unexpected way.
+  web_recent_open_failed: "Couldn't open the file. Try again.",
+  // Its copy took too long to read for the browser to still count the tap. {1} is its name.
+  web_recent_share_ready: '{1} is ready to share.',
 
   // Files shared to Usugami or opened with it
   web_share_receiving: 'Opening the files you shared…',

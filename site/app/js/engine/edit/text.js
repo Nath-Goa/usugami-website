@@ -1,7 +1,7 @@
 // Edit PDF's text (PageText.kt): laid out and drawn by the text engine, on the screen and in the PDF
 // alike, so the PDF has the text exactly where the preview showed it. It stays real text that can be
 // searched and selected, with only the letters used embedded.
-import { ensureFonts, measureTextSync, fileMetrics, canDraw } from '../text/index.js';
+import { ensureFonts, fontsReady, measureTextSync, fileMetrics, canDraw } from '../text/index.js';
 
 /** Text is laid out and drawn at this size, in points, and scaled to its own. */
 export const REFERENCE = 100;
@@ -51,6 +51,14 @@ export function textLayoutSync(text, color = '#000000') {
 export async function textLayout(text, color = '#000000') {
   await ensureFonts(String(text), TEXT_STYLE);
   return textLayoutSync(text, color);
+}
+
+/**
+ * textLayoutSync() if the fonts `text` needs are loaded already, else null (without loading them):
+ * for a screen that must draw at once, such as when the text's colour changes.
+ */
+export function textLayoutNow(text, color = '#000000') {
+  return fontsReady(String(text), TEXT_STYLE) ? textLayoutSync(text, color) : null;
 }
 
 /** The box `text` needs at a font size of one point: [unitWidth, unitHeight] (see textItem()). */

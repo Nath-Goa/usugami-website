@@ -20,7 +20,7 @@ import { drawItem } from './edit/draw.js';
 export * from './edit/layout.js';
 export { EditHistory, MAX_UNDO } from './edit/history.js';
 export {
-  REFERENCE, TEXT_MAX_LENGTH, TEXT_STYLE, textLayout, textLayoutSync, unitSize, canDrawText, drawText,
+  REFERENCE, TEXT_MAX_LENGTH, TEXT_STYLE, textLayout, textLayoutSync, textLayoutNow, unitSize, canDrawText, drawText,
 } from './edit/text.js';
 export {
   importPicture, decodePicture, pdfImage, pdfLongSide, PHOTO_DPI, LOSSLESS_DPI, MAX_SIDE, JPEG_QUALITY, PREVIEW_SIDE,
@@ -36,11 +36,23 @@ export { drawItem, drawLiveStroke, tracePath } from './edit/draw.js';
  */
 export async function shownPageSizes(input) {
   const doc = await loadPdf(input.bytes, input.password ? { password: input.password } : {});
-  return doc.getPages().map((page) => {
+  return pagesOf(doc).map((page) => {
     const f = pageFrame(page);
     const crop = page.getCropBox();
     return { width: f.width, height: f.height, rotation: f.rotation, box: [crop.x, crop.y, crop.x + crop.width, crop.y + crop.height], matrix: f.matrix };
   });
+}
+
+/**
+ * The pages of `doc`. A page tree that loops or is damaged makes pdf-lib overflow its stack or throw
+ * a TypeError: that PDF can't be opened (UserError('pdf_import_failed')), as redact.js says it.
+ */
+function pagesOf(doc) {
+  try {
+    return doc.getPages();
+  } catch {
+    throw new UserError('pdf_import_failed');
+  }
 }
 
 /** Whether a page has annotations (comments, form fields, links) at all. */
@@ -68,7 +80,8 @@ export async function editPages(input, options = {}, hooks = {}) {
   const items = options.items ?? [];
   checkCancelled(signal);
   const doc = await loadPdf(input.bytes, input.password ? { password: input.password } : {});
-  const count = doc.getPageCount();
+  const pages = pagesOf(doc);
+  const count = pages.length;
   const kept = items.filter((it) => Number.isInteger(it.page) && it.page >= 0 && it.page < count);
   if (!kept.length) throw new RangeError('Edit PDF has nothing to draw');
 
@@ -94,7 +107,6 @@ export async function editPages(input, options = {}, hooks = {}) {
     if (!byPage.has(item.page)) byPage.set(item.page, []);
     byPage.get(item.page).push(item);
   }
-  const pages = doc.getPages();
   for (const [index, onPage] of byPage) {
     checkCancelled(signal);
     const page = pages[index];

@@ -86,7 +86,8 @@ async function loadFonts(page, opList) {
  * The glyphs pdf.js draws on a page, its annotations' appearances included, in drawing order:
  * [{ unicode, points (four corners, user space: start and end at the descent, start and end at
  * the ascent), origin, end, up (one em up, as a vector), spaceWidth, height (text extraction's
- * glyph height), chars }], everything in the page's own coordinates (PDF user space).
+ * glyph height), chars, font (pdf.js's font object, or null), fontSize (Tf's size) }],
+ * everything in the page's own coordinates (PDF user space).
  */
 export async function pageGlyphs(page) {
   const opList = await page.getOperatorList({ intent: 'display', annotationMode: AnnotationMode.ENABLE });
@@ -199,6 +200,9 @@ export async function pageGlyphs(page) {
         spaceWidth: (spaceEm ?? 0.25) * fontSize * alongUnit,
         height: extent.height,
         chars: Math.max(1, unicode.length),
+        // Text extraction starts its average letter width afresh where the font or size changes.
+        font,
+        fontSize,
       });
       x += advance;
     }
@@ -351,6 +355,8 @@ function onShownPage(glyphs, frame) {
       width: Math.abs(along(end) - along(origin)),
       height: g.height * em,
       spaceWidth: g.spaceWidth,
+      font: g.font ?? null,
+      size: g.fontSize ?? 0,
     });
   }
   return out;
@@ -448,6 +454,9 @@ function lines(glyphs) {
   let lastWordSpacing = -1;
   let previousAverage = -1;
   for (const g of glyphs) {
+    // Another font or size: the average letter width starts again from this glyph, as PDFBox's
+    // PDFTextStripper.writePage does, so a small word after a large one isn't run into it.
+    if (last && (g.font !== last.font || g.size !== last.size)) previousAverage = -1;
     const wordSpacing = g.spaceWidth;
     let deltaSpace;
     if (!wordSpacing || Number.isNaN(wordSpacing)) deltaSpace = Infinity;

@@ -12,7 +12,7 @@
 // letter-spaced and broken after a hyphen, and also finds it in what comments, links and form
 // fields say where no page shows it.
 import { openPdfJs } from '../lib/pdfjs.js';
-import { loadPdf, savePdf } from './pdf-common.js';
+import { loadPdf, savePdf, wasUnmarked } from './pdf-common.js';
 import { UserError, PasswordError, CancelledError, checkCancelled } from '../core/errors.js';
 import { yieldToUI } from '../core/dom.js';
 import { pageGlyphs, findOnPage, pageTextOf } from './redact/glyphs.js';
@@ -23,7 +23,7 @@ import { renderRedacted, renderShown, encodePicture, replaceWithPicture, release
 import { pageView, get, items, PDFDict } from './redact/objects.js';
 import { normalize } from './redact/page-text.js';
 import { sanitize, redactedName } from './redact/names.js';
-import { readPages } from './cleanup.js';
+import { repairPageTree } from './cleanup.js';
 import {
   PageFrame, clamp, same, boxToRect, rectToBox, makeBox, MAX_BOXES,
 } from './redact/boxes.js';
@@ -59,33 +59,58 @@ async function closeView(pdf) {
 const frameOf = (page) => PageFrame.fromView(page.view, page.rotate);
 
 /**
- * The page dictionaries of `doc` (pdf-lib), in order. A damaged page tree (one that loops, lacks
- * /Kids, has a page without its type or a page in its place) is read otherwise by pdf-lib than by
- * viewers and pdf.js (cleanup.js' readPages), or not at all: the pages shown then aren't those
- * Redact would change, so such a file fails as a damaged PDF rather than with a TypeError or a
- * stack overflow.
+ * The page dictionaries of `doc` (pdf-lib), in order, as viewers find them: { nodes, mended }. A
+ * damaged page tree (one that miscounts, loops, has a page without its type, or a lone page in the
+ * tree's place), which pdf-lib would read otherwise than viewers do, is mended first, as the app
+ * mends it when a PDF is opened (PdfToolsEngine.inspect; cleanup.js' repairPageTree), so the pages
+ * Redact changes are those the preview shows. `mended` says whether it had to be. A PDF without
+ * pages (no catalog, no /Kids) fails as a damaged one, never with a TypeError or a stack overflow.
  */
 function pageNodes(doc) {
-  let nodes;
   try {
-    nodes = doc.getPages().map((p) => p.node);
+    const { pages, changed } = repairPageTree(doc);
+    return { nodes: pages.map((p) => p.dict), mended: changed };
   } catch {
     throw new UserError('pdf_import_failed');
   }
-  const shown = readPages(doc).pages;
-  if (shown.length !== nodes.length || shown.some((p, i) => p.dict !== nodes[i])) throw new UserError('pdf_import_failed');
-  return nodes;
+}
+
+/**
+ * What pdf.js reads of `input`: what the screen's previews show (PdfToolsEngine.previewView), so
+ * Find text and the pictures see the pages as the preview does. A PdfSource has it: `viewBytes`,
+ * opened with `viewPassword` (without the password, Usugami's mark and a damaged page tree). A
+ * plain input ({ bytes, password }) is read as it is, unless its page tree has to be mended or it
+ * carries Usugami's mark: then a copy without them, made as core/pdfdoc.js makes the view.
+ * `reading` is the input's pdf-lib reading when there is one ({ doc, mended }; null: pdf-lib can't
+ * read it), so it isn't read twice for nothing. pdf-lib's own copy needs none of this: loadPdf
+ * takes the mark off in memory, and pageNodes mends the tree.
+ */
+async function shownOf(input, reading) {
+  if (input?.viewBytes instanceof Uint8Array) {
+    return { bytes: input.viewBytes, password: input.viewPassword || undefined };
+  }
+  if (reading === null || (reading && !reading.mended && !wasUnmarked(reading.doc))) return input;
+  try {
+    // A fresh copy: the one being redacted mustn't be saved half-way.
+    const copy = await loadPdf(input.bytes, { password: input.password ?? undefined });
+    const { changed } = repairPageTree(copy);
+    if (!changed && !wasUnmarked(copy)) return input;
+    return { bytes: await savePdf(copy) };
+  } catch {
+    // pdf-lib can't read it: pdf.js reads the PDF itself, and says what is wrong with it.
+    return input;
+  }
 }
 
 /**
  * Every page's frame as shown (its crop box turned by its /Rotate), for drawing boxes over a
  * preview and for turning boxes into PDF user space and back: [{ left, bottom, width, height,
  * rotation, shownWidth, shownHeight }]. `source` is a pdf.js document (PdfSource.pdfjs()) or an
- * input { bytes, password }.
+ * input { bytes, password } (or a PdfSource: its view is read, as the previews show it).
  */
 export async function pageFrames(source) {
   const own = !(source && typeof source.getPage === 'function');
-  const pdf = own ? await openView(source, 'pdf_import_failed') : source;
+  const pdf = own ? await openView(await shownOf(source), 'pdf_import_failed') : source;
   try {
     const frames = [];
     for (let i = 1; i <= pdf.numPages; i++) {
@@ -120,7 +145,18 @@ export async function renderPreview(pdf, pageIndex, cssWidth, { signal, pixelRat
   const element = document.createElement('canvas');
   element.width = width;
   element.height = height;
-  const { canvas } = await renderShown(page, frame, width, height, signal, element);
+  let canvas;
+  try {
+    ({ canvas } = await renderShown(page, frame, width, height, signal, element));
+  } finally {
+    // pdf.js would otherwise keep the page's decoded images and drawing until the PDF is closed
+    // (tens of megabytes a page for a scan); it waits for any other drawing of the page to end.
+    try {
+      page.cleanup();
+    } catch {
+      // The PDF was closed meanwhile.
+    }
+  }
   canvas.style.width = `${cssWidth}px`;
   canvas.frame = frame.toJSON();
   return canvas;
@@ -135,7 +171,8 @@ export async function renderPreview(pdf, pageIndex, cssWidth, { signal, pixelRat
  * where no page shows it gets a small box, so that its page is redacted and it goes. Text that is
  * a picture (a scan) has nothing to find. Throws PasswordError, or UserError('redact_find_failed').
  *
- * @param {{ name?: string, bytes: Uint8Array, password?: string }} input
+ * @param {{ name?: string, bytes: Uint8Array, password?: string, viewBytes?: Uint8Array, viewPassword?: string }} input
+ *   a FileItem, or a PdfSource (its viewBytes are what pdf.js reads)
  * @param {string} query
  * @param {{ onProgress?: (done: number, total: number) => void, signal?: AbortSignal }} [hooks]
  */
@@ -143,7 +180,22 @@ export async function findText(input, query, hooks = {}) {
   const { onProgress, signal } = hooks;
   if (!normalize(String(query ?? '')).length) return [];
   checkCancelled(signal);
-  const pdf = await openView(input, 'redact_find_failed');
+  // pdf-lib's reading, its page tree mended: for what comments, links and fields say (in the PDF's
+  // objects, not on its pages). Null for a PDF pdf.js reads but pdf-lib can't (damaged, or
+  // encrypted in a way it doesn't know): its pages are still searched.
+  const read = async () => {
+    try {
+      const doc = await loadPdf(input.bytes, { password: input.password ?? undefined });
+      return { doc, ...pageNodes(doc) };
+    } catch {
+      return null;
+    }
+  };
+  // A PdfSource has its view: pdf-lib reads the PDF once pdf.js is done with it, so the two aren't
+  // in memory together. A plain input is read first, to know whether pdf.js needs a mended copy.
+  let reading = input?.viewBytes instanceof Uint8Array ? undefined : await read();
+  checkCancelled(signal);
+  const pdf = await openView(await shownOf(input, reading), 'redact_find_failed');
   const inText = [];
   const frames = [];
   try {
@@ -171,23 +223,26 @@ export async function findText(input, query, hooks = {}) {
   } finally {
     await closeView(pdf);
   }
-  // What comments, links and fields say: in the PDF's objects, not on its pages.
+  // What comments, links and fields say: in the PDF's objects, not on its pages. The view has the
+  // same pages, in the same order.
+  if (reading === undefined) reading = await read();
+  checkCancelled(signal);
   let inComments = [];
-  try {
-    const doc = await loadPdf(input.bytes, { password: input.password ?? undefined });
-    const pages = new Set(inText.map((m) => m[0].page));
-    const nodes = doc.getPages().map((p) => p.node);
-    const frameAt = (i) => frames[i] ?? (() => {
-      const { view, rotate } = pageView(doc.context, nodes[i]);
-      return PageFrame.fromView(view, rotate);
-    })();
-    const commentFrames = nodes.map((_, i) => frameAt(i));
-    inComments = findInComments(doc, commentFrames, query, pages, () => checkCancelled(signal))
-      .filter((m) => m[0].page < frames.length);
-  } catch (e) {
-    if (e instanceof CancelledError) throw e;
-    // A PDF pdf.js reads but pdf-lib can't (damaged, or encrypted in a way it doesn't know): its
-    // pages were still searched.
+  if (reading) {
+    try {
+      const { doc, nodes } = reading;
+      const pages = new Set(inText.map((m) => m[0].page));
+      const frameAt = (i) => frames[i] ?? (() => {
+        const { view, rotate } = pageView(doc.context, nodes[i]);
+        return PageFrame.fromView(view, rotate);
+      })();
+      const commentFrames = nodes.map((_, i) => frameAt(i));
+      inComments = findInComments(doc, commentFrames, query, pages, () => checkCancelled(signal), nodes)
+        .filter((m) => m[0].page < frames.length);
+    } catch (e) {
+      if (e instanceof CancelledError) throw e;
+      // Comments too damaged to read: the pages were still searched.
+    }
   }
   const all = [...inText, ...inComments].map((boxes, i) => ({ boxes, i }));
   // In page order, as they are on each page (a stable sort).
@@ -266,7 +321,8 @@ function toBox(frame, page, item) {
  * that no page shows go too) and `name` (the new PDF's name, without .pdf; "<name>_redacted" by
  * default). Those two may be given in `hooks` instead.
  *
- * @param {{ name?: string, bytes: Uint8Array, password?: string }} input
+ * @param {{ name?: string, bytes: Uint8Array, password?: string, viewBytes?: Uint8Array, viewPassword?: string }} input
+ *   a FileItem, or a PdfSource (its viewBytes are what pdf.js reads)
  * @param {object} boxesByPage
  * @param {{ onProgress?: (done: number, total: number) => void, signal?: AbortSignal, searched?: string[], name?: string }} [hooks]
  */
@@ -279,11 +335,15 @@ export async function redactPdf(input, boxesByPage, hooks = {}) {
   const check = () => checkCancelled(signal);
   check();
 
+  // pdf-lib's copy, which becomes the new PDF, is the PDF itself (Usugami's mark taken off in
+  // memory, its page tree mended); pdf.js draws the pictures from what the preview showed.
   const doc = await loadPdf(input.bytes, { password: input.password ?? undefined });
   check();
-  const pdf = await openView(input, 'pdf_import_failed');
+  const { nodes, mended } = pageNodes(doc);
+  const shown = await shownOf(input, { doc, mended });
+  check();
+  const pdf = await openView(shown, 'pdf_import_failed');
   try {
-    const nodes = pageNodes(doc);
     if (pdf.numPages !== nodes.length) throw new UserError('pdf_import_failed');
     const viewPages = new Map();
     const viewPage = async (index) => {
@@ -358,7 +418,7 @@ export async function redactPdf(input, boxesByPage, hooks = {}) {
     const stay = nodes.filter((_, i) => !isPictured.has(i));
     emptyUnused(reader, drawnThere, stay, check);
     check();
-    removeLeaks(doc, redactedPages, removedAnnotations, searched);
+    removeLeaks(doc, redactedPages, removedAnnotations, searched, nodes);
     check();
     const bytes = await savePdf(doc);
     check();
@@ -376,9 +436,9 @@ export async function redactPdf(input, boxesByPage, hooks = {}) {
   }
 }
 
-/** The page's text as Find text reads it, for checks: { pageIndex: text }. */
+/** Each page's text as Find text reads it (from what the preview shows), for checks: [text, ...]. */
 export async function readPageTexts(input) {
-  const pdf = await openView(input, 'redact_find_failed');
+  const pdf = await openView(await shownOf(input), 'redact_find_failed');
   try {
     const out = [];
     for (let i = 1; i <= pdf.numPages; i++) {

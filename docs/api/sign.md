@@ -17,6 +17,13 @@ without drawing it again, a reload forgets it, and nothing is written to any sto
 
 No UI, no strings of its own. Plain inputs, so it can be called from tests with `runInPage`.
 
+The signature and its place without pdf-lib are `engine/signature.js` (`Signature`, the layout
+functions and constants, `renderSignature`, `traceSignature`, `signaturePathData`,
+`drawSignature`, `inkColor`, `INKS` …); `engine/sign.js` re-exports all of it with `signPdf` and
+the page frames, so either import works. The screen's `pad.js` and `placer.js` import only
+`signature.js`; `index.js` loads `engine/sign.js` (pdf-lib) just after the screen shows and waits
+for it when Sign PDF is pressed.
+
 ### `signPdf(input, options, hooks)` → `Promise<OutputFile>`
 
 ```js
@@ -143,14 +150,20 @@ card → "Signature" with "Draw your signature" (or the signature, to change) an
 isn't a certified digital signature → once there is a signature: "Page to sign" (a strip of the
 pages, the last chosen first; only for more than one page), "Place your signature" (the page drawn
 by pdf.js with the signature on it: drag it, tap or click elsewhere to move it there, arrow keys on
-the focused signature), "Size", the four nudge buttons (off against an edge) → "File name"
+the focused signature), "Size" (one step per percent, as it is read out), the four nudge buttons
+(off against an edge with `aria-disabled`, so the one pressed there keeps the focus) → "File name"
 (`<name>_signed`) → Sign PDF → "Working on your PDF…" (Cancel) → the result screen ("The new PDF
 has no password." for a locked one). The result is a history step (`ctx.pushStep('result')`):
 Back to editing keeps the page, the place and the name; the browser's (or a phone's) Back from the
 result does the same, and Forward shows the result again; a reload on that step takes the step
 back. Start over and removing the PDF keep the signature. PDFs are opened with the screen's
 AbortSignal (`openPdf(item, { password, signal })`), so a password dialog still open closes when
-the user leaves.
+the user leaves; leaving while signing stops it and takes the progress dialog away at once. A PDF
+that can't be opened is told about without its name, as the app's addPdfs does for one PDF. A
+failed signing is said once the progress dialog has gone (a screen reader hears nothing outside
+it). While a PDF opens, Choose PDF is off with `aria-disabled`, keeping the focus; a cancelled
+password dialog gives it back there. The page is the screen's `<main data-main>` landmark, and the
+empty card's drop zone goes with it, so the screen isn't kept in memory once left.
 
 The pad: full screen on phones (sized to leave room for the ink row on a phone turned sideways),
 a dialog in the middle from 840 × 600 px. One finger, pen or mouse signs at a time; coalesced

@@ -34,17 +34,29 @@ All three, as the app's screen for a tool on one PDF:
 - The tool's options, then **File name** with ".pdf" (`Report_split`, `Report_pages_deleted`,
   `Report_rotated`, from `defaultName`; reset for each new PDF).
 - The main button at the bottom (**Split PDF**, **Delete pages**, **Rotate PDF**), off without a
-  PDF, while opening or working, and until the tool is ready (Delete pages: something typed;
-  Rotate: a page turned). Pages typed wrongly are said in a snackbar (no progress, nothing made).
+  PDF and until the tool is ready (Delete pages: something typed; Rotate: a page turned). While a
+  PDF opens or is made it, the Choose PDF card and Choose another PDF are only marked off
+  (`aria-disabled`, shown as off), not `disabled`, so the one pressed keeps the keyboard focus and
+  a dialog closing (a password cancelled, Cancel pressed) gives it back. Pages typed wrongly are
+  said in a snackbar (no progress, nothing made). On screens 840 px and wider the main button ends
+  where the column above it ends: `.onepdf` sets the kit's `--ui-column` to `.page--narrow`'s
+  content width (760 px less its 32 px padding each side).
 - **Working on your PDF…** after 400 ms, with the engine's progress and **Cancel** (cancelling says
-  nothing). Problems: the engine's UserError message, else "Couldn't process this PDF…".
+  nothing). Problems: the engine's UserError message, else "Couldn't process this PDF…", said once
+  the dialog has gone (while it is open the rest of the page is out of a screen reader's reach).
+- The focus where a keyboard user expects it: a PDF opened, on its card; nothing opened (a password
+  cancelled), back where it was; Back to editing, on the main button (or the back arrow while the
+  main button is off); Start over or Remove, on Choose PDF; Rotate's Reset pages, which turns
+  itself off, on Rotate all pages right.
 - The kit's **result screen** (`showResult`): its history step (`pushStep('result')`) so the
   browser's Back (Android's Back) returns to the tool (`onStep(null)`), as does the back arrow
   ("Back to editing", which takes the step back with `popStep`); the tool shows again as it was.
   The browser's Forward to a result left that way doesn't bring it back: its step goes back again
   (the tool stays). Opened on the result step (a reload there), the tool starts empty and the step
   goes. ZIP named after the file name typed. "The new PDF has no password." when the PDF had one.
-  **Start over** goes back to Choose PDF.
+  **Start over** goes back to Choose PDF. A PDF pasted on the tool after a result (even after a
+  paste on the result screen) still takes the open one's place: the screen's paste zone is made
+  again when the tool comes back.
 - `hasUnsavedWork()`: while working; on the result, until it is saved; on the tool, Rotate's
   turned pages (Split's and Delete pages' typing doesn't count, as in the app).
 
@@ -168,14 +180,15 @@ The screens throw nothing; they show these (keys in their namespace files unless
 
 ## Strings
 
-`split.js`: `pdf_split_action pdf_selected pdf_selected_hint pdf_custom pdf_custom_hint pdf_fixed
-pdf_fixed_hint pdf_fixed_example pdf_every_page pdf_combine_selected pdf_combine_ranges` and the
-page errors above. `delete-pages.js`: `pdf_delete_pages_action delete_pages_field
-delete_pages_hint delete_pages_count page_marked_delete page_kept pdf_need_page` and the page
-errors. `rotate.js`: `pdf_rotate_action rotate_all rotate_all_left rotate_all_right rotate_hint
-rotated_right rotated_left rotated_upside_down rotate_page_left rotate_page_right
-pdf_reset_pages`. Each also has the web strings `web_choose_another_pdf` ("Choose another PDF")
-and `web_opening_pdf` ("Opening the PDF…"). Keys shared with other screens have the same English
-everywhere (strings.xml). From common.js and kit.js: tool names, `pick_pdf`, `remove_file`,
-`result_details`, `page_count`, `file_name`, `pdf_page_number`, `pdf_working`, `tool_discard_title`,
-`discard`, `keep`, the result screen's.
+Each key is defined in one file only. `split.js`: `pdf_split_action pdf_selected pdf_selected_hint
+pdf_custom pdf_custom_hint pdf_fixed pdf_fixed_hint pdf_fixed_example pdf_every_page
+pdf_combine_selected pdf_combine_ranges pdf_ranges_format pdf_pages_chunk`. `delete-pages.js`:
+`pdf_delete_pages_action delete_pages_field delete_pages_hint delete_pages_count page_marked_delete
+page_kept`. `rotate.js`: `pdf_rotate_action rotate_all rotate_all_left rotate_all_right
+rotate_hint`. The strings the organize screens share (the other page errors, `pdf_need_page`,
+`rotated_*`, `rotate_page_left/right`, `pdf_reset_pages`, `web_choose_another_pdf`,
+`web_opening_pdf`...) are in common.js, with tool names, `pick_pdf`, `remove_file`,
+`result_details`, `page_count`, `file_name`, `pdf_page_number`, `pdf_working`,
+`tool_discard_title`, `discard`, `keep` and the result screen's. The test compares every app key
+with strings.xml when the Android app's folder is beside this repository (`../pdfer`), and skips
+that comparison otherwise (CI).

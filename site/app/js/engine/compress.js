@@ -2,16 +2,18 @@
 // drawings stay drawings. Each image is shrunk to the level's resolution for the largest space it
 // fills on a page (and never past what the largest page needs, as in the app), stored again as JPEG
 // at the level's quality, and kept as it was unless that is smaller. A PDF that doesn't get at
-// least 1% smaller is handed back as it was, unless it had a password: then it is always saved
-// again, without the password, as every tool's PDFs are.
+// least 1% smaller is handed back as it was, unless it had a password, was locked against changes
+// (an owner password) or carried Usugami's own watermark: then it is always saved again, without
+// them, as every tool's PDFs are (the app's compressTo).
 import { PDFName, PDFArray, PDFNumber, PDFRef } from '../lib/pdf-lib.js';
-import { loadPdf, savePdf } from './pdf-common.js';
+import { loadPdf, savePdf, wasEncrypted, wasUnmarked } from './pdf-common.js';
 import { UserError, PasswordError, CancelledError, checkCancelled } from '../core/errors.js';
-import { sanitizeName, withSuffix, baseName } from '../core/names.js';
+import { sanitizeName, withSuffix, baseName, namesArg } from '../core/names.js';
 import { savedPercent } from './images/page-layout.js';
 import { pause } from './images/canvas.js';
 import { findImages, measureImages } from './compress/placements.js';
 import { examine, readImage, encodeImage, imageStream } from './compress/image.js';
+import { viewerPages, wasMended } from './flatten/pages.js';
 
 /**
  * The levels (the app's PdfCompression): the most pixels per inch an image keeps where it is shown,
@@ -87,13 +89,9 @@ export async function compressPdf(input, options = {}, hooks = {}) {
 
   const doc = await loadPdf(original, { password: hasPassword ? input.password : undefined });
   checkCancelled(signal);
-  let pages;
-  try {
-    pages = doc.getPages();
-  } catch {
-    // Read as a PDF, but without pages that can be found: as damaged as one that can't be read.
-    throw new UserError('pdf_import_failed');
-  }
+  // The pages viewers find, a damaged page tree mended first (as the app mends it when the PDF is
+  // picked); without pages that can be found it is as damaged as one that can't be read.
+  const pages = viewerPages(doc);
   const pageCount = pages.length;
   let bytes;
   let imagesReduced = 0;
@@ -125,8 +123,12 @@ export async function compressPdf(input, options = {}, hooks = {}) {
     if (e instanceof UserError || e instanceof PasswordError || e?.name === 'CancelledError') throw e;
     throw new UserError('pdf_process_failed');
   }
-  // A saving under 1% isn't worth a re-encoded copy: the original is kept, and says so.
-  const keptOriginal = !hasPassword && savedPercent(original.length, bytes.length) == null;
+  // A saving under 1% isn't worth a re-encoded copy: the original is kept, and says so. Not one
+  // restricted by an owner password, which every tool takes off, nor one with Usugami's own
+  // watermark, which no tool keeps (the app's asItIs); nor one whose page tree had to be mended,
+  // which the app keeps only as its mended copy.
+  const keptOriginal = !hasPassword && !wasEncrypted(doc) && !wasUnmarked(doc) && !wasMended(doc)
+    && savedPercent(original.length, bytes.length) == null;
   return {
     name,
     bytes: keptOriginal ? original.slice() : bytes,
@@ -175,8 +177,8 @@ export function compressNotes(outcomes) {
   // A PDF kept as it was says so under its name; those with a password that came out no smaller are named.
   const unchanged = outcomes.filter((o) => o.result && !o.result.keptOriginal && notSmaller(o.result)).map((o) => o.name);
   const messages = [];
-  if (failed.length) messages.push({ key: 'batch_failed', count: failed.length, args: [failed.length, failed.join(', ')] });
-  if (unchanged.length) messages.push({ key: 'batch_not_smaller', count: unchanged.length, args: [unchanged.length, unchanged.join(', ')] });
+  if (failed.length) messages.push({ key: 'batch_failed', count: failed.length, args: [failed.length, namesArg(failed)] });
+  if (unchanged.length) messages.push({ key: 'batch_not_smaller', count: unchanged.length, args: [unchanged.length, namesArg(unchanged)] });
   return messages;
 }
 
@@ -195,9 +197,12 @@ async function reduce(ctx, entry, level, maxDimension, signal) {
     const shrinks = width < facts.width || height < facts.height;
     // CMYK and other colour spaces a JPEG can't hold here are only worth storing again when smaller.
     if (components !== 1 && components !== 3 && !shrinks) return false;
-    const read = await readImage(ctx, facts, width, height, { signal });
+    const read = await readImage(ctx, facts, width, height, { signal, rgba: true });
     if (!read) return false;
-    const encoded = await encodeImage(read.pixels, width, height, read.components, {
+    // Reading the pixels back took a while: the page paints before they are stored again.
+    checkCancelled(signal);
+    await pause();
+    const encoded = await encodeImage(read.rgba ?? read.pixels, width, height, read.components, {
       quality: level.quality,
       deviceRgb: cs.palette ? cs.palette.deviceRgb : cs.deviceRgb,
       decode: cs.palette ? undefined : facts.decode,

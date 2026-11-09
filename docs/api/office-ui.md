@@ -14,7 +14,7 @@ the parts on screen are the kit's (docs/api/kit.md).
 | `js/tools/office/progress.js` | the conversion dialog: `officeProgressDialog`, `officeProgressView` |
 | `js/tools/office/office.css` | its styles (classes `office-*`), loaded by `mount` |
 | `locales/en/office.js` | its strings |
-| `tests/office-ui.test.mjs` | the tests (`node tests/office-ui.test.mjs`, `--quick`: Chromium only, no screenshots) |
+| `tests/office-ui.test.mjs` | the tests (`node tests/office-ui.test.mjs`, `--quick`: Chromium only, no screenshots); also: each tool's empty screen within 3 s with every library held back, one main landmark and Skip to content, Back and Forward and a reload on the result, the progress dialog's spacing and colours, in Chromium, Firefox and WebKit |
 
 ## What the screen does
 
@@ -47,7 +47,8 @@ the parts on screen are the kit's (docs/api/kit.md).
   that fails doesn't stop the others.
 - **Progress** (OfficeProgressDialog, after 400 ms): "Creating and compressing PDF…" (one) or
   "…PDFs…" (several), the bar, for several "PDF 2 of 5" (read out as it changes) and the file's
-  name, then the page being drawn: "Page 3" (Word, its count unknown until the end), "2 of 6
+  name, then the page being drawn (its parts 12 px apart, the kit's empty lines taking no room for
+  one file; the page in the dialog's text colour, as the app's): "Page 3" (Word, its count unknown until the end), "2 of 6
   slides", "1 of 4 pages" (Excel), "Chapter 2 of 9" (EPUB). One file: the bar moves with the
   slides, pages or chapters, and runs without end for Word and while the PDF is saved; several:
   it moves file by file, each file's share filled as it goes. **Cancel** stops it: nothing is
@@ -55,7 +56,9 @@ the parts on screen are the kit's (docs/api/kit.md).
 - **The result** (`showResult`): one PDF with Open, Share, Save to Downloads, Save as…; several with
   their own buttons, Save to folder… and Share or save as ZIP (`Converted_PDFs.zip`). Back returns
   to the files with their names and choices; the browser's Back and Forward move between the two
-  (`pushStep('result')`). Start over asks first while unsaved.
+  (`pushStep('result')`, `onStep`, as the other tools): Forward shows the result left with Back
+  again; once it has gone (Start over, a run since) Forward stays on the files, and a reload on
+  the result's step leaves that step. Start over asks first while unsaved.
 - **Messages** once the result shows (or with no result when none was made): a file that couldn't
   be converted for a reason of its own is named with it ("hidden.pptx: This presentation has no
   slides to convert…", the same reason together, worded for several); one that failed for no such
@@ -76,6 +79,13 @@ the parts on screen are the kit's (docs/api/kit.md).
   (while checking or converting) use `aria-disabled` so the focus stays on them, a removed card
   passes the focus to the next Remove, and after a run with nothing made the focus is back on the
   main button.
+- **Loading**: the screen shows its empty "Choose" card at once, without waiting for any library:
+  it imports only `engine/office/kinds.js` (the kinds, choices and message keys); the engine
+  (`engine/office/index.js`: ZIP and XML reading, fflate) and the kind's converter (pdf-lib, the
+  fonts) are loaded while the user picks a file, and awaited where a file is first checked or
+  converted.
+- Landmarks: the content (under the top bar) is the screen's `<main data-main>`, which the app's
+  "Skip to content" link moves the focus to.
 - Layout: one column in the app's order, its parts 16 px apart, at every width. From 840 px one
   file (and the empty card) stays in a 640 px column in the middle; several are the kit's grid of
   cards (2–3 across) under the choices for all (640 px wide). The main button is the kit's
@@ -139,38 +149,40 @@ officeProgressView({ done: 1, total: 2 }, 'epub', true, { number: 2, total: 4 })
 ## Errors
 
 The screen throws no `UserError`s. It shows those of `verifyOfficeFile` and `convertOffice`
-(keys and texts in office-core.md, all defined in `locales/en/office.js`), and the text engine's
-`web_fonts_unavailable`. `office_too_large` / `_many` are shown in the web wording
+(keys and texts in office-core.md, all defined in `locales/en/office.js`), the text engine's
+`web_fonts_unavailable`, and `web_tool_load_failed` ("Word to PDF couldn't be opened…") when the
+engine or the converter can't be loaded (offline before they were saved for offline use). `office_too_large` / `_many` are shown in the web wording
 (`web_office_too_large`: "This workbook is too big to convert on this device. Set a print area for
 the part you need in Excel or another app, then try again.").
 
 ## Strings
 
-`locales/en/office.js`, from strings.xml (keys and English texts as the app's): `pick_word`,
-`pick_powerpoint`, `pick_excel`, `pick_epub`, `add_word`, `add_powerpoint`, `add_excel`,
-`add_epub`, `document_word`, `document_powerpoint`, `document_excel`, `document_epub`,
-`office_note_word`, `office_note_powerpoint`, `office_note_excel`, `office_note_epub`,
-`option_page_size`, `option_orientation`, `size_a4`, `size_letter`, `size_legal`, `size_a3`,
-`size_a5`, `orientation_portrait`, `orientation_landscape`, `book_page_note`, `sheet_as_file`,
-`sheet_fit_width`, `sheet_fit_width_on`, `sheet_fit_width_off`, `sheet_gridlines`,
-`sheet_gridlines_detail`, `convert`, `convert_many` (plural), `creating_pdf`, `creating_pdfs`,
-`progress_slides` (plural), `progress_chapter`, and every office message with its `_many`
+Each key is defined in exactly one `locales/en` file. `locales/en/office.js` defines, from
+strings.xml (keys and English texts as the app's): `pick_word`, `pick_powerpoint`, `pick_excel`,
+`pick_epub`, `add_word`, `add_powerpoint`, `add_excel`, `add_epub`, `document_word`,
+`document_powerpoint`, `document_excel`, `document_epub`, `office_note_word`,
+`office_note_powerpoint`, `office_note_excel`, `office_note_epub`, `book_page_note`,
+`sheet_as_file`, `sheet_fit_width`, `sheet_fit_width_on`, `sheet_fit_width_off`,
+`sheet_gridlines`, `sheet_gridlines_detail`, `convert_many` (plural), `creating_pdfs`,
+`progress_slides` (plural), `progress_chapter`, every office message with its `_many`
 (`office_legacy_word|powerpoint|excel`, `office_encrypted`, `office_encrypted_excel`,
 `office_not_word|powerpoint|excel`, `epub_not_recognized`, `epub_protected`, `office_no_slides`,
-`office_no_sheets`, `epub_empty`, `office_embedded_content`, `office_too_large`),
+`office_no_sheets`, `epub_empty`, `office_embedded_content`, `office_too_large`), and
 `office_convert_failed`.
 
-Web: `web_fonts_unavailable` (the text engine's), `web_office_note_word|powerpoint|excel|epub` (the
-notes saying "Usugami's own fonts" where the app says "your phone's fonts": the web app draws with
-its own bundled fonts; shown through `tWeb`), `web_office_too_large` / `_many`, `web_opening_files`
-("Opening the files…", the checking bar's name).
+Web: `web_office_note_word|powerpoint|excel|epub` (the notes saying "Usugami's own fonts" where the
+app says "your phone's fonts": the web app draws with its own bundled fonts; shown through
+`tWeb`), `web_office_too_large` / `_many`, and `web_opening_files` ("Opening the files…", the
+checking bar's name).
 
-The `size_*`, `orientation_*`, `option_*`, `creating_pdf` keys are also in `images.js` (same
-texts), and `web_fonts_unavailable` in several tools' files: each namespace loads alone, so each has
-its copy. From `common.js` and `kit.js`: the tool names, `pick_several_hint`, `remove_file`,
-`file_name`, `result_details`, `progress_pages`, `pdf_page_number`, `batch_progress`,
-`batch_failed`, `file_problem`, `option_value`, `share_waits`, `pdf_discard_title`,
-`share_discard_body`, `discard`, `keep`, and the kit's own.
+The screen also uses, from `common.js`: the tool names, `option_page_size`, `option_orientation`,
+`size_a4`, `size_letter`, `size_legal`, `size_a3`, `size_a5`, `orientation_portrait`,
+`orientation_landscape`, `convert`, `creating_pdf`, `pick_several_hint`, `remove_file`,
+`result_details`, `progress_pages`, `batch_progress`, `batch_failed`, `file_problem`,
+`share_waits`, `pdf_discard_title`, `share_discard_body`, `discard`, `keep`, `cancelling`,
+`web_fonts_unavailable` (the text engine's) and `web_tool_load_failed`; from `kit.js`:
+`file_name`, `pdf_page_number`, `option_value` and the kit's own. Those load at start, so they
+are never copied into `office.js`.
 
 ## Differences from the app
 

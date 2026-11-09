@@ -28,6 +28,9 @@ const reducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce
  * @param {(item: any) => Row} o.create   makes a row: { el, handle?, update(item, index, count, active), load?(), unload?(), destroy?() }.
  *   `handle` is the row's focusable element for the keyboard (arrows move the focus, Ctrl+arrows the row);
  *   elements inside the row marked data-rove are only in the Tab order on the active row (with `roving`).
+ *   `update` runs again only when something it can show changed: the item, its place, whether it
+ *   is the first or the last row, or whether it is the active row. A long list then stays quick when
+ *   one row turns (one update) or goes (the rows after it).
  * @param {(from: number, to: number) => (void|false)} o.onMove   a row moved one or more places; false refuses
  * @param {() => void} [o.onMoveStart]   a drag starts (one Undo step for the whole drag)
  * @param {(from: number, to: number) => void} [o.onMoveEnd]   a drag ended
@@ -65,12 +68,16 @@ export function reorderList(o) {
 
   const updateRow = (row) => {
     const active = !o.roving || row.index === activeIndex();
+    const last = row.index === rows.length - 1;
+    const was = row.shown;
+    if (was && was.item === row.item && was.index === row.index && was.last === last && was.active === active) return;
+    row.shown = { item: row.item, index: row.index, last, active };
     row.update(row.item, row.index, rows.length, active);
     if (row.handle) {
       row.handle.tabIndex = active ? 0 : -1;
-      row.handle.setAttribute('aria-describedby', [row.handle.dataset.describedby, hintId].filter(Boolean).join(' '));
+      if (!was) row.handle.setAttribute('aria-describedby', [row.handle.dataset.describedby, hintId].filter(Boolean).join(' '));
     }
-    if (o.roving) for (const n of row.el.querySelectorAll('[data-rove]')) n.tabIndex = active ? 0 : -1;
+    if (o.roving && was?.active !== active) for (const n of row.el.querySelectorAll('[data-rove]')) n.tabIndex = active ? 0 : -1;
   };
 
   const updateRange = (a, b) => {

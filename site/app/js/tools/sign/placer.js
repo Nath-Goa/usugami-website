@@ -7,7 +7,7 @@ import { t, formatNumber } from '../../core/i18n.js';
 import { iconButton, slider, uid } from '../../core/ui.js';
 import {
   PEN_WIDTH, clampPlacement, defaultPlacement, widthRange, signaturePathData, inkColor,
-} from '../../engine/sign.js';
+} from '../../engine/signature.js';
 
 /** Each nudge moves the signature by this share of the page. */
 export const NUDGE = 0.02;
@@ -15,8 +15,11 @@ export const NUDGE = 0.02;
 const GAP = 4;
 /** How far around the signature a press still picks it up to drag, in CSS pixels. */
 const REACH = 16;
-/** The size slider's steps across the signature's range of widths. */
-const SIZE_STEPS = 1000;
+/**
+ * The size slider's steps across the signature's range of widths: one per percent, so each arrow
+ * key changes it as much as a screen reader says (web_sign_size_value is in whole percents).
+ */
+const SIZE_STEPS = 100;
 /** Until the page's size is known, an A4 page stands in for it. */
 const A4 = { width: 595, height: 842 };
 
@@ -216,7 +219,11 @@ export function signaturePlacer({ src, signature, page, placement, onPlacement }
     { icon: 'east', label: 'sign_move_right', move: step(NUDGE, 0) },
   ];
   for (const m of moves) {
-    m.button = iconButton({ icon: m.icon, label: t(m.label), onClick: () => set(m.move(), true) });
+    m.button = iconButton({
+      icon: m.icon,
+      label: t(m.label),
+      onClick: () => { if (m.button.getAttribute('aria-disabled') !== 'true') set(m.move(), true); },
+    });
   }
   const nudges = h('div', { class: 'sign-nudges' }, ...moves.map((m) => m.button));
 
@@ -258,7 +265,12 @@ export function signaturePlacer({ src, signature, page, placement, onPlacement }
     const usable = hi > lo;
     sizeSlider.setDisabled(!usable);
     sizeSlider.setValue(usable ? Math.round(((p.width - lo) / (hi - lo)) * SIZE_STEPS) : 0);
-    for (const m of moves) m.button.disabled = same(m.move(), p);
+    // Off against an edge, but kept in the focus order, so a keyboard user who pressed it up to the
+    // edge isn't thrown out of it.
+    for (const m of moves) {
+      if (same(m.move(), p)) m.button.setAttribute('aria-disabled', 'true');
+      else m.button.removeAttribute('aria-disabled');
+    }
   }
 
   /** The preview's size: as wide as there is room, and short enough for the whole page to show. */

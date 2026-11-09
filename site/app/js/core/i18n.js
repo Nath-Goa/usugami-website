@@ -12,6 +12,8 @@ let language = 'en';
 /** Strings of the current language, then English, merged per key. */
 let strings = Object.create(null);
 let english = Object.create(null);
+/** The keys the language showing has strings of its own for (not English standing in). */
+let ownKeys = new Set();
 /** The namespaces loaded so far, in order, so a new language can reload them. */
 const namespaces = [];
 const loading = new Map();
@@ -55,7 +57,11 @@ function loadNamespace(ns) {
     let local = {};
     if (language !== 'en') {
       // Not translated yet: English stands in.
-      local = await importStrings(language, ns).catch(() => ({}));
+      local = { ...await importStrings(language, ns).catch(() => ({})) };
+      for (const k of Object.keys(local)) ownKeys.add(k);
+      // Without the language's common strings (offline before they were kept, say) the screens
+      // are in English: screen readers are told so.
+      if (ns === 'common' && !Object.keys(local).length && typeof document !== 'undefined') document.documentElement.lang = 'en';
     }
     for (const k of Object.keys(en)) if (!(k in local)) local[k] = en[k];
     Object.assign(strings, local);
@@ -119,10 +125,15 @@ export function hasString(key) {
 
 /**
  * The web app's wording of the app's string `key` where the app speaks of "this phone": the
- * string `web_<key>` when there is one, else `key` (e.g. tool_word_detail).
+ * string `web_<key>` when there is one, else `key` (e.g. tool_word_detail). In a language that
+ * has the app's translation of `key` but not yet one of `web_<key>`, the app's translation
+ * shows rather than the English web wording.
  */
 export function tWeb(key, ...args) {
-  return hasString('web_' + key) ? t('web_' + key, ...args) : t(key, ...args);
+  const web = 'web_' + key;
+  if (!hasString(web)) return t(key, ...args);
+  if (language !== 'en' && !ownKeys.has(web) && ownKeys.has(key)) return t(key, ...args);
+  return t(web, ...args);
 }
 
 let pluralRules = null;
@@ -173,6 +184,8 @@ export async function setLanguage(code) {
   language = code;
   strings = Object.create(null);
   english = Object.create(null);
+  ownKeys = new Set();
+  numberFormats.clear();
   loading.clear();
   applyToDocument();
   await loadStrings(...namespaces);
@@ -185,8 +198,19 @@ export function onLanguageChange(fn) {
   return () => languageListeners.delete(fn);
 }
 
+// Made once per language and options: a long list of sizes (a result of 300 files) would make
+// hundreds of them otherwise.
+const numberFormats = new Map();
+
 function numberFormat(options) {
-  return new Intl.NumberFormat(language, options);
+  const key = language + '|' + (options ? JSON.stringify(options) : '');
+  let format = numberFormats.get(key);
+  if (!format) {
+    format = new Intl.NumberFormat(language, options);
+    if (numberFormats.size > 64) numberFormats.clear();
+    numberFormats.set(key, format);
+  }
+  return format;
 }
 
 /**

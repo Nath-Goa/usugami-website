@@ -8,7 +8,8 @@ screen calls. It ports the app's `data/office/Ooxml.kt`, `DrawingML.kt`, `Office
 
 | Module | What |
 |---|---|
-| [`index.js`](#indexjs-the-dispatcher) | `convertOffice`, `verifyOfficeFile`, `officeKindOf`, options, names, error keys |
+| [`index.js`](#indexjs-the-dispatcher) | `convertOffice`, `verifyOfficeFile`, `officeKindOf`, and all of `kinds.js` |
+| [`kinds.js`](#kindsjs) | `OFFICE_KINDS`, options, names, `officeErrorKey`: nothing heavy, for the screens to load at once |
 | [`problems.js`](#problemsjs) | `OfficeFileProblem` and its kinds (thrown by converters) |
 | [`zip.js`](#zipjs) | `ZipArchive`: reading zips with limits against zip bombs |
 | [`xml-guard.js`](#xml-guardjs) | `XmlTokenGuard`, `decodeXml`, `guardXml`: checks before the browser's XML parser |
@@ -19,7 +20,8 @@ screen calls. It ports the app's `data/office/Ooxml.kt`, `DrawingML.kt`, `Office
 | [`path-measure.js`](#path-measurejs) | `PathMeasure` (Android's) for PdfPaths |
 | [`blocks.js`](#blocksjs) | the Block interface, `StackBlock`, `Spaced`, `EmptyBlock` |
 | [`tables.js`](#tablesjs) | `Border`, `CellBox`, `RowBlock`, `TableBlock` |
-| [`office-pdf.js`](#office-pdfjs) | `OfficePdf` (pages), `OfficeImages`, `ImagePicture`, `StandInPicture`, `BitmapPicture`, `inlinePicture` |
+| [`office-pdf.js`](#office-pdfjs) | `OfficePdf` (pages), `OfficeImages`, `ImagePicture`, `StandInPicture`, `BitmapPicture`, `inlinePicture`, `deflateBelow` |
+| [`pause.js`](#pausejs) | `pause()`: a breath in long work that a tab in the background doesn't slow down |
 
 Conventions, everywhere below:
 - **Lengths are points**, origin at the top-left, y down (the app's tenths of a point are gone).
@@ -66,7 +68,7 @@ export async function convertPptx(input, options, hooks = {}) {
     // ... draw
     pdf.finishPage();
     hooks.onProgress?.(i + 1, slides.length);   // Word: (page, null), its total being unknown
-    await new Promise((r) => setTimeout(r, 0)); // let the page breathe between pages
+    await pause();                              // ./pause.js: let the page breathe between pages
   }
   return pdf.finish(hooks);   // { bytes, pageCount }; tells onProgress(n, n, { compressing: true })
 }
@@ -88,6 +90,12 @@ export async function convertPptx(input, options, hooks = {}) {
 ```js
 import { convertOffice, verifyOfficeFile, officeKindOf, defaultOfficeOptions, officeErrorKey } from '../../engine/office/index.js';
 ```
+
+<a id="kindsjs"></a>The kinds, options, names and `officeErrorKey` below live in `kinds.js` (re-exported by
+`index.js`), which imports only `core/errors.js`, `core/names.js` and `problems.js`: a screen imports
+them from there to show itself at once, and `index.js` (ZIP and XML reading, fflate, and through
+the converters pdf-lib and the fonts) with `import()` while the user picks a file, as
+`js/tools/office/index.js` does.
 
 ### `convertOffice(kind, input, options = {}, hooks = {}) → Promise<OutputFile>`
 
@@ -249,7 +257,7 @@ zip.close();
 - `ZipArchive.open(bytes, { limits: { entries, entryBytes, totalBytes } })` lowers the limits.
   Defaults: `MAX_ENTRIES` 100,000; `MAX_ENTRY_BYTES` 256 MB inflated per entry; `MAX_TOTAL_BYTES`
   2 GB inflated in all from one archive. Inflating stops as soon as a limit is passed (a 270 MB
-  zip bomb fails in about a second), and `bytes()` pauses now and then and checks `signal`.
+  zip bomb fails in about a second), and `bytes()` pauses now and then (`pause.js`) and checks `signal`.
 - `ZipError.reason`: `'not-zip'`, `'damaged'` (broken directory or data, ".." names), `'encrypted'`
   (a zip password), `'unsupported'` (a compression method other than stored or deflated),
   `'too-large'`. `isZip(bytes)`: starts with a local file header.
@@ -372,7 +380,7 @@ SymbolFonts.text('Calibri', 'Done ', 'Wingdings')   // 'Done ✓'
 TableColumns.widths(grid, count, available, preferred = null)   // scaled down to fit
 new TabStops(set, cleared = [], aligned = new Map())  .over(base)  .positions(start, widths, defaultTab, scale = 1)
 TabAlign.RIGHT, TabAlign.CENTER
-PageBreaking.linesThatFit(lineBottoms, space, avoidSingleLines, force, keepFirst = true, keepLast = true)
+PageBreaking.linesThatFit(lineBottoms, space, avoidSingleLines, force, keepFirst = true, keepLast = true)   // ported here, the same as text/layout.js's
 new OfficeRect(x, y, width, height)       // .centerX .centerY .left .top .right .bottom .copy({...}) .equals(r)
 new GroupFrame(frame, [offX, offY], [extX, extY], flipH = false, flipV = false)  .place(rect)  .mirror(rotation, flipH, flipV) → [rotation, flipH, flipV]
 SlideTableStyles.parts(flags, row, rows, start, end, columns), SlideTableStyles.border(part, side, outer)
@@ -537,12 +545,34 @@ decodedSize(w, h, targetW, targetH) → [w, h]  // the size a picture is decoded
 - Pictures must be loaded (awaited) before drawing: drawing is synchronous.
 - Each picture is decoded once per size shown, no larger than **150 pixels per inch** where it is
   shown (`DPI`), at most `MAX_SIDE` (2400) on a side and `MAX_PIXELS` (12 MP), and stored once in
-  the PDF: as JPEG at quality 0.75 (`JPEG_QUALITY`) when opaque, losslessly with its transparency
-  otherwise. That is what the app's PDF has after its Compress PDF (Recommended) pass.
+  the PDF: as a JPEG at quality 0.75 (`JPEG_QUALITY`) when that is smaller than the picture stored
+  losslessly and the lossless stream is 2 KB (`MIN_JPEG_BYTES`) or more; losslessly (Flate)
+  otherwise, and always with its transparency when it has any. That is what the app's PDF has
+  after its Compress PDF (Recommended) pass, which replaces a picture only by a smaller JPEG and
+  leaves streams under 2 KB and masked pictures alone: small flat pictures shown large (logos,
+  diagrams) keep sharp edges, photos become JPEGs.
+- `deflateBelow(bytes, limit = Infinity) → Uint8Array | null`: `bytes` as a zlib (FlateDecode)
+  stream, or null as soon as it reaches `limit` bytes (how a picture's lossless size is told from
+  its JPEG's without deflating all of a photo).
 - Decoded as Android decodes pictures for the app: without turning them by their EXIF orientation.
   JPEG, PNG, GIF, BMP, WebP (and AVIF/HEIF where the browser decodes them) are drawn; EMF, WMF,
   TIFF, pictures over `MAX_DECODE_PIXELS` and damaged files show as the grey stand-in, as in the app.
 - Pictures draw on a PdfCanvas only (not on a screen canvas).
+
+---
+
+## `pause.js`
+
+```js
+import { pause } from './pause.js';
+await pause();   // the work goes on in a new task (a MessageChannel message)
+```
+
+Every long loop of the converters breathes with it (zip inflating, the XML guard's slices, Word's
+layout, slides, sheet rows, EPUB chapters): the page paints and answers input, its timers run.
+Not `setTimeout(0)`, which a tab in the background runs once a second at most (a big file would
+take minutes while the user looks elsewhere), nor `scheduler.yield()`, which goes ahead of the
+page's timers (the progress dialog's) and holds them up.
 
 ---
 
@@ -553,6 +583,7 @@ decodedSize(w, h, targetW, targetH) → [w, h]  // the size a picture is decoded
 nesting, encodings); zips (limits, a 270 MB zip bomb, damaged and encrypted entries, ".." names);
 packages and the app's messages for old, locked and wrong files; the dispatcher with stand-in
 converters; colours; DrawingML shapes, fills, outlines, arrowheads, transforms, pictures and crops
-drawn into a PDF and checked by pixels; tables with merged cells, borders and page splits; a
-13-million-character part read without freezing the page. Chromium in full, Firefox and WebKit for
-most of it.
+drawn into a PDF and checked by pixels, and stored as JPEG or losslessly as Compress PDF leaves
+them; tables with merged cells, borders and page splits; a 13-million-character part read without
+freezing the page, and as fast with timers slowed as in a tab in the background. Chromium in full,
+Firefox and WebKit for most of it (Firefox's console errors for broken XML let through).

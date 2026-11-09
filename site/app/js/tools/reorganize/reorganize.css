@@ -1,6 +1,11 @@
 /* Reorganize PDF: the page count and Undo, the bar for the chosen page, the grid and Add pages
    (PageGrids.kt). The tool's frame and the result screen are merge.css's. */
 
+/* The column the main button ends at on wide screens (the kit reads it): the whole .page's content. */
+.reorganize-view {
+  --ui-column: calc(var(--content-max) - 2 * var(--space-6));
+}
+
 .reorganize-options {
   display: flex;
   flex-direction: column;

@@ -892,6 +892,59 @@ await withPage(async (page, url) => {
     assert(text.includes('Jane Doe') && !text.includes('Lisbon'), `only the field under the area is part of the page: ${text}`);
     console.log('ok bakeUnder');
   }
+
+  // --- Damaged page trees: mended as the app mends them, every page viewers show flattened -------
+  {
+    const N = (k) => PDFName.of(k);
+    const pagesWithSquares = async (n) => {
+      const doc = await PDFDocument.create();
+      const font = await doc.embedFont(StandardFonts.Helvetica);
+      for (let i = 0; i < n; i++) {
+        const page = doc.addPage([300, 300]);
+        page.drawText(`TREE PAGE ${i + 1}`, { x: 20, y: 250, size: 16, font });
+        page.node.set(N('Annots'), doc.context.obj([doc.context.register(doc.context.obj({
+          Type: 'Annot', Subtype: 'Square', Rect: [50, 50, 150, 150], C: [1, 0, 0], IC: [1, 0, 0], F: 4,
+        }))]));
+      }
+      return doc;
+    };
+    const rootOf = (doc) => [doc.catalog.get(N('Pages')), doc.context.lookup(doc.catalog.get(N('Pages')))];
+    // A tree that leads back into itself (pdf-lib's own getPages() overflows its stack).
+    const looping = await pagesWithSquares(3);
+    {
+      const [rootRef, root] = rootOf(looping);
+      root.get(N('Kids')).push(looping.context.register(looping.context.obj({ Type: 'Pages', Kids: [rootRef], Count: 3, Parent: rootRef })));
+    }
+    // A lone page in the tree's place (pdf-lib's getPages() throws a TypeError).
+    const lone = await pagesWithSquares(1);
+    {
+      const [, root] = rootOf(lone);
+      const pageRef = root.get(N('Kids')).get(0);
+      lone.context.lookup(pageRef).delete(N('Parent'));
+      lone.catalog.set(N('Pages'), pageRef);
+    }
+    // A page without its /Type (pdf-lib skips it, and would leave its comment as it is).
+    const untyped = await pagesWithSquares(3);
+    {
+      const [, root] = rootOf(untyped);
+      untyped.context.lookup(root.get(N('Kids')).get(1)).delete(N('Type'));
+    }
+    for (const [what, doc, n] of [['looping', looping, 3], ['lone page', lone, 1], ['untyped page', untyped, 3]]) {
+      const out = await flatten(page, url, { name: 'tree.pdf', bytes: await doc.save({ addDefaultPage: false }) });
+      assert(!out.error, `${what}: flattened: ${out.message}`);
+      assert(out.pageCount === n, `${what}: ${out.pageCount} pages`);
+      const s = await structure(out.bytes);
+      assert(s.pages.length === n && s.pages.every((p) => p.length === 0), `${what}: every page's comment baked: ${JSON.stringify(s.pages)}`);
+      const shown = await page.evaluate(async (bytes) => {
+        const f = window.__flat;
+        const pages = await f.render(Uint8Array.from(atob(bytes), (c) => c.charCodeAt(0)));
+        return pages.map((p) => ({ text: p.text.trim(), red: f.count(p.canvas, p.viewport, [60, 60, 140, 140], (r, g, b) => r > 200 && g < 80 && b < 80) }));
+      }, b64(out.bytes));
+      assert(JSON.stringify(shown.map((p) => p.text)) === JSON.stringify([...Array(n).keys()].map((i) => `TREE PAGE ${i + 1}`)), `${what}: every page, in order: ${JSON.stringify(shown.map((p) => p.text))}`);
+      assert(shown.every((p) => p.red > 1000), `${what}: the squares are part of the pages: ${shown.map((p) => p.red)}`);
+    }
+    console.log('ok damaged page trees');
+  }
 });
 
 // The main case in Firefox and WebKit too.

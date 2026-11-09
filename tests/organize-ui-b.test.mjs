@@ -8,6 +8,7 @@
 //
 //   node tests/organize-ui-b.test.mjs          Chromium at both sizes, then Firefox and WebKit
 //   node tests/organize-ui-b.test.mjs --quick  Chromium only
+//   node tests/organize-ui-b.test.mjs --review Chromium only, the reviewers' findings only
 import { readFile, mkdir, access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { withPage, root } from './harness.mjs';
@@ -16,7 +17,8 @@ import {
   PageList, pageKey, pagesOf, samePages, BLANK, MAX_UNDO, enginePages, turnedKey,
 } from '../site/app/js/tools/merge/page-list.js';
 
-const quick = process.argv.includes('--quick');
+const review = process.argv.includes('--review');
+const quick = review || process.argv.includes('--quick');
 const shots = join(root, '.tmp', 'organize-ui-b', 'screens');
 await mkdir(shots, { recursive: true });
 const PHONE = { width: 360, height: 780 };
@@ -24,8 +26,9 @@ const DESKTOP = { width: 1366, height: 900 };
 const A4 = [595.28, 841.89];
 const LETTER = [612, 792];
 const LANDSCAPE = [842, 595];
-const appAssets = 'C:/Users/Nathan/OneDrive/Desktop/pdfer/app/src/androidTest/assets';
-const stringsXml = 'C:/Users/Nathan/OneDrive/Desktop/pdfer/app/src/main/res/values/strings.xml';
+// The Android app beside this repository (not there on CI: what needs it is skipped or made here).
+const appAssets = join(root, '..', 'pdfer', 'app', 'src', 'androidTest', 'assets');
+const stringsXml = join(root, '..', 'pdfer', 'app', 'src', 'main', 'res', 'values', 'strings.xml');
 
 let checks = 0;
 let group = '';
@@ -77,18 +80,20 @@ const fx = {
 
 async function stringTests() {
   group = 'strings';
-  const xml = await readFile(stringsXml, 'utf8');
+  // Not on CI, which has only this repository: the namespace checks still run.
+  const xml = await readFile(stringsXml, 'utf8').catch(() => null);
+  if (xml == null) console.log('strings.xml not found: app-string comparison skipped');
   const unescape = (s) => s.replace(/\\'/g, "'").replace(/\\"/g, '"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
     .replace(/%(\d)\$[sd]/g, '{$1}').replace(/%[sd]/g, '{1}');
   const app = new Map();
-  for (const m of xml.matchAll(/<string name="([^"]+)"[^>]*>([\s\S]*?)<\/string>/g)) app.set(m[1], unescape(m[2]));
+  for (const m of xml?.matchAll(/<string name="([^"]+)"[^>]*>([\s\S]*?)<\/string>/g) ?? []) app.set(m[1], unescape(m[2]));
   const common = (await import('../site/app/locales/en/common.js')).default;
   const kit = (await import('../site/app/locales/en/kit.js')).default;
   for (const ns of ['merge', 'reorganize']) {
     const strings = (await import(`../site/app/locales/en/${ns}.js`)).default;
     for (const [key, text] of Object.entries(strings)) {
       check(!(key in common) && !(key in kit), `${ns}.js doesn't redefine ${key} of common.js or kit.js`);
-      if (key.startsWith('web_')) continue;
+      if (key.startsWith('web_') || xml == null) continue;
       check(app.has(key), `${ns}.js: ${key} is a strings.xml key`);
       equal(text, app.get(key), `${ns}.js: ${key} is the app's English`);
     }
@@ -923,19 +928,309 @@ async function otherBrowser(page, url, name) {
 }
 
 // ---------------------------------------------------------------------------------------------
+// What reviewers found, checked
+
+/** A 2500-page PDF, made once when first needed (a few seconds). */
+let bigPdf = null;
+const big = async () => (bigPdf ??= pdf('big.pdf', await makePdf(Array.from({ length: 2500 }, (_, i) => ({ text: `BIG ${i + 1}` })))));
+
+/** What has the focus: 'BODY', or its label (aria-label, else its text). */
+const focused = (page) => page.evaluate(() => {
+  const a = document.activeElement;
+  return !a || a === document.body ? 'BODY' : (a.getAttribute('aria-label') ?? a.textContent.trim());
+});
+const focusIs = (page, selector) => page.evaluate((s) => document.activeElement === document.querySelector(s), selector);
+
+/** Opens Home, then the tool from there, so the browser's Back goes back to Home in the app. */
+async function openFromHome(page, url, id) {
+  await page.goto('about:blank');
+  await page.goto(url + 'app/#/');
+  await page.waitForSelector('.screen[data-route="home"]:not([aria-busy])', { timeout: 20000 });
+  await page.evaluate((id) => { location.hash = '#/tool/' + id; }, id);
+  await page.waitForSelector(`.screen[data-tool="${id}"]:not([aria-busy])`, { timeout: 20000 });
+  await page.evaluate(async (base) => {
+    const router = await import(base + 'app/js/core/router.js');
+    window.__handle = () => router.currentHandle();
+  }, url);
+}
+
+/** Picks a PDF from the keyboard (Enter on the focused card), gives the locked PDF, cancels its password. */
+async function cancelPassword(page, selector) {
+  await page.focus(selector);
+  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.keyboard.press('Enter')]);
+  await chooser.setFiles([fx.locked]);
+  await page.waitForSelector('dialog[open] .ui-password');
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('dialog[open]', { state: 'detached' });
+  await page.waitForTimeout(100);
+}
+
+/** On a wide screen the main button ends where the column (`selector`'s content) ends. */
+async function buttonUnderColumn(page, selector) {
+  for (const width of [1366, 1920]) {
+    await page.setViewportSize({ width, height: 900 });
+    const edges = await page.evaluate((s) => {
+      const col = document.querySelector(s);
+      return {
+        column: col.getBoundingClientRect().right - parseFloat(getComputedStyle(col).paddingRight),
+        button: document.querySelector('.merge-view > .ui-bottombar .ui-btn').getBoundingClientRect().right,
+      };
+    }, selector);
+    check(Math.abs(edges.column - edges.button) <= 1, `${width} px: the main button ends where the column does`, edges);
+  }
+  await page.setViewportSize(DESKTOP);
+}
+
+/** From the keyboard: the PDF made, Back to editing, made again, Start over (asked first). */
+async function resultFocus(page, action, empty) {
+  const run = '.merge-view > .ui-bottombar .ui-btn';
+  await page.focus(run);
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('.ui-result', { timeout: 30000 });
+  await page.focus('.ui-result .ui-topbar-nav');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('.merge-view:not([hidden])');
+  equal(await focused(page), action, 'Back to editing: the focus on the main button');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('.ui-result', { timeout: 30000 });
+  await page.focus('.ui-result-startover');
+  await page.keyboard.press('Enter');
+  await page.click('dialog[open] .ui-btn:has-text("Start over")');
+  await page.waitForSelector(`${empty}:not([hidden])`);
+  await page.waitForSelector('dialog[open]', { state: 'detached' });
+  check(await focusIs(page, empty), 'Start over: the focus on the empty card', await focused(page));
+}
+
+async function mergeReview(page, url, { wide }) {
+  group = `merge review ${wide ? 'desktop' : 'phone'}`;
+  await openTool(page, url, 'merge');
+  equal(await page.$$eval('main', (m) => m.map((x) => x.classList.contains('merge-page') && x.hasAttribute('data-main'))), [true], 'one main landmark: the content');
+  // A password question cancelled: the focus stays on the card it was picked from.
+  await cancelPassword(page, '.merge-page .ui-empty');
+  check(await focusIs(page, '.merge-page .ui-empty'), 'password cancelled: the focus on Add PDFs', await focused(page));
+
+  // Dropped on the empty card: added, and nothing stays marked as a drop target.
+  await dropFiles(page, '.merge-page .ui-empty', [fx.alpha, fx.beta]);
+  await waitFor(page, () => document.querySelectorAll('.merge-files .merge-file').length === 2);
+  equal(await page.$$eval('#app .is-dragover', (n) => n.length), 0, 'a drop on the empty card leaves nothing marked');
+  await page.evaluate(() => {
+    const dt = new DataTransfer();
+    dt.items.add(new File(['%PDF-1.4'], 'x.pdf', { type: 'application/pdf' }));
+    const target = document.querySelector('.merge-page');
+    for (const type of ['dragenter', 'dragleave']) target.dispatchEvent(new DragEvent(type, { dataTransfer: dt, bubbles: true, cancelable: true }));
+  });
+  equal(await page.$$eval('#app .is-dragover', (n) => n.length), 0, 'a drag in and out again leaves nothing marked');
+  await dropFiles(page, '.merge-page .merge-content', [fx.gamma]);
+  await waitFor(page, () => document.querySelectorAll('.merge-files .merge-file').length === 3);
+  equal(await page.$$eval('#app .is-dragover', (n) => n.length), 0, 'a drop on the list adds it, nothing left marked');
+  if (wide) await buttonUnderColumn(page, '.merge-page');
+
+  // Page mode: the move buttons never cover the picture, which a press drags.
+  await page.click('.merge-mode');
+  await waitFor(page, () => document.querySelectorAll('.merge-pages .merge-page-row').length === 6);
+  await waitFor(page, () => document.querySelectorAll('.merge-pages .merge-thumb canvas').length >= 4);
+  const row = (n) => `.merge-pages .merge-page-row:nth-of-type(${n})`;
+  const before = await pageLines(page);
+  const moves = (n) => page.$eval(row(n), (r) => {
+    const m = r.querySelector('.merge-moves').getBoundingClientRect();
+    const p = r.querySelector('.merge-thumb').getBoundingClientRect();
+    const overlaps = m.width > 1 && m.left < p.right && m.right > p.left && m.top < p.bottom && m.bottom > p.top;
+    return { width: m.width, opacity: getComputedStyle(r.querySelector('.merge-moves')).opacity, overlaps };
+  });
+  if (wide) {
+    const [c] = await centers(page, '.merge-pages .merge-thumb', [2]);
+    await page.mouse.move(c.x, c.y);
+    await page.waitForTimeout(250);
+    const m = await moves(3);
+    check(m.opacity === '1' && !m.overlaps, 'pointed at, the row shows its move buttons beside the picture', m);
+    equal(await page.evaluate(({ x, y }) => (document.elementFromPoint(x, y).closest('button') ? 'button' : 'picture'), c), 'picture', 'the picture is what is under the pointer');
+    await page.mouse.click(c.x, c.y);
+    equal(await pageLines(page), before, 'a click on the picture moves nothing');
+    // Dragged from its picture: page 1 to the fourth place.
+    const [from, to] = await centers(page, '.merge-pages .merge-thumb', [0, 3]);
+    await mouseDrag(page, from, to);
+    equal((await pageLines(page)).map((l) => l.slice(3)), [before[1], before[2], before[3], before[0], before[4], before[5]].map((l) => l.slice(3)), 'a drag from the picture moves the page');
+  } else {
+    // A tap on the row's text, then on its picture: nothing moves, the buttons don't show.
+    await page.tap(`${row(2)} .merge-page-text`);
+    await page.tap(`${row(2)} .merge-thumb`);
+    await page.waitForTimeout(200);
+    equal(await pageLines(page), before, 'taps on a row move nothing');
+    check((await moves(2)).width <= 1, 'tapped, the row shows no move buttons', await moves(2));
+    // A long press on the picture drags it.
+    const [from, to] = await centers(page, '.merge-pages .merge-thumb', [1, 3]);
+    await touchDrag(page, from, to);
+    equal((await pageLines(page))[3].slice(3), before[1].slice(3), 'a long press on the picture drags the page');
+    check((await moves(4)).width <= 1, 'after the drag, the row moved shows no move buttons', await moves(4));
+  }
+  await page.click('button:has-text("Reset pages")');
+
+  // The result left from the keyboard: the focus on Merge PDFs, then (Start over) on Add PDFs.
+  await resultFocus(page, 'Merge PDFs', '.merge-page .ui-empty');
+
+  // The last PDF removed: the focus on the Add PDFs card, which takes the list's place.
+  await pick(page, '.merge-page .ui-empty', [fx.gamma]);
+  await waitFor(page, () => document.querySelectorAll('.merge-files .merge-file').length === 1);
+  await page.focus('[aria-label="Remove gamma.pdf"]');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('.merge-page .ui-empty:not([hidden])');
+  check(await focusIs(page, '.merge-page .ui-empty'), 'the last PDF removed: the focus on Add PDFs', await focused(page));
+}
+
+async function reorganizeReview(page, url, { wide }) {
+  group = `reorganize review ${wide ? 'desktop' : 'phone'}`;
+  await openTool(page, url, 'reorganize');
+  equal(await page.$$eval('main', (m) => m.map((x) => x.classList.contains('reorganize-page') && x.hasAttribute('data-main'))), [true], 'one main landmark: the content');
+  await cancelPassword(page, '.reorganize-page .ui-empty');
+  check(await focusIs(page, '.reorganize-page .ui-empty'), 'password cancelled: the focus on Choose PDF', await focused(page));
+  await pick(page, '.reorganize-page .ui-empty', [fx.alpha]);
+  await waitFor(page, () => document.querySelectorAll('.reorganize-grid .ui-page-tile').length === 3);
+  // Undo of the last change turns Undo off: the focus goes to the page count beside it.
+  await page.click(tile(1));
+  await page.click('[aria-label="Rotate page 1 right"]');
+  await page.focus('[aria-label="Undo"]');
+  await page.keyboard.press('Enter');
+  check(await focusIs(page, '.reorganize-count'), 'the last Undo: the focus on the page count', await focused(page));
+  // Reset pages turns itself off: the focus goes to Add pages.
+  await page.click('[aria-label="Rotate page 1 right"]');
+  await page.focus('button:has-text("Reset pages")');
+  await page.keyboard.press('Enter');
+  equal(await focused(page), 'Add pages', 'Reset pages: the focus on Add pages');
+  if (wide) await buttonUnderColumn(page, '.reorganize-page');
+  // Reset lets go of the chosen page: chosen again, turned, saved.
+  await page.click(tile(1));
+  await page.click('[aria-label="Rotate page 1 right"]');
+  await resultFocus(page, 'Save PDF', '.reorganize-page .ui-empty');
+}
+
+/** Merge and Reorganize show their screen without waiting for the engine (pdf-lib), held here. */
+async function beforeTheEngine(page, url) {
+  group = 'the screens before the engine';
+  const held = [];
+  await page.route('**/vendor/pdf-lib/**', (route) => { held.push(route); });
+  try {
+    for (const id of ['merge', 'reorganize']) {
+      await page.goto('about:blank');
+      await page.goto(url + 'app/#/');
+      await page.waitForSelector('.screen[data-route="home"]:not([aria-busy])', { timeout: 20000 });
+      // Home may have asked for it ahead: what matters is that the tool doesn't wait for it.
+      await page.evaluate((id) => { location.hash = '#/tool/' + id; }, id);
+      await page.waitForSelector(`.screen[data-tool="${id}"]:not([aria-busy]) .ui-empty`, { timeout: 10000 });
+      equal(await page.inputValue('.screen .ui-field-input').catch(() => null) ?? 'none', id === 'merge' ? 'Merged_PDF' : '', `${id}: shown with its name, the engine not loaded`);
+    }
+  } finally {
+    await page.unroute('**/vendor/pdf-lib/**');
+    for (const r of held) await r.continue().catch(() => {});
+  }
+}
+
+/** Leaving Merge or Reorganize while the PDF is made stops it: no progress left over Home. */
+async function leaveWhileWorking(page, url) {
+  group = 'leaving while a PDF is made';
+  const bigOne = await big();
+  const cdp = await page.context().newCDPSession(page);
+  try {
+    for (const id of ['merge', 'reorganize']) {
+      await openFromHome(page, url, id);
+      if (id === 'merge') {
+        await pick(page, '.merge-page .ui-empty', [bigOne, { ...bigOne, name: 'big2.pdf' }]);
+        await waitFor(page, () => document.querySelectorAll('.merge-files .merge-file').length === 2, null, 60000);
+      } else {
+        await pick(page, '.reorganize-page .ui-empty', [bigOne]);
+        await waitFor(page, () => document.querySelectorAll('.reorganize-grid .ui-page-tile').length === 2500, null, 60000);
+        await page.click(tile(1));
+        await page.click('[aria-label="Remove page 1"]');
+      }
+      // Slowed, so the PDF can't be made before Back is pressed.
+      await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
+      await page.click('.merge-view > .ui-bottombar .ui-btn');
+      await page.waitForSelector('dialog[open] .ui-progress-dialog', { timeout: 20000 });
+      await page.goBack();
+      await page.waitForSelector('dialog[open] >> text=Discard your changes?', { timeout: 20000 });
+      check(await page.$('.ui-result') === null, `${id}: still working when Back is pressed`);
+      await page.click('dialog[open] button:has-text("Discard")');
+      await page.waitForSelector('.screen[data-route="home"]', { timeout: 20000 });
+      await page.waitForSelector('dialog[open]', { state: 'detached', timeout: 1500 });
+      checks++;
+      await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+    }
+  } finally {
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 }).catch(() => {});
+    await cdp.detach();
+  }
+}
+
+/**
+ * A long merge in page mode: a turn or a removal redraws only the rows it changes. A row redrawn
+ * writes its line again (row.update); pictures drawn and let go as the list scrolls don't count.
+ */
+async function longPageList(page, url) {
+  group = 'a long page list';
+  await openTool(page, url, 'merge');
+  await pick(page, '.merge-page .ui-empty', [await big(), fx.gamma]);
+  await waitFor(page, () => document.querySelectorAll('.merge-files .merge-file').length === 2, null, 60000);
+  await page.click('.merge-mode');
+  await waitFor(page, () => document.querySelectorAll('.merge-pages .merge-page-row').length === 2501, null, 60000);
+  const rowsChanged = (selector) => page.evaluate(async (selector) => {
+    const list = document.querySelector('.merge-pages');
+    const rows = new Set();
+    const watch = new MutationObserver((records) => {
+      for (const r of records) if (r.target.classList?.contains('merge-page-text')) rows.add(r.target.closest('.merge-page-row'));
+    });
+    watch.observe(list, { subtree: true, childList: true, characterData: true, attributes: true });
+    // Once nothing is being redrawn (300 ms without a line written).
+    const quiet = Date.now() + 15000;
+    do {
+      rows.clear();
+      await new Promise((r) => setTimeout(r, 300));
+      watch.takeRecords();
+    } while (rows.size && Date.now() < quiet);
+    rows.clear();
+    const t0 = performance.now();
+    document.querySelector(selector).click();
+    const ms = performance.now() - t0;
+    await new Promise((r) => setTimeout(r, 50));
+    for (const r of watch.takeRecords()) if (r.target.classList?.contains('merge-page-text')) rows.add(r.target.closest('.merge-page-row'));
+    watch.disconnect();
+    return { rows: rows.size, which: [...rows].map((r) => r.querySelector('.merge-page-text').textContent), ms: Math.round(ms) };
+  }, selector);
+  const turned = await rowsChanged('[aria-label="Rotate page 5 right"]');
+  equal(turned.which, ['5. big.pdf, page 5'], `a turn redraws only its row of 2501 (${turned.ms} ms)`);
+  const removed = await rowsChanged('[aria-label="Remove page 2499"]');
+  // The two rows after it, renumbered, and the row whose Tab stop the focus took (the first).
+  check(removed.rows <= 3, `a removal near the end redraws only the rows after it (${removed.ms} ms)`, removed.which);
+  equal((await pageLines(page)).length, 2500, 'removed');
+}
+
+// ---------------------------------------------------------------------------------------------
 
 await stringTests();
 pageListTests();
 
 for (const wide of [false, true]) {
   await withPage(async (page, url) => {
-    await mergeFiles(page, url, { wide });
-    await mergePages(page, url, { wide });
-    if (!wide) await mergePasswordsAndProblems(page, url);
-    await reorganize(page, url, { wide });
-    if (wide) await reorganizeMore(page, url);
-    await darkShots(page, url, { wide });
-    if (!wide) await narrow(page, url);
+    // Merging and reorganizing embed no font with pdf-lib: fontkit (157 kB gzipped) isn't loaded.
+    const fontkit = [];
+    page.on('request', (r) => { if (r.url().includes('/vendor/fontkit/')) fontkit.push(r.url()); });
+    if (!review) {
+      await mergeFiles(page, url, { wide });
+      await mergePages(page, url, { wide });
+      if (!wide) await mergePasswordsAndProblems(page, url);
+      await reorganize(page, url, { wide });
+      if (wide) await reorganizeMore(page, url);
+      await darkShots(page, url, { wide });
+      if (!wide) await narrow(page, url);
+      await page.setViewportSize(wide ? DESKTOP : PHONE);
+    }
+    await mergeReview(page, url, { wide });
+    await reorganizeReview(page, url, { wide });
+    if (wide) {
+      await beforeTheEngine(page, url);
+      await longPageList(page, url);
+      await leaveWhileWorking(page, url);
+    }
+    group = 'fontkit';
+    equal(fontkit, [], 'no fontkit loaded by Merge or Reorganize');
   }, { viewport: wide ? DESKTOP : PHONE });
   console.log(`ok: Chromium at ${wide ? 'desktop' : 'phone'} size`);
 }

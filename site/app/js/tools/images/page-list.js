@@ -360,7 +360,9 @@ export function pageList(o) {
       scrollFrame = 0;
       const d = dragging;
       if (!d) return;
-      const top = (document.querySelector('.images-editor .ui-topbar')?.getBoundingClientRect().bottom ?? 0) + EDGE;
+      // Below the chips, which stay over the pages under the top bar.
+      const over = document.querySelector('.images-editor .images-options') ?? document.querySelector('.images-editor .ui-topbar');
+      const top = (over?.getBoundingClientRect().bottom ?? 0) + EDGE;
       const bottom = (document.querySelector('.images-editor .ui-bottombar')?.getBoundingClientRect().top ?? window.innerHeight) - EDGE;
       let speed = 0;
       if (d.y < top) speed = -Math.ceil(Math.min(1, (top - d.y) / EDGE) * 14);

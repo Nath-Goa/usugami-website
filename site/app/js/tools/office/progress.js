@@ -49,6 +49,13 @@ export function officeProgressDialog({ kind, many = false, onCancel, delay } = {
   const step = h('p', { class: 'office-progress-step' });
   step.hidden = true;
   (dialog.el.querySelector('.ui-dialog-body') ?? dialog.el).append(step);
+  // The kit's lines ("PDF 2 of 5" and the name) take no room while they show nothing (one file),
+  // so the step sits 12 px under the bar, as the app leaves the batch's Column out then.
+  const textBlock = dialog.el.querySelector('.ui-progress-text');
+  const fitText = () => {
+    if (textBlock) textBlock.hidden = ![...textBlock.children].some((c) => !c.hidden);
+  };
+  fitText();
   let batch = null;
   let progress = null;
   const render = () => {
@@ -56,6 +63,7 @@ export function officeProgressDialog({ kind, many = false, onCancel, delay } = {
     dialog.update(view.fraction);
     step.textContent = view.text ?? '';
     step.hidden = !view.text;
+    fitText();
   };
   render();
   return {

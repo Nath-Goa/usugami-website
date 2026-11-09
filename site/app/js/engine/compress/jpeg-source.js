@@ -5,6 +5,7 @@
 import { parseJpeg } from '../images/jpeg.js';
 import { newCanvas, context2d } from '../images/canvas.js';
 import { release } from '../images/page-source.js';
+import { WorkBudget } from './budget.js';
 
 /** SOF0, SOF1, SOF2: Huffman-coded baseline, extended and progressive, which every browser decodes. */
 const DECODABLE_FRAMES = new Set([0xc0, 0xc1, 0xc2]);
@@ -121,35 +122,28 @@ export function jpegForDecoding(bytes) {
 }
 
 /**
- * Decodes a JPEG (`width` x `height`, `components` 1 or 3) and shrinks it to `outWidth` x
- * `outHeight`, as 8-bit components (`components` a pixel, rows from the top). Resolves to null when
- * the browser can't decode it at the size it says it is.
- * @returns {Promise<Uint8Array|null>}
+ * Decodes a JPEG (`width` x `height`) and shrinks it to `outWidth` x `outHeight`, as opaque RGBA
+ * ImageData (rows from the top; a grey JPEG has R = G = B). Resolves to null when the browser can't
+ * decode it at the size it says it is. Where the browser can, it decodes and shrinks the picture away
+ * from the page (createImageBitmap's resize, the same pixels as a smooth canvas draw in Chrome), so
+ * the page itself only reads the pixels back.
+ * @returns {Promise<ImageData|null>}
  */
-export async function decodeJpeg(bytes, { width, height, components }, outWidth, outHeight) {
+export async function decodeJpegImage(bytes, { width, height }, outWidth, outHeight) {
   const blob = new Blob([jpegForDecoding(bytes)], { type: 'image/jpeg' });
   let bitmap = null;
-  // Decoded at a power-of-two reduction when much smaller is wanted, as Android's inSampleSize does.
-  let sample = 1;
-  while (width / (sample * 2) >= outWidth && height / (sample * 2) >= outHeight) sample *= 2;
-  if (sample > 1) {
-    try {
-      bitmap = await createImageBitmap(blob, {
-        resizeWidth: Math.max(outWidth, Math.ceil(width / sample)),
-        resizeHeight: Math.max(outHeight, Math.ceil(height / sample)),
-        resizeQuality: 'high',
-        premultiplyAlpha: 'none',
-      });
-    } catch {
+  if (outWidth !== width || outHeight !== height) {
+    bitmap = await bitmapOf(blob, { resizeWidth: outWidth, resizeHeight: outHeight, resizeQuality: 'high' });
+    // A browser that ignores the resize (Safari) gives the picture at its own size, shrunk below.
+    const asked = bitmap && bitmap.width === outWidth && bitmap.height === outHeight;
+    if (bitmap && !asked && (bitmap.width !== width || bitmap.height !== height)) {
+      release(bitmap);
       bitmap = null;
     }
   }
   if (!bitmap) {
-    try {
-      bitmap = await createImageBitmap(blob, { premultiplyAlpha: 'none' });
-    } catch {
-      return null;
-    }
+    bitmap = await bitmapOf(blob, {});
+    if (!bitmap) return null;
     if (bitmap.width !== width || bitmap.height !== height) {
       release(bitmap);
       return null;
@@ -158,22 +152,52 @@ export async function decodeJpeg(bytes, { width, height, components }, outWidth,
   let canvas = null;
   try {
     canvas = shrink(bitmap, outWidth, outHeight);
-    const data = context2d(canvas, { willRead: true }).getImageData(0, 0, outWidth, outHeight).data;
-    const pixels = new Uint8Array(outWidth * outHeight * components);
+    return context2d(canvas, { willRead: true }).getImageData(0, 0, outWidth, outHeight);
+  } finally {
+    release(canvas);
+    release(bitmap);
+  }
+}
+
+/**
+ * The decoded picture, or null when the browser can't decode it (or has no memory for it). A JPEG
+ * has no transparency, so premultiplying changes nothing; asking Chrome not to makes it convert the
+ * picture on the page's own thread.
+ */
+async function bitmapOf(blob, options) {
+  try {
+    return await createImageBitmap(blob, options);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Decodes a JPEG (`width` x `height`, `components` 1 or 3) and shrinks it to `outWidth` x
+ * `outHeight`, as 8-bit components (`components` a pixel, rows from the top). Resolves to null when
+ * the browser can't decode it at the size it says it is. The components are copied out a slice at a
+ * time, letting the page paint meanwhile (`signal` stops it with CancelledError).
+ * @returns {Promise<Uint8Array|null>}
+ */
+export async function decodeJpeg(bytes, { width, height, components }, outWidth, outHeight, { signal } = {}) {
+  const image = await decodeJpegImage(bytes, { width, height }, outWidth, outHeight);
+  if (!image) return null;
+  const data = image.data;
+  const pixels = new Uint8Array(outWidth * outHeight * components);
+  const budget = new WorkBudget(signal);
+  await budget.check();
+  await budget.each(outWidth * outHeight, (from, to) => {
     if (components === 1) {
-      for (let p = 0, i = 0; p < pixels.length; p++, i += 4) pixels[p] = data[i];
+      for (let p = from, i = from * 4; p < to; p++, i += 4) pixels[p] = data[i];
     } else {
-      for (let p = 0, i = 0; p < pixels.length; p += 3, i += 4) {
+      for (let p = from * 3, i = from * 4, end = to * 3; p < end; p += 3, i += 4) {
         pixels[p] = data[i];
         pixels[p + 1] = data[i + 1];
         pixels[p + 2] = data[i + 2];
       }
     }
-    return pixels;
-  } finally {
-    release(canvas);
-    release(bitmap);
-  }
+  });
+  return pixels;
 }
 
 /**

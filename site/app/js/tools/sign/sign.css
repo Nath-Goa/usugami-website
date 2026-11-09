@@ -201,6 +201,8 @@
   margin: 2px 2px 0;
   overflow: hidden;
   border-radius: calc(var(--radius-m) - 2px) calc(var(--radius-m) - 2px) 0 0;
+  /* White in both themes around a page of another shape, as the app's PdfThumbnail. */
+  background: var(--paper, #ffffff);
 }
 
 .sign-strip-thumb canvas {
@@ -657,4 +659,40 @@
     flex: none;
     min-width: 160px;
   }
+}
+
+/* While a PDF opens, Choose PDF is off but keeps the focus (a password dialog gives it back there). */
+.sign-empty .ui-empty[aria-disabled="true"] {
+  cursor: default;
+  color: color-mix(in srgb, var(--on-surface) 38%, transparent);
+}
+
+.sign-empty .ui-empty[aria-disabled="true"] .ui-empty-icon,
+.sign-empty .ui-empty[aria-disabled="true"] .ui-empty-detail,
+.sign-empty .ui-empty[aria-disabled="true"] .ui-empty-drop {
+  color: inherit;
+}
+
+.sign-empty .ui-empty[aria-disabled="true"]::before {
+  display: none;
+}
+
+/* Against an edge of the page: looks off, as disabled, but keeps the keyboard focus it has. */
+.sign-nudges .ui-icon-btn[aria-disabled="true"] {
+  cursor: default;
+  color: color-mix(in srgb, var(--on-surface) 38%, transparent);
+}
+
+.sign-nudges .ui-icon-btn[aria-disabled="true"]::before {
+  display: none;
+}
+
+/* The main button ends where the column above it ends (the kit reads --ui-column on wide screens):
+   640 px until the preview shows, then the page's whole content. */
+.sign-bottombar {
+  --ui-column: 640px;
+}
+
+.sign-bottombar--wide {
+  --ui-column: calc(var(--content-max) - 2 * var(--space-6));
 }

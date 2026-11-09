@@ -2,6 +2,9 @@
    column, its sections opening and closing as pdfSectionEnter and pdfSectionExit. */
 
 .onepdf {
+  /* The column the main button ends at on wide screens (the kit reads it): .page--narrow's content,
+     760 px less its padding. */
+  --ui-column: calc(760px - 2 * var(--space-6));
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -77,11 +80,27 @@
   overflow: hidden;
 }
 
-/* On wide screens the main button ends where the column above it ends (.page--narrow: 760 px). */
-@media (min-width: 840px) {
-  .onepdf > .ui-bottombar {
-    padding-inline: max(var(--space-6), calc((100% - 760px) / 2 + var(--space-6)));
-  }
+/* Off for a moment (a PDF being opened or made) while keeping the focus: as off as disabled. */
+.onepdf .ui-btn[aria-disabled="true"],
+.onepdf .ui-empty[aria-disabled="true"] {
+  cursor: default;
+  color: color-mix(in srgb, var(--on-surface) 38%, transparent);
+}
+
+.onepdf .ui-btn--filled[aria-disabled="true"] {
+  background: color-mix(in srgb, var(--on-surface) 12%, transparent);
+  box-shadow: none;
+}
+
+.onepdf .ui-empty[aria-disabled="true"] .ui-empty-icon,
+.onepdf .ui-empty[aria-disabled="true"] .ui-empty-detail,
+.onepdf .ui-empty[aria-disabled="true"] .ui-empty-drop {
+  color: inherit;
+}
+
+.onepdf .ui-btn[aria-disabled="true"]::before,
+.onepdf .ui-empty[aria-disabled="true"]::before {
+  display: none;
 }
 
 /* Files dragged over the screen while a PDF is open take its place: the column is marked, not

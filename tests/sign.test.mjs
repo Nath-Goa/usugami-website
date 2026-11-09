@@ -772,7 +772,7 @@ async function phoneTests(browserName = 'chromium') {
     near(dragged.centerX - before2.centerX, -140 / preview.width, 0.01, 'Dragged left with the finger');
     near(dragged.centerY - before2.centerY, -60 / preview.height, 0.01, 'Dragged up with the finger');
     // Bigger, then nudged.
-    await page.locator('.sign-size input').fill('700');
+    await page.locator('.sign-size input').fill('70');
     const bigger = await previewPlace(page);
     check(bigger.width > dragged.width * 1.5, `The size slider makes it bigger: ${dragged.width} → ${bigger.width}`);
     await page.click('[aria-label="Move signature down"]');
@@ -792,16 +792,18 @@ async function phoneTests(browserName = 'chromium') {
     await page.click('.sign-strip-page[aria-label="Page 3"]');
     await page.waitForFunction(() => document.querySelector('.sign-mark').getAttribute('aria-label').endsWith('page 3'));
     // Its size is kept from page 2, as a share of the page: smaller first, to fit where it goes.
-    await page.locator('.sign-size input').fill('150');
+    await page.locator('.sign-size input').fill('15');
     await centrePreview(page);
     const pv = await page.locator('.sign-preview').boundingBox();
     await page.touchscreen.tap(pv.x + pv.width * 0.3, pv.y + pv.height * 0.2);
     const tapped = await previewPlace(page);
     near(tapped.centerX, 0.3, 0.01, 'A tap puts it there across');
     near(tapped.centerY, 0.2, 0.01, 'and down');
-    for (let i = 0; i < 20 && !await page.locator('[aria-label="Move signature up"]').isDisabled(); i++) await page.click('[aria-label="Move signature up"]');
+    const upOff = async () => await page.locator('[aria-label="Move signature up"]').getAttribute('aria-disabled') === 'true';
+    for (let i = 0; i < 20 && !await upOff(); i++) await page.click('[aria-label="Move signature up"]');
     const top = await previewPlace(page);
-    check(await page.locator('[aria-label="Move signature up"]').isDisabled(), 'Up is off against the top edge');
+    check(await upOff(), 'Up is off against the top edge');
+    check(!await page.locator('[aria-label="Move signature up"]').evaluate((b) => b.disabled), 'but stays in the focus order (aria-disabled, not disabled)');
     near(top.top, 0, 0.01, 'Against the top edge');
     await page.click('.sign-run');
     out = await resultBytes(page);
@@ -1027,9 +1029,12 @@ async function backTests(browser = 'chromium') {
       await navigate('/tool/sign', { files: [{ name: 'Locked.pdf', type: 'application/pdf', size: bytes.length, lastModified: 0, bytes }] });
     }, b64(await fixture('flatten-locked.pdf')));
     await page.waitForSelector('dialog[open] .ui-password input');
+    // As Android's Back, the first Back closes the dialog (the router does that now) and the next
+    // leaves; either way no dialog stays behind.
     await page.goBack();
-    await page.waitForSelector('.screen[data-route="home"]:not([aria-busy])');
     await page.waitForSelector('dialog[open]', { state: 'detached', timeout: 5000 });
+    if (await page.evaluate(() => location.hash) === '#/tool/sign') await page.goBack();
+    await page.waitForSelector('.screen[data-route="home"]:not([aria-busy])');
     await page.waitForTimeout(300);
     check(await page.locator('.screen[data-tool="sign"]').count() === 0 && !(await page.$('dialog[open]')), `${browser}: the password dialog went with the screen`);
   }, { browser, viewport: { width: 412, height: 860 } });
@@ -1065,6 +1070,144 @@ async function otherBrowsers() {
 
 // -----------------------------------------------------------------------------------------------
 
+/** A PDF of `pages` A4 pages, each with a line of text: slow enough to sign that leaving mid-way can be tried. */
+async function manyPages(pages) {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  for (let i = 0; i < pages; i++) doc.addPage(A4).drawText(`Page ${i + 1}`, { x: 60, y: 760, size: 14, font });
+  return doc.save({ useObjectStreams: false });
+}
+
+// Review fixes: the screen is let go once left, one PDF's problem without its name, the size slider
+// in whole percents, the move buttons keep the focus at the edge, the focus after a cancelled
+// password, and leaving while signing closes the progress dialog at once.
+async function reviewTests() {
+  const bytes = await mixedPages();
+  await withPage(async (page, url, context) => {
+    await openTool(page, url);
+    check((await page.locator('main[data-main]').count()) === 1, 'one main landmark');
+    // One PDF that can't be opened: the reason alone, as the app says it.
+    await page.evaluate(() => {
+      const dt = new DataTransfer();
+      dt.items.add(new File([new TextEncoder().encode('not a PDF')], 'text.pdf', { type: 'application/pdf' }));
+      const target = document.querySelector('.sign-page .ui-empty');
+      for (const type of ['dragenter', 'dragover', 'drop']) target.dispatchEvent(new DragEvent(type, { dataTransfer: dt, bubbles: true, cancelable: true }));
+    });
+    await page.waitForFunction(() => [...document.querySelectorAll('.ui-snackbar-text')].some((e) => e.textContent === "Couldn't open that PDF. It may be damaged or unsupported."), null, { timeout: 10000 });
+    check(true, 'one bad PDF is told about without its name');
+
+    // A password asked for and cancelled: the focus is back on Choose PDF.
+    const locked = await (async () => {
+      const doc = await PDFDocument.load(bytes);
+      await doc.encrypt({ userPassword: 'pw', ownerPassword: 'owner' });
+      return doc.save({ useObjectStreams: false });
+    })();
+    await page.locator('.sign-page .ui-empty').focus();
+    const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.keyboard.press('Enter')]);
+    await chooser.setFiles({ name: 'locked.pdf', mimeType: 'application/pdf', buffer: Buffer.from(locked) });
+    await page.locator('dialog[open] input[type="password"]').waitFor();
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('dialog[open]', { state: 'detached' });
+    await page.waitForTimeout(200);
+    check(await page.evaluate(() => document.activeElement?.classList.contains('ui-empty')), 'the password cancelled, the focus is on Choose PDF');
+
+    // The size slider: one percent per arrow key, as it is read out.
+    await pickPdf(page, 'in.pdf', bytes);
+    await page.click('.sign-card--draw');
+    const box = await padBox(page);
+    await mouseStroke(page, box, wavePoints());
+    await page.click('.sign-pad-done');
+    await page.waitForSelector('.sign-size input');
+    const size = page.locator('.sign-size input');
+    await size.focus();
+    await page.keyboard.press('Home');
+    const w0 = (await previewPlace(page)).width;
+    await page.keyboard.press('ArrowRight');
+    check(await size.getAttribute('aria-valuetext') === '1%', `one arrow key is 1% (${await size.getAttribute('aria-valuetext')})`);
+    check((await previewPlace(page)).width > w0, 'and the signature grows');
+
+    // Pressed up to the top edge with the keyboard, Up keeps the focus.
+    const up = page.locator('[aria-label="Move signature up"]');
+    await up.focus();
+    for (let i = 0; i < 80 && (await up.getAttribute('aria-disabled')) !== 'true'; i++) await page.keyboard.press('Enter');
+    check((await up.getAttribute('aria-disabled')) === 'true', 'Up is off against the top edge');
+    check(await page.evaluate(() => document.activeElement?.getAttribute('aria-label') === 'Move signature up'), 'and keeps the focus');
+
+  }, { viewport: { width: 412, height: 915 }, mobile: false });
+
+  // Left for Home, the screen and its PDF can be let go. Waited for with locators only: an
+  // ElementHandle (page.waitForSelector) would hold the screen itself.
+  await withPage(async (page, url, context) => {
+    await page.goto(url + 'app/#/tool/sign');
+    await page.locator('.screen[data-tool="sign"]:not([aria-busy]) .ui-empty').waitFor();
+    await page.evaluate((data) => {
+      const b = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
+      const dt = new DataTransfer();
+      dt.items.add(new File([b], 'in.pdf', { type: 'application/pdf' }));
+      const target = document.querySelector('.sign-page .ui-empty');
+      for (const type of ['dragenter', 'dragover', 'drop']) target.dispatchEvent(new DragEvent(type, { dataTransfer: dt, bubbles: true, cancelable: true }));
+    }, b64(bytes));
+    await page.locator('.sign-signature').waitFor();
+    await page.evaluate(() => { window.__signScreen = new WeakRef(document.querySelector('.screen[data-tool="sign"]')); });
+    await page.evaluate(async () => (await import('./js/core/router.js')).navigate('/'));
+    await page.locator('.screen[data-route="home"]:not([aria-busy])').waitFor();
+    const cdp = await context.newCDPSession(page);
+    let gone = false;
+    for (let i = 0; i < 5 && !gone; i++) {
+      await cdp.send('HeapProfiler.collectGarbage');
+      await page.waitForTimeout(200);
+      gone = await page.evaluate(() => window.__signScreen.deref() === undefined);
+    }
+    check(gone, 'the Sign screen is let go once left');
+  }, { viewport: { width: 412, height: 915 }, mobile: false });
+
+  // On a large monitor the main button ends where the column above it ends, before and after the
+  // preview shows.
+  await withPage(async (page, url) => {
+    await openTool(page, url);
+    await pickPdf(page, 'in.pdf', bytes);
+    const edges = () => page.evaluate(() => ({
+      button: document.querySelector('.sign-run').getBoundingClientRect().right,
+      column: document.querySelector('.sign-layout').getBoundingClientRect().right,
+    }));
+    let r = await edges();
+    near(r.button, r.column, 1, 'Sign PDF lines up with the column');
+    await page.click('.sign-card--draw');
+    const box = await padBox(page);
+    await mouseStroke(page, box, wavePoints());
+    await page.click('.sign-pad-done');
+    await page.waitForSelector('.sign-size input');
+    r = await edges();
+    near(r.button, r.column, 1, 'and with the wider column once the preview shows');
+  }, { viewport: { width: 1920, height: 1000 } });
+
+  // Leaving while a large PDF is signed: the progress dialog goes with the screen.
+  const big = await manyPages(2500);
+  await withPage(async (page, url) => {
+    await openTool(page, url);
+    await pickPdf(page, 'big.pdf', big);
+    await page.click('.sign-card--draw');
+    const box = await padBox(page);
+    await mouseStroke(page, box, wavePoints());
+    await page.click('.sign-pad-done');
+    await page.waitForSelector('.sign-size input');
+    await page.click('.sign-run');
+    await page.waitForSelector('dialog.ui-dialog--progress[open]');
+    await page.goBack().catch(() => {});
+    // The router asks first while the PDF is being made: Discard.
+    await page.locator('dialog[open]').getByRole('button', { name: 'Discard' }).click({ timeout: 5000 }).catch(() => {});
+    const t0 = Date.now();
+    await page.waitForFunction(() => !document.querySelector('dialog[open]'), null, { timeout: 5000 });
+    check(Date.now() - t0 < 1000, `the progress dialog went with the screen (${Date.now() - t0} ms)`);
+  }, { viewport: { width: 412, height: 915 }, mobile: false });
+}
+
+if (process.argv.includes('--review')) {
+  await reviewTests();
+  console.log(`review: all ${checks} checks passed`);
+  process.exit(0);
+}
+
 if (process.argv.includes('--other')) {
   await otherBrowsers();
   console.log(`sign (other browsers): all ${checks} checks passed`);
@@ -1091,6 +1234,8 @@ await backTests();
 console.log(`Back: ${checks} checks`);
 await lookTests();
 console.log(`looks: ${checks} checks`);
+await reviewTests();
+console.log(`review: ${checks} checks`);
 if (!quick) {
   await otherBrowsers();
   for (const browser of ['firefox', 'webkit']) await backTests(browser);

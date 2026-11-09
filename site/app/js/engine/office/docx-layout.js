@@ -13,6 +13,7 @@ import { inlinePicture } from './office-pdf.js';
 import { Borders } from './docx-styles.js';
 import { DocPara, DocTable, PAGE_BREAK, SECTION_END, Reader, hasPageNumber, picturesOf, MAX_COLUMNS } from './docx-read.js';
 import { checkCancelled } from '../../core/errors.js';
+import { pause } from './pause.js';
 
 const WHITE = 0xffffffff;
 const EPS = 1e-6;
@@ -112,25 +113,8 @@ async function measured(text, style) {
   return (await measureText(text.replace(/ /g, ' '), style)).width;
 }
 
-/**
- * Lets the browser paint and answer input, and the page's own timers run: the work goes on in a
- * new task at the back of the queue. Not with a timer: in a tab in the background timers run once a
- * second at most, which would slow a long document to a crawl when the user looks elsewhere. (Nor
- * with scheduler.yield(), which goes ahead of the page's timers and holds them up.)
- */
-function yieldNow() {
-  if (typeof MessageChannel === 'function') {
-    return new Promise((resolve) => {
-      const channel = new MessageChannel();
-      channel.port1.onmessage = () => {
-        channel.port1.close();
-        resolve();
-      };
-      channel.port2.postMessage(null);
-    });
-  }
-  return new Promise((resolve) => setTimeout(resolve, 0));
-}
+/** Lets the browser paint and answer input in a new task, not a timer (see pause.js). */
+const yieldNow = pause;
 
 /** Loads the pictures `item` draws (each once, however often it is asked). */
 async function loadPictures(item) {

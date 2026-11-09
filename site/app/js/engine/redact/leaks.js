@@ -8,6 +8,12 @@ import {
 import { between, clamp, makeBox, addressForms } from './boxes.js';
 import { normalize, containsIgnoringCase } from './page-text.js';
 
+/**
+ * The pages' dictionaries in order: `nodes` when given (the page tree as mended, which pdf-lib's
+ * own page list may not follow), else pdf-lib's pages.
+ */
+const pageNodesOf = (doc, nodes) => nodes ?? doc.getPages().map((p) => p.node);
+
 /** Annotation flags (/F): hidden, and not shown on the screen. */
 const HIDDEN = 1 << 1;
 const NO_VIEW = 1 << 5;
@@ -98,17 +104,17 @@ function walkFields(ctx, kids, onPages, offPage, seen = new Set(), depth = 0) {
 /**
  * The form fields whose own text has `has` where no page shows it, for their widgets on pages to
  * be boxed (fields), and the pages to box for those none of whose widgets is on a page
- * (elsewhere: the one a widget names, or the first).
+ * (elsewhere: the one a widget names, or the first). `nodes` are the pages' dictionaries.
  */
-function fieldsHolding(doc, has, check) {
+function fieldsHolding(doc, nodes, has, check) {
   const ctx = doc.context;
   const holders = new Set();
   const onPages = new Set();
   const pageOf = new Map();
-  doc.getPages().forEach((page, index) => {
+  nodes.forEach((node, index) => {
     check?.();
-    pageOf.set(page.node, index);
-    for (const widget of items(ctx, get(page.node, 'Annots'))) {
+    pageOf.set(node, index);
+    for (const widget of items(ctx, get(node, 'Annots'))) {
       if (!(widget instanceof PDFDict) || getName(widget, 'Subtype') !== 'Widget') continue;
       onPages.add(widget);
       const hidden = (flagsOf(widget) & (HIDDEN | NO_VIEW)) !== 0;
@@ -208,18 +214,20 @@ function richText(annotation) {
  * (a highlight, a drawing), and links, buttons and fields that hold the text where no page shows
  * it, get the smallest box, at their corner. Only when nothing else has `query` is a page boxed
  * for a field none of whose widgets is on a page. Returns [[box], ...] (fractions of the shown page).
+ * `nodes`: the pages' dictionaries in order (default: pdf-lib's pages).
  */
-export function findInComments(doc, frames, query, skip, check) {
+export function findInComments(doc, frames, query, skip, check, nodes) {
   const ctx = doc.context;
   const wanted = normalize(query);
   if (!wanted.length) return [];
   const has = (text) => containsIgnoringCase(normalize(text), wanted);
-  const holding = fieldsHolding(doc, has, check);
+  const pages = pageNodesOf(doc, nodes);
+  const holding = fieldsHolding(doc, pages, has, check);
   const found = [];
-  doc.getPages().forEach((page, index) => {
+  pages.forEach((node, index) => {
     if (skip.has(index)) return;
     check?.();
-    const annotations = get(page.node, 'Annots');
+    const annotations = get(node, 'Annots');
     if (!(annotations instanceof PDFArray)) return;
     const frame = frames[index];
     for (const annotation of items(ctx, annotations)) {
@@ -341,7 +349,7 @@ function collectFields(ctx, kids, into, seen) {
  * Takes out of the form the fields under `kids` whose own text has any of `searched`, and that no
  * page that stays has a widget of. Their values go with them; fields left with none under them too.
  */
-function dropFieldsHolding(doc, kids, searched) {
+function dropFieldsHolding(doc, nodes, kids, searched) {
   const ctx = doc.context;
   const wanted = searched.map(normalize).filter((w) => w.length);
   if (!wanted.length) return;
@@ -350,7 +358,7 @@ function dropFieldsHolding(doc, kids, searched) {
     return wanted.some((w) => containsIgnoringCase(t, w));
   };
   const onPages = new Set();
-  for (const page of doc.getPages()) for (const a of items(ctx, get(page.node, 'Annots'))) if (a instanceof PDFDict) onPages.add(a);
+  for (const node of nodes) for (const a of items(ctx, get(node, 'Annots'))) if (a instanceof PDFDict) onPages.add(a);
   const doomed = new Set();
   walkFields(ctx, kids, onPages, (field) => {
     if (fieldTexts(ctx, field).some(has)) doomed.add(field);
@@ -365,9 +373,11 @@ function dropFieldsHolding(doc, kids, searched) {
  * digital signatures say of their signers, named destinations to redacted pages, attached files,
  * JavaScript, applications' private data, article threads, pages' metadata and actions, and the
  * pop-ups of annotations that were removed. The pages without boxes otherwise stay as they were.
+ * `nodes`: the pages' dictionaries in order (default: pdf-lib's pages).
  */
-export function removeLeaks(doc, redactedPages, removedAnnotations, searched) {
+export function removeLeaks(doc, redactedPages, removedAnnotations, searched, nodes) {
   const ctx = doc.context;
+  const pages = pageNodesOf(doc, nodes);
   ctx.trailerInfo.Info = undefined;
   const catalog = doc.catalog;
   for (const key of REMOVED_CATALOG_KEYS) catalog.delete(N(key));
@@ -402,7 +412,7 @@ export function removeLeaks(doc, redactedPages, removedAnnotations, searched) {
     const fields = getArray(form, 'Fields');
     if (fields) {
       pruneFields(ctx, fields, removedAnnotations, new Set());
-      dropFieldsHolding(doc, fields, searched);
+      dropFieldsHolding(doc, pages, fields, searched);
     }
     if (!fields || fields.size() === 0) {
       catalog.delete(N('AcroForm'));
@@ -421,7 +431,7 @@ export function removeLeaks(doc, redactedPages, removedAnnotations, searched) {
 
   // Attached files go from the pages that stay too; then nothing there may still lead to an
   // annotation that went: a pop-up goes with it, and a reply or a field forgets it.
-  const kept = doc.getPages().map((p) => p.node).filter((node) => !redactedPages.has(node));
+  const kept = pages.filter((node) => !redactedPages.has(node));
   const gone = new Set(removedAnnotations);
   for (const node of kept) {
     for (const key of REMOVED_PAGE_KEYS) node.delete(N(key));

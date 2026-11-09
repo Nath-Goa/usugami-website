@@ -7,7 +7,7 @@
 //   node tools/vendor.mjs --out .tmp/vendor-check
 // The output folder is deleted and made again, so --out refuses a folder that has files but no
 // VERSIONS.json (anything that isn't an earlier output).
-import { cp, mkdir, rm, readdir, writeFile, readFile } from 'node:fs/promises';
+import { cp, mkdir, rm, readdir, writeFile, readFile, rename } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, dirname, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -202,10 +202,12 @@ for (const d of ['cmaps', 'standard_fonts', 'wasm', 'iccs']) {
 }
 await copy(join(nm, 'pdfjs-dist/LICENSE'), join(out, 'pdfjs/LICENSE'));
 // pdfjs-dist ships no license for its QuickJS build; pdf.js added these texts later (commit
-// a3beacc), under these names. Use the copies in licenses/ until a release includes them.
+// a3beacc), under these names. Use the copies in licenses/ until a release includes them. (Like
+// every bare LICENSE file, they are served with .txt added: see addTxtToLicenses below.)
 if (existsSync(join(out, 'pdfjs/wasm/quickjs-eval.wasm'))) {
   for (const [name, text] of [['LICENSE_QUICKJS', 'QuickJS.txt'], ['LICENSE_PDFJS_QUICKJS', 'pdf.js.quickjs.txt']]) {
-    if (!existsSync(join(out, 'pdfjs/wasm', name))) await copy(join(licensesDir, text), join(out, 'pdfjs/wasm', name));
+    const there = [name, name + '.txt'].some((n) => existsSync(join(out, 'pdfjs/wasm', n)));
+    if (!there) await copy(join(licensesDir, text), join(out, 'pdfjs/wasm', name));
   }
 }
 
@@ -250,6 +252,25 @@ await copy(join(nm, 'libheif-js/LICENSE'), join(out, 'libheif/LICENSE'));
 // Material icons: tools/build-icons.mjs copies the ones the app draws into js/core/icons.js. Their
 // license (Apache-2.0) is served from here, so the site carries a copy of it.
 await copy(join(nm, '@material-design-icons/svg/LICENSE'), join(out, 'material-icons/LICENSE'));
+
+// License texts without an extension (LICENSE, LICENSE_FOXIT...) get .txt: GitHub Pages serves
+// extensionless files as application/octet-stream, so browsers would download them instead of
+// showing them (the app's Open-source licenses screen links to them).
+const BARE_LICENSE = /^(?:licen[cs]e|copying)(?:[_-][\w-]*)?$/i;
+async function addTxtToLicenses(dir) {
+  let renamed = 0;
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) renamed += await addTxtToLicenses(path);
+    else if (BARE_LICENSE.test(entry.name)) {
+      if (existsSync(path + '.txt')) throw new Error(`${path}.txt exists already`);
+      await rename(path, path + '.txt');
+      renamed++;
+    }
+  }
+  return renamed;
+}
+if (!await addTxtToLicenses(out)) throw new Error('no license files found to serve as .txt');
 
 // Source maps aren't shipped, so drop the comments pointing at them (browsers would ask for them).
 async function stripSourceMaps(dir) {

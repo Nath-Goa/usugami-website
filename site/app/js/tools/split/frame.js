@@ -10,7 +10,7 @@ import {
   snackbar, alertDialog, dropZone,
 } from '../../core/ui.js';
 import { pickFiles } from '../../core/files.js';
-import { openPdf } from '../../core/pdfdoc.js';
+import { openPdf, preloadPdfJs } from '../../core/pdfdoc.js';
 import { showResult } from '../../core/output.js';
 import { UserError, CancelledError } from '../../core/errors.js';
 
@@ -85,6 +85,16 @@ export function updateSelection(grid, shown, next) {
   grid.refresh(changed);
 }
 
+/**
+ * Turns a control off for a moment (a PDF opening or being made) without `disabled`, which would
+ * throw the keyboard focus out of it, to the page itself, where a dialog closing would leave it too.
+ * Its click handler checks for itself; frame.css shows it as off.
+ */
+function setOff(el, off) {
+  if (off) el.setAttribute('aria-disabled', 'true');
+  else el.removeAttribute('aria-disabled');
+}
+
 /** The message a problem shows: a UserError's own, else `fallback`'s. */
 export function problemText(error, fallback) {
   return error instanceof UserError ? t(error.key, ...(error.args ?? [])) : t(fallback);
@@ -107,6 +117,8 @@ export function problemText(error, fallback) {
  * @returns {Promise<{ unmount(): void, hasUnsavedWork(): boolean, onStep(step: string|null): void }>}
  */
 export async function mountPdfTool(ctx, spec) {
+  // pdf.js (about 460 kB) loads while a PDF is being chosen; pdfdoc.js imports it only on demand.
+  preloadPdfJs();
   await Promise.all([
     loadStrings(spec.namespace),
     ensureCss(new URL('./frame.css', import.meta.url)),
@@ -138,9 +150,11 @@ export async function mountPdfTool(ctx, spec) {
   ctx.root.append(screen);
 
   const refresh = () => {
-    main.disabled = !src || !tool || importing || processing || !tool.ready();
-    if (empty) empty.disabled = importing;
-    if (card) for (const b of card.querySelectorAll('.onepdf-another')) b.disabled = importing || processing;
+    // Busy, the buttons are only marked off: the one pressed keeps the focus.
+    main.disabled = !src || !tool || !tool.ready();
+    setOff(main, importing || processing);
+    if (empty) setOff(empty, importing);
+    if (card) for (const b of card.querySelectorAll('.onepdf-another')) setOff(b, importing || processing);
   };
 
   const hasChanges = () => !!(src && tool?.unsaved?.());
@@ -156,6 +170,10 @@ export async function mountPdfTool(ctx, spec) {
     const active = document.activeElement;
     if (!active || active === document.body || !active.isConnected || !screen.contains(active)) target?.focus?.({ preventScroll: true });
   };
+
+  // Back on the tool from its result: the main button, else the top bar's back arrow (the title
+  // can't take the focus).
+  const focusTool = () => (main.disabled ? bar.querySelector('.ui-topbar-nav') : main)?.focus?.({ preventScroll: true });
 
   const setImporting = (b) => {
     importing = b;
@@ -262,7 +280,12 @@ export async function mountPdfTool(ctx, spec) {
     } finally {
       if (mine === opening && !gone) setImporting(false);
     }
-    if (!opened) return;
+    if (!opened) {
+      // Nothing opened (a password asked for and cancelled, say): the focus stays where it was, or
+      // goes back to the card picked from.
+      if (mine === opening && !gone) focusIfLost(empty ?? card);
+      return;
+    }
     // Left, or another PDF picked meanwhile: this one belongs to nothing now.
     if (mine !== opening || gone) {
       opened.close();
@@ -333,6 +356,7 @@ export async function mountPdfTool(ctx, spec) {
     const source = src;
     const name = fileName;
     let files = null;
+    let failure = null;
     try {
       const input = { name: source.name, bytes: source.bytes, ...(source.password ? { password: source.password } : {}) };
       const made = await tool.run(input, plan, name, {
@@ -341,12 +365,15 @@ export async function mountPdfTool(ctx, spec) {
       });
       files = [].concat(made);
     } catch (e) {
-      if (!(e instanceof CancelledError) && !controller.signal.aborted && !gone) snackbar(problemText(e, 'pdf_process_failed'));
+      failure = e;
     } finally {
       await dialog.close();
       processing = false;
       if (run === controller) run = null;
     }
+    // Said once the dialog has gone: while it is open, the rest of the page (the snackbar and the
+    // announcer with it) is out of a screen reader's reach.
+    if (failure && !(failure instanceof CancelledError) && !controller.signal.aborted && !gone) snackbar(problemText(failure, 'pdf_process_failed'));
     if (gone || !files?.length || src !== source) {
       refresh();
       return;
@@ -380,12 +407,18 @@ export async function mountPdfTool(ctx, spec) {
     result.destroy();
     result = null;
     ctx.root.replaceChildren(screen);
+    // A paste on the result screen let go of the screen's paste zone while it was out of the page:
+    // it is made again, so a PDF pasted on the tool still takes the open one's place.
+    if (src) {
+      screenDrop(false);
+      screenDrop(true);
+    }
     refresh();
     return true;
   };
 
   const backToEditing = () => {
-    if (leaveResult()) (main.disabled ? bar.querySelector('h1') : main)?.focus?.({ preventScroll: true });
+    if (leaveResult()) focusTool();
     if (stepPushed) {
       stepPushed = false;
       ctx.popStep?.();
@@ -417,7 +450,7 @@ export async function mountPdfTool(ctx, spec) {
     onStep(step) {
       if (step == null) {
         stepPushed = false;
-        if (leaveResult()) (main.disabled ? bar.querySelector('h1') : main)?.focus?.({ preventScroll: true });
+        if (leaveResult()) focusTool();
       } else if (!result) {
         // Forward to a result that has gone: back to where it was.
         ctx.popStep?.();

@@ -89,13 +89,11 @@ export function mount(ctx) {
       if (m === 'fixed') field.input.setAttribute('inputmode', 'numeric');
       else field.input.removeAttribute('inputmode');
     };
-    const makeCombine = (m) => switchRow({
-      label: combineLabel(m),
+    const combineRow = switchRow({
+      label: combineLabel(mode),
       checked: combine,
       onChange: (b) => { combine = b; },
     });
-
-    let combineRow = makeCombine(mode);
     const fieldBox = collapsible(field, { cls: 'split-section' });
     const combineBox = collapsible(combineRow, { cls: 'split-section' });
 
@@ -134,10 +132,7 @@ export function mount(ctx) {
       field.setValue('');
       // A section closing keeps its words, rather than taking another mode's as it goes.
       if (showsField(m)) fieldFor(m);
-      if (showsCombine(m)) {
-        combineRow = makeCombine(m);
-        combineBox.inner.replaceChildren(combineRow);
-      }
+      if (showsCombine(m)) combineRow.setLabel(combineLabel(m));
       fieldBox.setShown(showsField(m));
       combineBox.setShown(showsCombine(m));
       pickerBox.setShown(m === 'selected');

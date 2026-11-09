@@ -813,13 +813,16 @@ await test('result screen: cancelling, a failure, a result shown again (chromium
     }
     const long = await doc.save();
     await page.evaluate(([l, a]) => { fx.long = bytesOf(l); fx.a = bytesOf(a); settings.setSetting('mark.on', true); }, [b64(long), b64(base)]);
-    // A slow phone: the dialog shows once the work has taken a while.
+    // A slow phone: the dialog shows once the work has taken a while. Chrome's throttling isn't
+    // proportional everywhere (on Windows, rate 60 makes DOM work some 650 times slower, so showing
+    // the screen alone takes 40 s): 6, as a slow phone, and the dialog has to have shown.
     const cdp = await page.context().newCDPSession(page);
-    await cdp.send('Emulation.setCPUThrottlingRate', { rate: 60 });
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: 6 });
     await page.evaluate(() => show(['long']));
-    await page.waitForSelector('dialog[open] .ui-dialog-title', { state: 'attached', timeout: 15000 });
+    await page.waitForSelector('dialog[open].is-shown .ui-dialog-title', { timeout: 15000 });
     eq(await page.textContent('dialog[open] .ui-dialog-title'), markStrings.mark_adding, 'Adding the Usugami watermark…');
     // Cancel while the PDF is being marked (the dialog shows once that has taken 400 ms).
+    assert(!(await page.evaluate(() => log.some((l) => l.startsWith('ready:')))), 'still being marked when Cancel is pressed');
     await page.evaluate(() => document.querySelector('dialog[open] .ui-btn').click());
     await until(page, () => log.includes('back'));
     await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
@@ -846,6 +849,44 @@ await test('result screen: cancelling, a failure, a result shown again (chromium
     eq(again, ['', true, false, false], 'the same version at once, ready just after');
     await until(page, () => log.includes('ready:again'));
     eq(await page.evaluate(() => b64Of(result.files[0].bytes)), first, 'the same bytes');
+
+    // Several, shown again (the browser's Back, then Forward): each row says, opens and saves the
+    // version showing, the one with the mark, as the app's rows act on the PdfFile shown.
+    await page.evaluate(() => {
+      result.destroy();
+      log.length = 0;
+      window.made = [
+        { name: 'kept.pdf', bytes: fx.a, type: 'application/pdf', pageCount: 3, keptOriginal: true, originalSize: fx.a.length },
+        { name: 'other.pdf', bytes: fx.a.slice(), type: 'application/pdf', pageCount: 3 },
+      ];
+      window.result = output.showResult(document.getElementById('root'), { files: made, onReady: () => log.push('ready:many') });
+    });
+    await until(page, () => log.includes('ready:many'));
+    await page.evaluate(() => {
+      result.destroy();
+      log.length = 0;
+      window.result = output.showResult(document.getElementById('root'), { files: made, onReady: () => log.push('ready:many again') });
+    });
+    await until(page, () => log.includes('ready:many again'));
+    const rows = await page.evaluate(async () => {
+      const { formatSize } = await import(new URL('js/core/i18n.js', location.href).href);
+      return {
+        sizes: [...document.querySelectorAll('.ui-result-details')].map((e) => e.textContent.split(' · ').pop()),
+        want: result.files.map((f) => formatSize(f.bytes.length)),
+        extras: [...document.querySelectorAll('.ui-result-extra')].map((e) => e.textContent),
+        carries: result.files.map((f) => marks.mayCarryMark(f.bytes)),
+      };
+    });
+    eq(rows.sizes, rows.want, 'shown again: each row gives the size of the PDF with the mark');
+    assert(rows.carries.every(Boolean) && rows.extras.length === 0, `shown again: marked, and no "Already compact" for a PDF saved anew ${JSON.stringify(rows)}`);
+    for (const name of ['other.pdf', 'kept.pdf']) {
+      await page.click(`[aria-label="Save ${name}"]`);
+      const [own] = await Promise.all([page.waitForEvent('download'), page.click('.ui-menu >> text=Save to Downloads')]);
+      assert(own.suggestedFilename() === name && mayCarryMark(await readFile(await own.path())), `shown again: ${name}'s own Save gives it with the mark`);
+    }
+    await until(page, () => window.state().saved, null, 10000);
+    await page.waitForTimeout(400);
+    assert(await page.evaluate(() => document.querySelector('.ui-result-unsaved').hidden), 'shown again: saved one by one, the result is saved');
     // A setting changed in another tab is followed too.
     await page.evaluate(() => {
       localStorage.setItem('usugami.settings', JSON.stringify({ ...JSON.parse(localStorage.getItem('usugami.settings')), 'mark.on': false }));

@@ -13,13 +13,15 @@ import { topBar, button, card, iconButton, dropZone } from '../core/ui.js';
 // Imported up front (ui.js loads it anyway), so the picker opens within the tap: mobile Safari
 // doesn't open one after an await, as the tap no longer counts.
 import { pickFiles } from '../core/files.js';
-import { recentRow } from './recent.js';
+import { recentRow, keepRowFocus } from './recent.js';
 
 /** How many of the files saved last Home shows. */
 const HOME_RECENT_FILES = 3;
 
 /** What is typed into the search field: kept while a tool opened from the results shows. */
 let savedQuery = '';
+/** The tool whose card opened it last, so the focus goes back to that card on the way back. */
+let lastOpened = null;
 
 /** Every card the search looks through, Scan document first, as on Home. */
 const CARDS = ['scan', ...SECTIONS.flatMap((s) => s.tools)];
@@ -43,7 +45,11 @@ export async function mount(ctx) {
   /** Set while Home goes back a history step itself (the search emptied), not the user. */
   let popping = false;
 
-  const openTool = (id) => navigate('/tool/' + id);
+  const openTool = (id) => {
+    // Coming back, the focus returns to this card (restoreFocus).
+    lastOpened = id;
+    navigate('/tool/' + id);
+  };
 
   /**
    * Picks images for a scan. A photo goes through the app's photo flow (Discard photo, Take
@@ -71,12 +77,16 @@ export async function mount(ctx) {
         button({ label: t('scan_upload'), icon: 'photo_library', variant: 'outlined', onClick: () => pickForScan({ multiple: true }) })));
   };
 
-  const toolCard = (id) => card({
-    icon: TOOLS[id].icon,
-    title: t(TOOLS[id].title),
-    detail: tWeb(TOOLS[id].detail),
-    onClick: () => openTool(id),
-  });
+  const toolCard = (id) => {
+    const el = card({
+      icon: TOOLS[id].icon,
+      title: t(TOOLS[id].title),
+      detail: tWeb(TOOLS[id].detail),
+      onClick: () => openTool(id),
+    });
+    el.dataset.toolCard = id;
+    return el;
+  };
 
   // The top bar: Usugami, and Settings.
   const bar = topBar({
@@ -95,19 +105,25 @@ export async function mount(ctx) {
     const files = await listRecent();
     if (mine !== recentSeq) return;
     top.classList.toggle('has-recent', files.length > 0);
+    // A file removed with the keyboard: the focus goes to the row now in its place, else See all,
+    // else the search field (none left).
+    let seeAll = null;
+    const refocus = keepRowFocus(() => recentBox.querySelector('.recent-list'), () => seeAll ?? input);
     if (!files.length) {
       recentBox.replaceChildren();
       recentBox.hidden = true;
+      refocus();
       return;
     }
     recentBox.hidden = false;
     const headingId = 'home-recent-title';
-    const seeAll = button({ label: t('recent_see_all'), variant: 'text', onClick: () => navigate('/recent') });
+    seeAll = button({ label: t('recent_see_all'), variant: 'text', onClick: () => navigate('/recent') });
     const now = new Date();
     recentBox.replaceChildren(
       h('section', { 'aria-labelledby': headingId },
         h('div', { class: 'home-recent-head' }, h('h2', { id: headingId }, t('recent_title')), seeAll),
         h('ul', { class: 'recent-list' }, files.slice(0, HOME_RECENT_FILES).map((f) => recentRow(f, now)))));
+    refocus();
   };
 
   // The search field.
@@ -187,11 +203,15 @@ export async function mount(ctx) {
     }
   });
 
-  // "/" goes to the search field, as on many sites, unless the user is typing elsewhere.
+  // "/" goes to the search field, as on many sites, but only while no control has the focus (the
+  // page itself, or the screen's heading, which the focus moves to as Home opens): a "/" spoken or
+  // typed while on a card or a button doesn't move the user away (WCAG 2.1.4).
   const onKey = (e) => {
     if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return;
-    const target = e.target;
-    if (target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
+    const at = document.activeElement;
+    const idle = !at || at === document.body || at === document.documentElement || at === page || at === root
+      || (at.matches?.('h1') && at.getAttribute('tabindex') === '-1' && root.contains(at));
+    if (!idle) return;
     if (document.querySelector('dialog[open]')) return;
     e.preventDefault();
     input.focus();
@@ -223,6 +243,16 @@ export async function mount(ctx) {
       stopDrop();
     },
     hasUnsavedWork: () => false,
+    /** Back from a tool opened here: the focus goes back to its card (the router asks). */
+    restoreFocus() {
+      if (!lastOpened) return false;
+      const shown = Array.from(root.querySelectorAll(`[data-tool-card="${lastOpened}"]`)).find((el) => el.getClientRects().length);
+      const target = shown?.matches('button, a') ? shown : shown?.querySelector('button, a, [tabindex]');
+      lastOpened = null;
+      if (!target) return false;
+      target.focus({ preventScroll: true });
+      return document.activeElement === target;
+    },
     /** Back while searching clears the search (the app's BackHandler); Forward brings it back. */
     onStep(next) {
       step = next;

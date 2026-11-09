@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-jMe6rNJgQiAWDTIKU+Ry6cW9fksKi/2lF8vxcgEekyQ='; style-src 'self'; img-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
   <title>Privacy: Usugami</title>
   <meta name="description" content="Usugami’s privacy policy: the Android app has no ads, analytics, tracking or accounts and collects no data, and the website and web app work on your files in your browser, never upload them, and set no cookies.">
   <meta name="color-scheme" content="light dark">
@@ -26,7 +27,7 @@
   <link rel="apple-touch-icon" href="../assets/img/apple-touch-icon.png">
   <link rel="stylesheet" href="../assets/css/tokens.css">
   <link rel="stylesheet" href="../assets/css/site.css">
-  <!-- Once the domain is linked, add these (they need absolute URLs; see docs/website.md):
+  <!-- The page's address on usugami.com, for search engines and link previews (absolute URLs; see docs/website.md). -->
   <link rel="canonical" href="https://usugami.com/privacy/">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Usugami">
@@ -37,7 +38,6 @@
   <meta property="og:image:width" content="1280">
   <meta property="og:image:height" content="640">
   <meta name="twitter:card" content="summary_large_image">
-  -->
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -208,9 +208,9 @@
           <h3 id="web-app" class="anchor-heading">The web app</h3>
           <ul>
             <li>The web app works on your files in your browser, on your device. It never uploads them: the images, PDFs and documents you pick, and the PDFs it makes, never leave your device.</li>
-            <li>It can read only the files you pick, drop on it, paste into it or share to it. It doesn’t use your camera, location, contacts or microphone: <strong>Take photo</strong> opens your phone’s own camera app, which hands just that one photo to the web app. It saves only where you choose; with <strong>Save to folder…</strong>, your browser asks you first to let it save into the folder you picked.</li>
+            <li>It can read only the files you pick, drop on it, paste into it, share to it or open with it. It doesn’t use your camera, location, contacts or microphone: <strong>Take photo</strong> opens your phone’s own camera app, which hands just that one photo to the web app. It saves only where you choose; with <strong>Save to folder…</strong>, your browser asks you first to let it save into the folder you picked.</li>
             <li>It downloads only its own files, from this same website, and only as they are needed: the app itself, and the libraries a tool uses the first time you open that tool. These requests ask for the app’s files by name and carry nothing of your files.</li>
-            <li>When you save a file, your browser saves it where you choose. When you share or open a file, it goes to the app you pick, and that app’s own privacy policy applies.</li>
+            <li>When you save a file, your browser saves it where you choose. When you open a file, your browser shows it in a new tab (a ZIP file is saved instead). When you share a file, it goes to the app you pick, and that app’s own privacy policy applies.</li>
           </ul>
 
           <h3 id="web-downloads" class="anchor-heading">Text recognition (OCR) and fonts</h3>
@@ -226,10 +226,11 @@
             <li>Working copies: while you work, the files you picked and the PDFs the web app makes are kept only in the page’s memory, not in your browser’s storage. They are gone when you start over, leave the tool or close the page.</li>
             <li>Signatures: a signature you draw for “Sign PDF” is kept only in the page’s memory while the web app is open, so you can use it again. It is never saved in your browser’s storage or in a file of its own, only in the PDFs you sign.</li>
             <li>Edit PDF: the text, drawings, shapes and pictures you add to a PDF are kept the same way, until you leave the tool, and only end up in the PDF you save.</li>
-            <li>Settings: your language, your appearance (System, Light or Dark), your last choices in the tools (such as page size, margins, compression level and text language), and the Usugami watermark switch with its size and opacity. They are kept in your browser’s local storage on your device. This website’s pages read the appearance setting to match the app’s theme, and never write anything.</li>
+            <li>Settings: your language, your appearance (System, Light or Dark), your last choices in the tools (such as page size, orientation, margins, one PDF or one per image, and compression level), and the Usugami watermark switch with its size and opacity. They are kept in your browser’s local storage on your device. This website’s pages read the appearance setting to match the app’s theme, and never write anything.</li>
             <li>Recent files: copies of the last 50 files you saved with the web app, with their names, types and sizes and when you saved them, kept in your browser’s storage (IndexedDB) on your device so you can open and share them again from Home. A browser can’t open a file it has saved to your device again, so the web app keeps its own copy, in this browser only. Removing a file from the list, or clearing the list, deletes its copy. Files you only share aren’t listed.</li>
-            <li>Offline copies: the web app’s service worker keeps copies of the site’s own files (the app, its libraries, fonts and text-recognition data, as they are used) in your browser’s cache, so the web app works without an internet connection. They are the same files for everyone and contain nothing of yours.</li>
-            <li>Shared files: when you share files to the installed web app from another app, your browser hands them to its service worker, which keeps them in your browser’s cache only until the web app has read them, and then deletes them. If the web app is closed before it reads them, they are deleted the next time you share files to it (once they are an hour old), or when you clear this site’s data.</li>
+            <li>Offline copies: the web app’s service worker keeps copies of the site’s own files (the app, its libraries, fonts and text-recognition data, as they are used) in your browser’s cache, so the web app, and each tool you have used, works without an internet connection. They are the same files for everyone and contain nothing of yours.</li>
+            <li>Shared files: when you share files to the installed web app from another app, your browser hands them to its service worker, which keeps them in your browser’s cache only until the web app has read them, and then deletes them. If the web app is closed before it reads them, they are deleted the next time you share files to it (once they are an hour old), or when you clear this site’s data. Sharing works only through the service worker: after you clear this site’s data, open the web app once before you share files to it again. Without its service worker, your browser would send the shared files to this website instead.</li>
+            <li>Keeping it: once you install the web app, it asks your browser to keep what it stores here (persistent storage) instead of clearing it by itself when your device runs short of space. Your browser may ask you first. It changes nothing about what is stored, and clearing this site’s data still deletes it all.</li>
           </ul>
           <p>Nothing is stored anywhere else, and nothing is sent to the developer or anyone else. The web app has no servers of its own: this website only serves its files.</p>
 

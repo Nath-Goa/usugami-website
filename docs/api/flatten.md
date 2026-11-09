@@ -42,6 +42,12 @@ What it does to a PDF:
 - Damaged parts are skipped, not fatal: a field tree that loops, an annotation that isn't a
   dictionary, a look with no box, a font that can't be read (its field then counts as one that
   can't be drawn).
+- **A damaged page tree is mended first**, as the app mends it when a PDF is picked
+  (`PdfToolsEngine.inspect`, `repairPageTree`): a tree that leads back into itself, a lone page in
+  the tree's place, a page without its `/Type`, counts that are wrong. The pages flattened are the
+  pages viewers show (and the screens' previews), in their order, and the PDF made has a sound tree
+  (`engine/flatten/pages.js`, below). pdf-lib's own `getPages()` would overflow its stack, throw a
+  `TypeError`, or skip a page there.
 
 ## `flattenPdf(input, hooks)` / `flattenPdf(input, options, hooks)`
 
@@ -76,7 +82,7 @@ Throws:
 |---|---|---|
 | `UserError('flatten_nothing')` | no form fields and no annotations but links | This PDF has no form fields or comments to flatten. |
 | `UserError('flatten_xfa_only')` | its only form is a dynamic XFA form | This PDF's form is a dynamic XFA form, which Usugami can't flatten. |
-| `UserError('pdf_import_failed')` | not readable as a PDF (from `loadPdf`) | Couldn't open that PDF. It may be damaged or unsupported. (`common.js`) |
+| `UserError('pdf_import_failed')` | not readable as a PDF (from `loadPdf`), or no page can be found in it | Couldn't open that PDF. It may be damaged or unsupported. (`common.js`) |
 | `UserError('pdf_process_failed')` | anything else going wrong while flattening or saving | Couldn't process this PDF. Check the file and free storage. |
 | `PasswordError` (`.wrong`) | a password is needed, or the one given is wrong | (the screen asks for it: `core/pdfdoc.js`) |
 | `CancelledError` | `signal` aborted | (say nothing) |
@@ -105,13 +111,27 @@ for (const m of flattenNotes(outcomes)) snackbar(say(m));
   `batch_failed` naming the rest), then what happened to the others (`file_problem` naming them,
   with `flatten_fields_kept` / `flatten_fields_kept_many` and `flatten_xfa_dropped(_many)`). What
   is said of several files comes once for all of them, in the words for several; of one file
-  alone, in the words for one. A cancelled one is left out. Names are the files' original names.
+  alone, in the words for one. A cancelled one is left out. Names are the files' original names,
+  listed with `namesArg` (core/names.js): with more than four, the first three and the message
+  `names_and_more` ("and 2 more") as a nested argument.
 
 ## `flattenDocument(doc, hooks)`
 
-The same on a `PDFDocument` already open (from `loadPdf`), changed in place; returns
-`{ keptFields, droppedDynamicXfa }`. Throws the `UserError`s above (not `pdf_process_failed`).
-Save with `savePdf(doc)` from `pdf-common.js`.
+The same on a `PDFDocument` already open (from `loadPdf`), changed in place, its page tree mended
+first when damaged; returns `{ keptFields, droppedDynamicXfa, pageCount }` (`pageCount`: the pages
+viewers find). Throws the `UserError`s above (not `pdf_process_failed`). Save with `savePdf(doc)`
+from `pdf-common.js`.
+
+## `viewerPages(doc)` and `wasMended(doc)` (`engine/flatten/pages.js`)
+
+The pages of an open `PDFDocument` as viewers find them, as pdf-lib `PDFPage` objects in order
+(Flatten PDF and Compress PDF use it in place of pdf-lib's `getPages()`). A page tree that would be
+read otherwise than viewers read it is mended first with `cleanup.js`' `repairPageTree` (laid out
+again flat; a page without its type gets one, and is made a `PDFPageLeaf`; a root that isn't a
+pdf-lib page tree becomes one), so pdf-lib's `getPages()` and `getPageCount()` find the same pages
+afterwards. Throws `UserError('pdf_import_failed')` when no page can be found. `wasMended(doc)`
+tells whether it had to change anything: the bytes the PDF was read from are then read otherwise
+by PDF libraries than by viewers (Compress PDF doesn't hand such a PDF back as it was).
 
 ## `bakeUnder(doc, pageIndex, areas, { signal })`
 

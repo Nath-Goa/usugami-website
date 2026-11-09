@@ -2,6 +2,7 @@
 // "1-3;5;7-9" for Split's separate ranges (the app's PdfPageSelection.kt). Typed numbers count from
 // 1; the page indexes returned count from 0.
 import { UserError } from '../core/errors.js';
+import { withSuffix, baseName } from '../core/names.js';
 
 /** Why typed pages can't be used, and the string that says so (strings.xml). */
 const PROBLEM_KEYS = {
@@ -171,4 +172,39 @@ export function formatPages(pages) {
  */
 export function formatPagesInOrder(pages) {
   return writeRuns([...pages]);
+}
+
+// ---------------------------------------------------------------------------------------------
+// The names Split, Merge, Reorganize, Delete pages and Rotate give their PDFs (the view model's
+// defaultName). Here rather than in organize.js so a screen can show the name before that engine,
+// with pdf-lib, has loaded; organize.js exports them too.
+
+/**
+ * What Split adds to the name of part `index` (zero-based), which holds `pages`: its number and
+ * its first and last pages, counted from 1, as in "_2_4-6".
+ */
+export function partSuffix(index, pages) {
+  return `_${index + 1}_${pages[0] + 1}-${pages[pages.length - 1] + 1}`;
+}
+
+/**
+ * The name the tool's PDF gets unless another is typed (no extension), after `input`, the (first)
+ * PDF: { name, pageCount? }. tool: 'split', 'merge', 'reorganize', 'delete-pages' or 'rotate'.
+ * Report.pdf gives "Report_split", "Merged_PDF", "Report_reorganized", "Report_pages_deleted" and
+ * "Report_rotated". Split leaves room for the part endings a PDF of this many pages can get.
+ */
+export function defaultName(tool, input) {
+  const base = input?.name ? baseName(input.name) : 'Usugami';
+  const named = (suffix) => withSuffix(base, suffix, 'Usugami');
+  switch (tool) {
+    case 'split': {
+      const last = Math.max(1, input?.pageCount ?? 1) - 1;
+      return withSuffix(base, '_split', 'Usugami', partSuffix(last, [last]).length);
+    }
+    case 'merge': return 'Merged_PDF';
+    case 'rotate': return named('_rotated');
+    case 'delete-pages': return named('_pages_deleted');
+    case 'reorganize': return named('_reorganized');
+    default: throw new Error(`Unknown tool ${tool}`);
+  }
 }

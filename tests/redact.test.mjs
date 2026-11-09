@@ -5,6 +5,7 @@
 // several fonts, letter-spaced and broken by a hyphen. Ported from the app's RedactionTest.kt,
 // AreasTest.kt and RedactionDeviceTest.kt. The PDFs are made up here with pdf-lib.
 import { readFile, access } from 'node:fs/promises';
+import { join } from 'node:path';
 import { inflateSync, deflateSync, crc32 } from 'node:zlib';
 import {
   PDFDocument, StandardFonts, rgb, degrees, PDFName, PDFString, PDFHexString, PDFDict, PDFArray,
@@ -1058,7 +1059,7 @@ async function run(browser, { viewport } = {}) {
       assert(!out.isEncrypted, 'the result has no password');
       assert((await look(page, url, result.bytes, 0)).red === 0, 'no red left');
       // The app's own test PDF with a password.
-      const asset = await readFile('C:/Users/Nathan/OneDrive/Desktop/pdfer/app/src/androidTest/assets/protected.pdf').catch(() => null);
+      const asset = await readFile(join(root, '..', 'pdfer', 'app', 'src', 'androidTest', 'assets', 'protected.pdf')).catch(() => null);
       if (asset) {
         const b = { left: 0, top: 0, right: 1, bottom: 0.5 };
         const r = await call(page, url, 'redactPdf', { name: 'protected.pdf', bytes: new Uint8Array(asset), password: 'test123' }, { 0: [b] });
@@ -1080,51 +1081,231 @@ async function run(browser, { viewport } = {}) {
         }
         assert(error?.name === 'UserError' && ['redact_find_failed', 'pdf_import_failed'].includes(error.key), `${name}: ${error?.message}`);
       }
-      // Files pdf-lib opens but whose pages it can't read as viewers do: no catalog, a page tree that
-      // loops, one without /Kids, a lone page in the tree's place. A UserError, never a TypeError
-      // or a stack overflow.
+      // Files without pages to speak of: no catalog, a page tree without /Kids. A UserError, never
+      // a TypeError or a stack overflow.
       const handMade = (objects) => {
         let text = '%PDF-1.4\n';
         for (const [n, source] of Object.entries(objects)) text += `${n} 0 obj\n${source}\nendobj\n`;
         return new TextEncoder().encode(`${text}trailer\n<< /Root 1 0 R /Size 20 >>\n%%EOF\n`);
       };
-      const content = '<< /Length 0 >>\nstream\n\nendstream';
-      const damaged = {
-        'no catalog': new TextEncoder().encode('%PDF-1.4 nothing else'),
-        'a looping page tree': handMade({
-          1: '<< /Type /Catalog /Pages 2 0 R >>', 2: '<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>',
-          3: '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents 9 0 R >>',
-          4: '<< /Type /Pages /Parent 2 0 R /Kids [2 0 R] /Count 1 >>', 9: content,
-        }),
-        'no /Kids': handMade({ 1: '<< /Type /Catalog /Pages 2 0 R >>', 2: '<< /Type /Pages /Count 1 >>' }),
-        'a lone page': handMade({ 1: '<< /Type /Catalog /Pages 3 0 R >>', 3: '<< /Type /Page /MediaBox [0 0 200 200] /Contents 9 0 R >>', 9: content }),
+      const shows = (text) => {
+        const s = `BT /F1 14 Tf 20 100 Td (${text}) Tj ET`;
+        return `<< /Length ${s.length} >>\nstream\n${s}\nendstream`;
       };
-      const outcome = await page.evaluate(async ({ src, files }) => {
+      const font = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>';
+      const leaf = (parent, contents, size = '0 0 200 300') => `<< /Type /Page${parent ? ` /Parent ${parent} 0 R` : ''} /MediaBox [${size}] /Contents ${contents} 0 R /Resources << /Font << /F1 8 0 R >> >> >>`;
+      const broken = {
+        'no catalog': new TextEncoder().encode('%PDF-1.4 nothing else'),
+        'no /Kids': handMade({ 1: '<< /Type /Catalog /Pages 2 0 R >>', 2: '<< /Type /Pages /Count 1 >>' }),
+      };
+      // Page trees pdf-lib reads otherwise than viewers do, which the app mends when it opens a PDF
+      // (PdfToolsEngine.inspect): a tree that loops, a lone page in the tree's place, a page
+      // without its type, a tree that miscounts. Redacted like any other, the pages as shown.
+      const mended = {
+        'a looping page tree': [1, handMade({
+          1: '<< /Type /Catalog /Pages 2 0 R >>', 2: '<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>',
+          3: leaf(2, 9), 4: '<< /Type /Pages /Parent 2 0 R /Kids [2 0 R] /Count 1 >>', 8: font, 9: shows('SECRET loop'),
+        })],
+        'a lone page': [1, handMade({ 1: '<< /Type /Catalog /Pages 3 0 R >>', 3: leaf(0, 9, '0 0 200 200'), 8: font, 9: shows('SECRET lone') })],
+        'a page without its type': [2, handMade({
+          1: '<< /Type /Catalog /Pages 2 0 R >>', 2: '<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>',
+          3: leaf(2, 9).replace('/Type /Page ', ''), 5: leaf(2, 10), 8: font, 9: shows('SECRET untyped'), 10: shows('second page'),
+        })],
+        'a tree that miscounts': [2, handMade({
+          1: '<< /Type /Catalog /Pages 2 0 R >>', 2: '<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 5 >>',
+          3: leaf(2, 9), 5: leaf(2, 10), 8: font, 9: shows('SECRET first'), 10: shows('second page'),
+        })],
+      };
+      const b64 = (bytes) => Buffer.from(bytes).toString('base64');
+      const outcome = await page.evaluate(async ({ src, pdfdoc, files }) => {
         const engine = await import(src);
+        const { openPdf } = await import(pdfdoc);
         const out = {};
-        for (const [name, b64] of Object.entries(files)) {
-          const bytes = () => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+        for (const [name, encoded] of Object.entries(files)) {
+          const bytes = () => Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0));
           const said = async (work) => {
             try {
               const result = await work();
-              return Array.isArray(result) ? `${result.length} found` : 'done';
+              if (Array.isArray(result)) return `${result.length} found`;
+              if (result?.bytes) {
+                let s = '';
+                for (let i = 0; i < result.bytes.length; i += 0x8000) s += String.fromCharCode(...result.bytes.subarray(i, i + 0x8000));
+                return { pageCount: result.pageCount, picturedPages: result.picturedPages, b64: btoa(s) };
+              }
+              return 'done';
             } catch (e) {
               return `${e.name}: ${e.key ?? e.message}`;
             }
           };
-          out[name] = [
-            await said(() => engine.redactPdf({ name: 'd.pdf', bytes: bytes() }, { 0: [{ left: 0.1, top: 0.1, right: 0.5, bottom: 0.5 }] })),
-            await said(() => engine.pageFrames({ bytes: bytes() })),
-            await said(() => engine.findText({ bytes: bytes() }, 'secret')),
-          ];
+          const boxes = { 0: [{ left: 0, top: 0, right: 1, bottom: 1 }] };
+          // As the screen gives it (a PdfSource: its view mended) and as a plain FileItem.
+          let source = null;
+          try {
+            source = await openPdf({ name: 'd.pdf', type: 'application/pdf', size: 1, lastModified: 0, bytes: bytes() }, { ask: false });
+          } catch {
+            // The screen says it is damaged.
+          }
+          out[name] = {
+            redacted: await said(() => engine.redactPdf({ name: 'd.pdf', bytes: bytes() }, boxes)),
+            frames: await said(() => engine.pageFrames({ bytes: bytes() })),
+            found: await said(() => engine.findText({ bytes: bytes() }, 'secret')),
+            texts: await engine.readPageTexts({ bytes: bytes() }).catch((e) => `${e.name}: ${e.key ?? e.message}`),
+            fromSource: source ? await said(() => engine.redactPdf(source, boxes)) : null,
+            foundInSource: source ? await said(() => engine.findText(source, 'secret')) : null,
+          };
+          source?.close();
         }
         return out;
-      }, { src: new URL(ENGINE, url).href, files: Object.fromEntries(Object.entries(damaged).map(([k, v]) => [k, Buffer.from(v).toString('base64')])) });
-      for (const [name, [redacted, frames, found]] of Object.entries(outcome)) {
+      }, {
+        src: new URL(ENGINE, url).href,
+        pdfdoc: new URL('app/js/core/pdfdoc.js', url).href,
+        files: Object.fromEntries([...Object.entries(broken), ...Object.entries(mended).map(([k, [, v]]) => [k, v])].map(([k, v]) => [k, b64(v)])),
+      });
+      for (const name of Object.keys(broken)) {
+        const { redacted, frames, found, fromSource } = outcome[name];
         eq(redacted, 'UserError: pdf_import_failed', `${name}: Redact says the PDF is damaged`);
+        assert(fromSource === null || fromSource === 'UserError: pdf_import_failed', `${name}: from the screen too: ${fromSource}`);
         assert(/^UserError: pdf_import_failed$|^\d+ found$/.test(frames), `${name}: page frames: ${frames}`);
         assert(/^UserError: redact_find_failed$|^0 found$/.test(found), `${name}: Find text: ${found}`);
       }
+      for (const [name, [pages]] of Object.entries(mended)) {
+        const { redacted, frames, found, texts, fromSource, foundInSource } = outcome[name];
+        eq(frames, `${pages} found`, `${name}: its pages as viewers show them`);
+        eq(found, '1 found', `${name}: Find text finds the word once`);
+        eq(foundInSource, '1 found', `${name}: also from the screen's PdfSource`);
+        eq(texts.length, pages, `${name}: each page's text`);
+        assert(/secret/i.test(texts[0]), `${name}: page 1 says SECRET: ${texts[0]}`);
+        for (const [how, result] of [['as a FileItem', redacted], ['from the screen', fromSource]]) {
+          assert(typeof result === 'object' && result, `${name} ${how}: redacted, not ${result}`);
+          eq([result.pageCount, result.picturedPages], [pages, [0]], `${name} ${how}: every page kept, page 1 a picture`);
+          const bytes = Buffer.from(result.b64, 'base64');
+          assert(!leaksOf(await everything(bytes), 'secret').length, `${name} ${how}: SECRET is gone from the file`);
+          const doc = await load(bytes);
+          eq(doc.getPageCount(), pages, `${name} ${how}: a sound page tree`);
+          if (pages > 1) assert((await look(page, url, bytes, 1)).text.includes('second page'), `${name} ${how}: page 2 stays as it was`);
+        }
+      }
+    });
+
+    await test('Usugami\'s own mark: searched and drawn as the preview shows the PDF, without it', async () => {
+      // A PDF Usugami made before, with its mark, opened as the screen opens it. The app finds and
+      // draws from its view, without the mark (PdfToolsEngine.previewView), and the new PDF gets
+      // the mark the setting asks for once it is made, so an old one isn't kept in the pictures.
+      const doc = await PDFDocument.create({ updateMetadata: false });
+      const helv = await doc.embedFont(StandardFonts.Helvetica);
+      doc.addPage([595, 842]).drawText('Top SECRET words here', { x: 72, y: 700, size: 18, font: helv });
+      doc.addPage([595, 842]).drawText('Second page public', { x: 72, y: 700, size: 18, font: helv });
+      const r = await page.evaluate(async ({ b64, app }) => {
+        const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+        const { markPdf } = await import(app + 'js/engine/page-mark.js');
+        const { openPdf } = await import(app + 'js/core/pdfdoc.js');
+        const { openPdfJs } = await import(app + 'js/lib/pdfjs.js');
+        const E = await import(app + 'js/engine/redact.js');
+        const marked = await markPdf(bytes, { size: 100, opacity: 100 });
+        /** Dark pixels in the bottom-right corner (where the mark is) of page `index` drawn at 1 px a point. */
+        const corner = async (pdfBytes, index) => {
+          const pdf = await openPdfJs(pdfBytes);
+          try {
+            const pg = await pdf.getPage(index + 1);
+            const vp = pg.getViewport({ scale: 1 });
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.round(vp.width);
+            canvas.height = Math.round(vp.height);
+            const cx = canvas.getContext('2d');
+            await pg.render({ canvasContext: cx, canvas, viewport: vp, background: '#ffffff' }).promise;
+            const d = cx.getImageData(Math.floor(canvas.width * 0.6), Math.floor(canvas.height * 0.9), Math.floor(canvas.width * 0.4), Math.floor(canvas.height * 0.1)).data;
+            let n = 0;
+            for (let i = 0; i < d.length; i += 4) if (d[i] < 128 && d[i + 1] < 128 && d[i + 2] < 128) n++;
+            return n;
+          } finally {
+            await pdf.loadingTask.destroy();
+          }
+        };
+        const item = { name: 'marked.pdf', type: 'application/pdf', size: marked.length, lastModified: 0, bytes: marked };
+        const source = await openPdf(item, { ask: false });
+        const boxes = [{ pageIndex: 0, box: { page: 0, left: 0.1, top: 0.15, right: 0.5, bottom: 0.2 } }];
+        try {
+          const out = await E.redactPdf(source, boxes);
+          const plain = await E.redactPdf(item, boxes);
+          return {
+            hasView: source.hasView,
+            markedCorner: await corner(marked, 0),
+            foundMark: (await E.findText(source, 'usugami')).length,
+            foundMarkPlain: (await E.findText(item, 'usugami')).length,
+            foundText: (await E.findText(source, 'secret')).length,
+            texts: await E.readPageTexts(item),
+            redactedCorner: await corner(out.bytes, 0),
+            keptCorner: await corner(out.bytes, 1),
+            plainCorner: await corner(plain.bytes, 0),
+          };
+        } finally {
+          source.close();
+        }
+      }, { b64: Buffer.from(await doc.save()).toString('base64'), app: new URL('app/', url).href });
+      assert(r.hasView, 'the screen shows a view without the mark');
+      assert(r.markedCorner > 100, `the mark is there to begin with: ${r.markedCorner}`);
+      eq([r.foundMark, r.foundMarkPlain, r.foundText], [0, 0, 1], 'the mark isn\'t found; the page\'s own words are');
+      assert(r.texts.every((t) => !/usugami/i.test(t)), `the text read has no mark: ${JSON.stringify(r.texts)}`);
+      eq([r.redactedCorner, r.keptCorner, r.plainCorner], [0, 0, 0], 'no old mark in the redacted picture, on the page kept, or from a FileItem');
+    });
+
+    await test('a change of font or size starts the letter widths again (PDFTextStripper)', async () => {
+      // 'INVOICE' in 40 pt bold, then 'No 4521' in 9 pt with no space between them, 1.5 to 4 points
+      // after. PDFBox reads a word break where the gap is wider than 0.3 of the small letters'
+      // own average width (1.95 pt): in all but the first row.
+      const doc = await PDFDocument.create({ updateMetadata: false });
+      const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+      const regular = await doc.embedFont(StandardFonts.Helvetica);
+      const p = doc.addPage([595, 842]);
+      const gaps = [1.5, 2.2, 2.6, 3.0, 4.0];
+      gaps.forEach((gap, i) => {
+        const y = 760 - 60 * i;
+        p.drawText('INVOICE', { x: 40, y, size: 40, font: bold });
+        // pdf.js's width of INVOICE at 40 pt.
+        p.drawText('No 4521', { x: 40 + 164.48 + gap, y, size: 9, font: regular });
+      });
+      const input = { name: 'invoice.pdf', bytes: await doc.save() };
+      const [text] = await call(page, url, 'readPageTexts', input);
+      eq(text, 'INVOICENo 4521 INVOICE No 4521 INVOICE No 4521 INVOICE No 4521 INVOICE No 4521', 'words told apart after the size changes');
+      const found = await call(page, url, 'findText', input, 'invoice no');
+      eq(new Set(found.map((f) => f.match)).size, 4, 'four of five rows found');
+      eq(found.map((f) => Math.round(f.rect.y)).sort((a, b) => b - a).filter((y, i, all) => all.indexOf(y) === i).length, 4, 'one row each');
+      assert(found.every((f) => f.rect.y < 760 - 30), 'not the first row');
+    });
+
+    await test('previews let pdf.js free the page once drawn', async () => {
+      // A large scan on each page: pdf.js keeps a drawn page's decoded images until the page is
+      // cleaned up, which a phone scrolling through a scan can't afford.
+      const r = await page.evaluate(async ({ src, app }) => {
+        const { renderPreview } = await import(src);
+        const { openPdfJs } = await import(app + 'js/lib/pdfjs.js');
+        const { PDFDocument } = await import(app + 'js/lib/pdf-lib.js');
+        const canvas = document.createElement('canvas');
+        canvas.width = 1200;
+        canvas.height = 1700;
+        const cx = canvas.getContext('2d');
+        cx.fillStyle = '#c8b4a0';
+        cx.fillRect(0, 0, 1200, 1700);
+        cx.fillStyle = '#202020';
+        for (let y = 40; y < 1700; y += 60) cx.fillRect(80, y, 1000, 20);
+        const jpeg = new Uint8Array(await (await new Promise((ok) => canvas.toBlob(ok, 'image/jpeg', 0.8))).arrayBuffer());
+        const doc = await PDFDocument.create();
+        const image = await doc.embedJpg(jpeg);
+        for (let i = 0; i < 3; i++) doc.addPage([595, 842]).drawImage(image, { x: 0, y: 0, width: 595, height: 842 });
+        const pdf = await openPdfJs(await doc.save());
+        try {
+          const kept = [];
+          for (let i = 0; i < 3; i++) {
+            const shown = await renderPreview(pdf, i, 200, { pixelRatio: 1 });
+            const pg = await pdf.getPage(i + 1);
+            kept.push({ states: pg._intentStates.size, images: [...pg.objs].filter(([, data]) => data?.bitmap || data?.data).length, drawn: shown.width });
+          }
+          return kept;
+        } finally {
+          await pdf.loadingTask.destroy();
+        }
+      }, { src: new URL(ENGINE, url).href, app: new URL('app/', url).href });
+      for (const [i, k] of r.entries()) eq([k.states, k.images, k.drawn], [0, 0, 200], `page ${i + 1}: nothing kept once drawn`);
     });
 
     await test('cancelling stops the work', async () => {
@@ -1258,13 +1439,20 @@ async function run(browser, { viewport } = {}) {
       const r = await page.evaluate(async ({ src, b64 }) => {
         const { findText, redactPdf } = await import(src);
         const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-        // yieldToUI uses scheduler.yield() where the browser has it, else a timer: count its calls.
-        const created = !globalThis.scheduler;
-        const target = globalThis.scheduler ?? (globalThis.scheduler = {});
-        const before = Object.getOwnPropertyDescriptor(target, 'yield');
-        const own = typeof target.yield === 'function' ? target.yield.bind(target) : () => new Promise((ok) => setTimeout(ok, 0));
+        // yieldToUI lets the page in with a message task (MessageChannel), or with scheduler.yield()
+        // where an older version did: either is counted.
         let yields = 0;
-        target.yield = () => { yields++; return own(); };
+        const target = globalThis.scheduler;
+        const before = target ? Object.getOwnPropertyDescriptor(target, 'yield') : undefined;
+        if (typeof target?.yield === 'function') {
+          const own = target.yield.bind(target);
+          target.yield = () => { yields++; return own(); };
+        }
+        const post = MessagePort.prototype.postMessage;
+        MessagePort.prototype.postMessage = function (...args) {
+          yields++;
+          return post.apply(this, args);
+        };
         let frames = 0;
         let running = true;
         const frame = () => { frames++; if (running) requestAnimationFrame(frame); };
@@ -1276,9 +1464,9 @@ async function run(browser, { viewport } = {}) {
           return { afterFind, yields, frames, pages: out.picturedPages.length };
         } finally {
           running = false;
-          if (created) delete globalThis.scheduler;
-          else if (before) Object.defineProperty(target, 'yield', before);
-          else delete target.yield;
+          MessagePort.prototype.postMessage = post;
+          if (before) Object.defineProperty(target, 'yield', before);
+          else if (target) delete target.yield;
         }
       }, { src: new URL(ENGINE, url).href, b64: Buffer.from(secretBytes).toString('base64') });
       assert(r.afterFind >= 4, `Find text yields after each of the 4 pages: ${r.afterFind}`);

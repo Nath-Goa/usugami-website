@@ -131,14 +131,29 @@ async function dropFiles(page, files) {
 
 async function waitReady(page) {
   await page.waitForSelector('.redact-sheet.is-ready', { timeout: 20000 });
-  await page.waitForFunction(async () => (await import('./js/core/router.js')).currentHandle()?.redact?.ready(), null, { timeout: 20000 });
+  // Polled in the page: waitForFunction doesn't wait for an async predicate (a promise is truthy).
+  await page.evaluate(async () => {
+    const { currentHandle } = await import('./js/core/router.js');
+    const started = Date.now();
+    while (!currentHandle()?.redact?.ready()) {
+      if (Date.now() - started > 20000) throw new Error('Redact PDF\'s page was never ready');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  });
 }
 
-const handle = (page, fn, arg) => page.evaluate(async ({ src, arg }) => {
-  const r = (await import('./js/core/router.js')).currentHandle().redact;
-  // eslint-disable-next-line no-new-func
-  return new Function('r', 'arg', `return (${src})(r, arg);`)(r, arg);
-}, { src: fn.toString(), arg });
+/**
+ * Calls fn(r, arg) in the page with the screen's test handle `r`. Through Playwright's handle of
+ * it, not by building a function from text: the app's Content Security Policy has no 'unsafe-eval'.
+ */
+async function handle(page, fn, arg) {
+  const r = await page.evaluateHandle(async () => (await import('./js/core/router.js')).currentHandle().redact);
+  try {
+    return await r.evaluate(fn, arg);
+  } finally {
+    await r.dispose();
+  }
+}
 const state = (page) => handle(page, (r) => r.state());
 
 /** The page's place on the screen, its frame scrolled into the middle of it first. */
@@ -360,6 +375,13 @@ await test('the screen before and after choosing a PDF (phone)', async () => {
     assert(r.height <= 440.5 && r.width <= PHONE.width - 40 + 0.5, 'fits the screen');
     // Nothing scrolls sideways.
     assert(await page.evaluate(() => document.scrollingElement.scrollWidth <= document.scrollingElement.clientWidth), 'no sideways scroll');
+    // Messages show above the bottom bar, as the app's above its button (the kit lifts them).
+    await find(page, 'nowhere to be found');
+    await page.waitForSelector('.ui-snackbar.is-shown', { timeout: 30000 });
+    const message = await settled(page, '.ui-snackbar.is-shown');
+    const bar = await page.locator('.ui-bottombar').boundingBox();
+    assert(message && bar && message.y + message.height <= bar.y + 0.5, `the message is above the bottom bar: ${JSON.stringify({ message, bar })}`);
+    await dismissSnacks(page);
   }, { viewport: PHONE });
 });
 
@@ -710,7 +732,7 @@ await test('redacting: the boxed words are gone, the rest stays (pdf.js text and
     const crop = doc.getPage(2).getCropBox();
     eq([crop.x, crop.y, crop.width, crop.height], [100, 200, 400, 500], 'crop box kept');
     // Text: the pictured pages have none; the untouched page keeps its own.
-    const texts = await runInPage(page, url, 'app/js/engine/redact.js', 'readPageTexts', { bytes: { __b64: Buffer.from(bytes).toString('base64') } });
+    const texts = await runInPage(page, url, 'app/js/engine/redact.js', 'readPageTexts', { bytes });
     for (const i of [0, 1, 2]) eq(texts[i].trim(), '', `page ${i + 1} has no text left`);
     assert(texts[3].toLowerCase().includes('nothing to hide here'), `page 4 keeps its text: ${texts[3]}`);
     // Pixels: under the boxes black; the other words still there to read; blank paper white.
@@ -830,6 +852,79 @@ await test('damaged files and locked PDFs', async () => {
   }, { viewport: PHONE });
 });
 
+await test('the keyboard keeps its place; one main landmark; a failure is said once the progress dialog has gone (desktop)', async () => {
+  await withPage(async (page, url) => {
+    await openApp(page, url);
+    const active = () => page.evaluate(() => {
+      const a = document.activeElement;
+      return { tag: a?.tagName, cls: a?.className ?? '', inScreen: !!a?.closest('.screen[data-tool="redact"]') };
+    });
+    // One main landmark, the screen's content, where Skip to content goes.
+    eq(await page.$$eval('#app .screen[data-tool="redact"] main, #app .screen[data-tool="redact"] [role="main"]', (m) => m.map((n) => n.className)), ['page redact-page'], 'one main landmark');
+    eq(await page.$eval('#app .screen[data-tool="redact"] [data-main]', (n) => n.tagName), 'MAIN', 'it is the [data-main] element');
+    await page.focus('.skip-link');
+    await page.keyboard.press('Enter');
+    assert((await active()).cls.includes('redact-page'), `Skip to content focuses the main landmark: ${JSON.stringify(await active())}`);
+    await page.keyboard.press('Tab');
+    assert((await active()).cls.includes('ui-empty'), `the next Tab is Choose PDF, past the top bar: ${JSON.stringify(await active())}`);
+
+    // Choose PDF by keyboard, then the password dialog cancelled: the focus is back on Choose PDF.
+    const locked = await samplePdf({ pages: 1, password: 'secret' });
+    await page.focus('.redact-page .ui-empty');
+    const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.keyboard.press('Enter')]);
+    await chooser.setFiles({ name: 'Locked.pdf', mimeType: 'application/pdf', buffer: Buffer.from(locked.bytes) });
+    await page.waitForSelector('dialog[open] input[type=password]');
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('dialog[open]', { state: 'detached' });
+    await page.waitForFunction(() => !document.querySelector('.redact-page .ui-empty[aria-disabled]'));
+    const back = await active();
+    assert(back.cls.includes('ui-empty') && back.inScreen, `cancelled: the focus is on Choose PDF, not ${back.tag}`);
+
+    // Chosen by keyboard: the PDF's card takes the focus from Choose PDF, which has gone.
+    const [chooser2] = await Promise.all([page.waitForEvent('filechooser'), page.keyboard.press('Enter')]);
+    await chooser2.setFiles({ name: 'Sample report.pdf', mimeType: 'application/pdf', buffer: Buffer.from(sample.bytes) });
+    await waitReady(page);
+    const chosen = await active();
+    assert(chosen.cls.includes('ui-file-card') && chosen.inScreen, `chosen: the focus is on the PDF's card, not ${chosen.tag}.${chosen.cls}`);
+
+    // Redact PDF by keyboard: the result's heading has the focus once the progress dialog has gone.
+    await handle(page, (r) => r.addBox({ page: 0, left: 0.1, top: 0.1, right: 0.3, bottom: 0.15 }));
+    await page.focus('.ui-bottombar button');
+    await page.keyboard.press('Enter');
+    await page.waitForSelector('.ui-result-heading', { timeout: 60000 });
+    await page.waitForFunction(() => document.activeElement?.classList.contains('ui-result-heading'), null, { timeout: 5000 })
+      .catch(async () => { throw new Error(`the result's heading has no focus: ${JSON.stringify(await active())}`); });
+    await page.click('.ui-result .ui-topbar-nav');
+    await page.waitForSelector('.redact-sheet');
+    await handle(page, (r) => r.clearBoxes());
+    await page.click('.ui-file-card .ui-icon-btn');
+    await page.waitForSelector('.redact-page .ui-empty');
+
+    // A PDF pdf.js shows but pdf-lib can't read (its header gone): Redact PDF fails. The message
+    // comes once the progress dialog has gone, when the rest of the screen can be heard again.
+    const headerless = Buffer.from(sample.bytes).subarray(Buffer.from(sample.bytes).indexOf('\n') + 1);
+    await page.evaluate(() => {
+      window.__said = [];
+      new MutationObserver(() => {
+        const modal = !!document.querySelector('dialog[open]');
+        const announcer = document.getElementById('announcer');
+        if (announcer?.textContent) window.__said.push({ text: announcer.textContent, modal, where: 'announcer' });
+        for (const n of document.querySelectorAll('.ui-snackbar-text')) window.__said.push({ text: n.textContent, modal, where: 'snackbar' });
+      }).observe(document.body, { subtree: true, childList: true, characterData: true });
+    });
+    const [chooser3] = await Promise.all([page.waitForEvent('filechooser'), page.click('.redact-page .ui-empty')]);
+    await chooser3.setFiles({ name: 'Headerless.pdf', mimeType: 'application/pdf', buffer: headerless });
+    await waitReady(page);
+    await handle(page, (r) => r.addBox({ page: 0, left: 0.1, top: 0.1, right: 0.3, bottom: 0.15 }));
+    await page.click('.ui-bottombar button');
+    await snack(page, common.pdf_import_failed);
+    const said = (await page.evaluate(() => window.__said)).filter((s) => s.text === common.pdf_import_failed);
+    assert(said.some((s) => s.where === 'snackbar'), 'the snackbar showed');
+    assert(said.every((s) => !s.modal), `said only once the dialog had gone: ${JSON.stringify(said)}`);
+    assert(said.some((s) => s.where === 'announcer'), `the announcer said it: ${JSON.stringify(said)}`);
+  }, { viewport: { width: 1280, height: 800 } });
+});
+
 for (const browser of quick ? ['chromium'] : ['chromium', 'firefox', 'webkit']) {
   await test(`${browser}: leaving while a password is asked for closes the dialog; a reload on the result step`, async () => {
     await withPage(async (page, url) => {
@@ -837,14 +932,26 @@ for (const browser of quick ? ['chromium'] : ['chromium', 'firefox', 'webkit']) 
       await page.goto(url + 'app/#/');
       await page.waitForSelector('html[data-ready="true"]', { timeout: 20000 });
       await page.waitForSelector('.screen[data-route="home"]:not([aria-busy])');
-      // Handed over from Home, then the browser's Back while the password is asked for.
-      await page.evaluate(async (b64) => {
+      // Handed over from Home, as Choose a tool does.
+      const handOver = () => page.evaluate(async (b64) => {
         const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
         const { navigate } = await import('./js/core/router.js');
         await navigate('/tool/redact', { files: [{ name: 'Locked.pdf', type: 'application/pdf', size: bytes.length, lastModified: 0, bytes }] });
       }, Buffer.from(locked.bytes).toString('base64'));
+      await handOver();
       await page.waitForSelector('dialog[open] input[type=password]');
+      // The browser's Back while the password is asked for closes the dialog first, as Android's
+      // Back does: Redact PDF stays, without the PDF.
       await page.goBack();
+      await page.waitForSelector('dialog[open]', { state: 'detached', timeout: 5000 });
+      await page.waitForSelector('#app > .screen[data-tool="redact"]:not([aria-busy]) .redact-page .ui-empty:not([aria-disabled])', { timeout: 5000 });
+      eq((await state(page)).pageCount, 0, 'no PDF opened');
+      // Leaving while the password is asked for (to Home): the dialog goes with the screen.
+      await page.evaluate(async () => (await import('./js/core/router.js')).navigate('/', { replace: true }));
+      await page.waitForSelector('.screen[data-route="home"]:not([aria-busy])');
+      await handOver();
+      await page.waitForSelector('dialog[open] input[type=password]');
+      await page.evaluate(async () => (await import('./js/core/router.js')).navigate('/'));
       await page.waitForSelector('.screen[data-route="home"]:not([aria-busy])');
       await page.waitForSelector('dialog[open]', { state: 'detached', timeout: 5000 });
       await page.waitForTimeout(300);

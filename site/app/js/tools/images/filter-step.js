@@ -10,6 +10,7 @@ import { iconButton, uid } from '../../core/ui.js';
 import { CancelledError } from '../../core/errors.js';
 import { straighten, isCloseTo } from '../../engine/images/crop.js';
 import { applyLookAsync, LOOKS, LOOK_LABELS, MAX_ADJUSTMENT } from '../../engine/images/looks.js';
+import { wheelAlong } from './wheel.js';
 
 /** The large page is made at most this many pixels on its long side. */
 const PAGE_MAX = 1200;
@@ -155,6 +156,8 @@ export function createFilterStep({ photo: photoPromise, corners: getCorners, sta
     return b;
   });
   const looks = h('div', { class: 'images-looks', role: 'radiogroup', 'aria-labelledby': titleId }, ...lookButtons);
+  // Beside a wide picture the row shows three or four looks: a mouse wheel scrolls along it.
+  wheelAlong(looks);
   looks.addEventListener('keydown', (e) => {
     const at = lookButtons.indexOf(document.activeElement);
     if (at < 0) return;

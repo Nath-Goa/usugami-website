@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -17,12 +18,10 @@ defaults:
     shell: bash
 
 jobs:
-  test:
-    name: Check and test
+  checks:
+    name: Check the site
     runs-on: ubuntu-24.04
-    # The browser tests take about 20 to 30 minutes here; tests/run.mjs also stops any one file
-    # after 20 minutes.
-    timeout-minutes: 60
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -36,13 +35,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Chromium, Firefox and WebKit with the system libraries they need (the versions the
-      # locked playwright package expects).
-      - name: Install the test browsers
-        run: npx playwright install --with-deps chromium firefox webkit
-
+      # --require-csp: every page, the web app's too, must have its own Content-Security-Policy.
+      # (The deployment runs the check without it.)
       - name: Check the site
-        run: node tools/check-site.mjs
+        run: node tools/check-site.mjs --require-csp
 
       # site/app/vendor/ is made from node_modules by npm run vendor and committed. When a library
       # update (for example from Dependabot) changes package-lock.json, run npm run vendor on the
@@ -64,15 +60,44 @@ jobs:
             process.exit(stale ? 1 : 0);
           "
 
-      # Every tests/*.test.mjs file, in Chromium, Firefox and WebKit as each file chooses.
+  test:
+    name: Test (part ${{ matrix.part }} of ${{ strategy.job-total }})
+    runs-on: ubuntu-24.04
+    # All the test files take about 48 minutes one after another on a fast PC, so they run in
+    # four parts of about 12 minutes each, side by side (tests/run.mjs --shard splits them by
+    # the times listed in it). tests/run.mjs also stops any one file after 20 minutes.
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Chromium, Firefox and WebKit with the system libraries they need (the versions the
+      # locked playwright package expects).
+      - name: Install the test browsers
+        run: npx playwright install --with-deps chromium firefox webkit
+
+      # This part's tests/*.test.mjs files, in Chromium, Firefox and WebKit as each file chooses.
       - name: Run the tests
-        run: npm test
+        run: npm test -- --shard ${{ matrix.part }}/${{ strategy.job-total }}
 
       - name: Upload test output
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: test-output
+          name: test-output-part-${{ matrix.part }}
           path: |
             tests/output/
             test-results/

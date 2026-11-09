@@ -9,7 +9,11 @@ Chromium only, no dark screenshots; `--only <words>`: the tests whose name has t
 screen, they cover Home's Take photo (in Chromium, Firefox and WebKit), images shared while the tool
 shows, the app's discard question on the browser's Back, a HEIC photo made into a page, the result
 step, and what text recognition is given (a test wraps `engine/ocr.js` to see each picture read, and
-to make reading fail).
+to make reading fail). Also: the chips over scrolled pages and their 48 px taps, the focus and
+scroll when the first pages come, the sheet's Back and Escape, messages announced after the
+progress dialog, the look reset by the router's Discard, the tool showing while pdf-lib, fontkit,
+pdf.js and Tesseract are held back, and Filters' wheel and Crop page's cursors (the sheet's and the
+wheel's tests in Chromium, Firefox and WebKit).
 
 ## Opening the tools
 
@@ -49,6 +53,7 @@ phone's Back go back as the app's Back does:
 | Screen | Step | Back |
 | --- | --- | --- |
 | Editor | none | leaves the tool, asking the app's "Discard these images?" first while there are pages (the back arrow, and the router through `discardQuestion()`) |
+| Create PDF sheet | `sheet` | closes it, the images kept (the app's Back closes its bottom sheet) |
 | Crop page | `crop` | closes it: a photo just taken is discarded, a scan stops |
 | Waiting for a scan's next image | `waiting` | stops the scan |
 | Filters | `filters` (above `crop`) | back to Crop page, the corners kept |
@@ -56,7 +61,22 @@ phone's Back go back as the app's Back does:
 
 Moving between the screens in code keeps the history as deep as the screen showing: steps are
 pushed, or taken back one `popStep()` at a time (each awaited), so the history never runs two
-changes at once.
+changes at once. The sheet's step goes however the sheet closes (Escape, the scrim, a swipe,
+Create PDF).
+
+### The editor
+
+The page size, orientation and margin chips stay under the top bar while the pages scroll (in the
+app only the page grid scrolls), the import progress over their top edge; the row is 56 px tall
+as the app's (each chip takes 48 px to tap), and the keyboard's focus brought to a page clears it.
+When the first pages arrive the editor starts at its top, and the focus, when it was on the empty
+screen's button pressed, goes to the first page. While images are being added the empty screen's
+buttons are off with `aria-disabled` (not `disabled`, which would throw the focus out of the
+button pressed).
+
+On Crop page, a mouse over a corner or side it would take (within 40 px, as a press) shows the
+`grab` cursor, `grabbing` while dragging. On Filters, a mouse wheel scrolls the row of looks along
+(beside a wide picture it shows three or four), until its end.
 
 ## Modules
 
@@ -69,7 +89,8 @@ changes at once.
 | `preview.js` | `pagePreview()`, `pagePicture(item)`, `forgetPreviews(image)`, `clearPreviews()` |
 | `crop-screen.js` | `createCropScreen(options)`, `createScanWaiting(options)` |
 | `filter-step.js` | `createFilterStep(options)`, `drawTurnedInto(canvas, picture, rotation)` |
-| `convert.js` | `openConvertSheet(model, onCreate)`, `convert(model, choice, hooks)`, `summary(count, layout)`, `ocrProblemDialog(key)` |
+| `convert.js` | `openConvertSheet(model, onCreate)`, `convert(model, choice, hooks)`, `preloadConvert()`, `summary(count, layout)`, `ocrProblemDialog(key)` |
+| `wheel.js` | `wheelAlong(row)` (a vertical mouse wheel scrolls a sideways row; returns a function that stops it) |
 
 These are the tool's own parts; nothing outside it needs them. In brief:
 
@@ -101,15 +122,24 @@ no page), `closeCrop()`, `scanUnderWay()`, `initialChoices()`, `defaultFileName(
 Settings kept (as the app's SettingsStore): `images.pageSize`, `images.orientation`,
 `images.margin`, `images.merge` (only changed when making a PDF of several images),
 `images.compression`. The look chosen last lives beside the module for the visit (reset by a new
-scan from Home and by Remove all), as the app keeps it beside its editor.
+scan from Home, by Remove all and Start over, and when the tool goes with its images, discarded
+through the router's question: as the app's confirmDiscard, which clears them all), as the app
+keeps it beside its editor.
 
 ### `convert.js`
 
 ```js
 const sheet = openConvertSheet(model, (choice) => convert(model, choice, { say: snackbar, signal }));
 // choice: { merge, fileName, compression, ocrLanguage (null: OCR off) }
+// sheet: { update(), close(), open, closed (a promise, resolved once it has closed) }
 const made = await convert(model, choice, { say, signal }); // → { files, name } or null
 ```
+
+The PDF writer, its fonts and the OCR engine (about 1 MB) are loaded once a PDF is made, not
+before the tool shows: `preloadConvert()` (called by `mount` once the tool shows) starts loading
+them without waiting. `say(text)` is called only once the progress dialog has closed (a message
+announced under a modal dialog is never heard, the rest of the page being inert); the result's
+saving messages are the app editor's (`showResult`'s `wording: 'images'`).
 
 `convert` makes the PDFs with `engine/images/build-pdf.js` (pages: `{ name, bytes, rotation, look,
 brightness, contrast }`, `bytes` being the page's stored image: the upright JPEG or PNG

@@ -1,9 +1,14 @@
 // The test harness itself (tests/harness.mjs): runInPage passing binary values both ways at any
-// depth, and withPage's allowConsole. In Chromium, Firefox and WebKit.
+// depth, and withPage's allowConsole, in Chromium, Firefox and WebKit; and the test runner
+// (tests/run.mjs: filters, --list, --shard), with Node only.
 //
 //   node tests/harness.test.mjs            all three browsers
 //   node tests/harness.test.mjs chromium   one
-import { withPage, runInPage, assert } from './harness.mjs';
+import { readdirSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { join } from 'node:path';
+import { withPage, runInPage, assert, root } from './harness.mjs';
+import { shard } from './run.mjs';
 
 const started = Date.now();
 let count = 0;
@@ -62,6 +67,38 @@ const PROBE = module(`
 
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const values = (v) => [...v].map(String);
+
+// tests/run.mjs (npm test), with Node only.
+const runner = join(root, 'tests', 'run.mjs');
+const runTests = (...args) => spawnSync(process.execPath, [runner, ...args], { encoding: 'utf8' });
+const testFiles = readdirSync(join(root, 'tests')).filter((f) => f.endsWith('.test.mjs')).sort();
+
+await test('npm test: filters that match no file fail, and --list shows what would run', async () => {
+  const none = runTests('nosuchname');
+  assert(none.status === 1 && none.stderr.includes('No test file matches: nosuchname'), `no match: ${none.status} ${none.stderr}`);
+  const partly = runTests('organize', 'nosuchname', '--list');
+  assert(partly.status === 1 && partly.stderr.includes('No test file matches: nosuchname'), `one filter matches nothing: ${partly.status}`);
+  const listed = runTests('organize', 'compress', '--list');
+  assert(listed.status === 0, listed.stderr);
+  const names = listed.stdout.trim().split(/\r?\n/);
+  assert(names.length >= 3 && names.every((f) => /organize|compress/.test(f) && testFiles.includes(f)), `listed: ${names}`);
+  for (const bad of [['--shard', '0/4'], ['--shard', '5/4'], ['--shard=x'], ['--nosuch']]) {
+    const r = runTests(...bad, '--list');
+    assert(r.status === 2 && /Usage:/.test(r.stderr), `${bad.join(' ')}: ${r.status} ${r.stderr}`);
+  }
+});
+
+await test('npm test -- --shard i/n: each test file in exactly one part, the same parts every time', async () => {
+  for (const n of [1, 2, 3, 4, 5]) {
+    const parts = Array.from({ length: n }, (_, i) => shard(testFiles, i + 1, n));
+    const all = parts.flat();
+    assert(all.length === testFiles.length && new Set(all).size === testFiles.length, `${n} parts cover every file once`);
+    assert(parts.every((p) => p.length && same(p, [...p].sort())), `${n} parts: none empty, each in name order`);
+    assert(same(parts, Array.from({ length: n }, (_, i) => shard(testFiles, i + 1, n))), `${n} parts: the same every time`);
+  }
+  const fromCli = [1, 2, 3, 4].map((i) => runTests('--shard', `${i}/4`, '--list').stdout.trim().split(/\r?\n/).slice(1));
+  assert(same(fromCli, [1, 2, 3, 4].map((i) => shard(testFiles, i, 4))), 'the command line gives the same parts');
+});
 
 const only = process.argv[2];
 for (const browser of ['chromium', 'firefox', 'webkit'].filter((b) => !only || b === only)) {

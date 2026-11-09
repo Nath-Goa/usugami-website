@@ -1,11 +1,9 @@
 // Picked, dropped, pasted and shared files as FileItems ({ name, type, size, lastModified, bytes }),
 // and what kind of file each one is: by its content first (ImageFileType.kt, the ZIP formats), then
 // by its name and its type (SharedFiles.kt).
-import { unzipSync } from '../lib/fflate.js';
-// Images to PDF's own: how images are told apart (no imports of its own), and the types its
-// picker offers (decode.js brings ~50 kB of image code with it; libheif stays loaded on demand).
-import { imageFileType, IMAGE_HEADER_BYTES, IMAGE_MIME } from '../engine/images/image-type.js';
-import { IMAGE_ACCEPT } from '../engine/images/decode.js';
+// Images to PDF's own: how images are told apart and the types its picker offers, from
+// image-type.js, which has no imports, so app start doesn't load decode.js and its ~50 kB.
+import { imageFileType, IMAGE_HEADER_BYTES, IMAGE_MIME, IMAGE_ACCEPT } from '../engine/images/image-type.js';
 
 const WORD_TYPES = [
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -65,8 +63,24 @@ const KIND_TYPES = {
   epub: 'application/epub+zip',
 };
 
-/** How long a cancelled pick waits for files that may follow it. */
-const CANCEL_GRACE_MS = 300;
+/**
+ * How long a cancelled pick waits for files that may follow it: Firefox (as Playwright drives it)
+ * sends change up to half a second after cancel while the page is busy. A real cancel shows
+ * nothing either way, so waiting longer costs nothing.
+ */
+const CANCEL_GRACE_MS = 1500;
+
+/**
+ * The accept attribute for `accept` (a kind or an accept string) where the picker opens. On
+ * Android the EPUB picker also offers "binary data", as the app's (OfficeKind.pickerTypes): some
+ * file providers don't know EPUB, and the content says whether a file is an e-book. Elsewhere that
+ * type would offer every .bin and .exe file.
+ */
+function acceptFor(accept) {
+  const known = ACCEPT[accept];
+  if (accept === 'epub' && /Android/i.test(globalThis.navigator?.userAgent ?? '')) return 'application/epub+zip,application/octet-stream,' + dotted('epub');
+  return known ?? accept ?? '';
+}
 
 /**
  * Opens the system's file picker and resolves with the files chosen, as FileItems (empty when the
@@ -79,7 +93,7 @@ const CANCEL_GRACE_MS = 300;
 export function pickFiles({ accept = 'pdf', multiple = false, capture } = {}) {
   const input = document.createElement('input');
   input.type = 'file';
-  input.accept = ACCEPT[accept] ?? accept ?? '';
+  input.accept = acceptFor(accept);
   input.multiple = !!multiple;
   if (capture) {
     // The attribute, not the property: browsers without camera capture have no such property.
@@ -133,6 +147,8 @@ export async function toFileItems(files, { onUnreadable } = {}) {
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
       const item = { name: file.name || 'file', type: file.type || '', size: bytes.length, lastModified: file.lastModified || Date.now(), bytes };
+      // A ZIP (Word, PowerPoint, Excel, EPUB) is read with fflate, loaded only when one comes.
+      if (isZip(bytes)) await loadZipReader();
       if (!item.type) item.type = typeOfKind(fileKind(item), item.bytes);
       items.push(item);
     } catch {
@@ -142,6 +158,18 @@ export async function toFileItems(files, { onUnreadable } = {}) {
   if (unreadable.length) onUnreadable?.(unreadable);
   return items;
 }
+
+// fflate (about 90 kB) is loaded once a ZIP is picked, dropped, pasted or shared, not at start.
+let fflate = null;
+let fflateLoading = null;
+
+/** Loads fflate for zipKind; a failure leaves the reading of the ZIP's directory alone. */
+function loadZipReader() {
+  fflateLoading ??= import('../lib/fflate.js').then((m) => { fflate = m; }, () => { fflateLoading = null; });
+  return fflateLoading;
+}
+
+const isZip = (bytes) => startsWith(bytes, [0x50, 0x4b, 0x03, 0x04]);
 
 /** A FileItem made from bytes (for files made in the app, or in tests). */
 export function fileItem(name, bytes, type = '') {
@@ -172,7 +200,7 @@ export function kindOfContent(bytes) {
   if (!bytes?.length) return null;
   if (isPdf(bytes)) return 'pdf';
   if (imageType(bytes)) return 'image';
-  if (startsWith(bytes, [0x50, 0x4b, 0x03, 0x04])) return zipKind(bytes);
+  if (isZip(bytes)) return zipKind(bytes);
   return null;
 }
 
@@ -250,15 +278,16 @@ function zipKind(bytes) {
   const names = [];
   let entries;
   try {
-    entries = unzipSync(bytes, {
+    entries = fflate ? fflate.unzipSync(bytes, {
       filter: (f) => {
         names.push(f.name);
         return (f.name === 'mimetype' || f.name === '[Content_Types].xml') && f.originalSize <= MAX_ENTRY;
       },
-    });
+    }) : storedEntries(bytes, names);
   } catch {
     return null;
   }
+  if (!entries) return null;
   const mimetype = entries.mimetype && latin1(entries.mimetype).trim();
   if (mimetype === 'application/epub+zip') return 'epub';
   const types = entries['[Content_Types].xml'] ? new TextDecoder().decode(entries['[Content_Types].xml']) : '';
@@ -274,6 +303,41 @@ function zipKind(bytes) {
   if (has('xl/workbook.xml')) return 'xlsx';
   if (has('meta-inf/container.xml') && names.some((x) => /\.opf$/i.test(x))) return 'epub';
   return null;
+}
+
+/**
+ * Without fflate (a FileItem not made by toFileItems): the ZIP's names from its central directory,
+ * into `names`, and its mimetype and [Content_Types].xml entries when they are stored as they are
+ * (an EPUB's mimetype always is). Compressed ones are left out: the main part's name still tells.
+ * Null for a damaged ZIP (or a ZIP64 one).
+ */
+function storedEntries(bytes, names) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let end = -1;
+  for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 22 - 0xffff); i--) {
+    if (view.getUint32(i, true) === 0x06054b50) { end = i; break; }
+  }
+  if (end < 0) return null;
+  const count = view.getUint16(end + 10, true);
+  let at = view.getUint32(end + 16, true);
+  const decoder = new TextDecoder();
+  const entries = {};
+  for (let n = 0; n < count; n++) {
+    if (at + 46 > bytes.length || view.getUint32(at, true) !== 0x02014b50) return null;
+    const method = view.getUint16(at + 10, true);
+    const size = view.getUint32(at + 20, true);
+    const nameLength = view.getUint16(at + 28, true);
+    const skip = nameLength + view.getUint16(at + 30, true) + view.getUint16(at + 32, true);
+    const local = view.getUint32(at + 42, true);
+    const name = decoder.decode(bytes.subarray(at + 46, at + 46 + nameLength));
+    names.push(name);
+    if ((name === 'mimetype' || name === '[Content_Types].xml') && method === 0 && size <= MAX_ENTRY && local + 30 <= bytes.length) {
+      const start = local + 30 + view.getUint16(local + 26, true) + view.getUint16(local + 28, true);
+      if (start + size <= bytes.length) entries[name] = bytes.subarray(start, start + size);
+    }
+    at += 46 + skip;
+  }
+  return entries;
 }
 
 function startsWith(bytes, prefix) {

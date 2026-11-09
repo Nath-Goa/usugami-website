@@ -6,11 +6,11 @@ import { t, tWeb, loadStrings } from '../../core/i18n.js';
 import { segmented, textField, snackbar, uid } from '../../core/ui.js';
 import { icon } from '../../core/icons.js';
 import { UserError, CancelledError } from '../../core/errors.js';
+// Only the choices: the engine (pdf-lib, the text engine) loads once there is text or a PDF.
 import {
-  addWatermark, watermarkStamp, paintWatermark, canDrawWatermark, WATERMARK_COLORS, WATERMARK_OPACITIES,
-  WATERMARK_MAX_LENGTH, DEFAULT_COLOR, DEFAULT_OPACITY,
-} from '../../engine/stamps.js';
-import { mountStampTool, optionHeading } from '../page-numbers/stamp-screen.js';
+  WATERMARK_COLORS, WATERMARK_OPACITIES, WATERMARK_MAX_LENGTH, DEFAULT_COLOR, DEFAULT_OPACITY,
+} from '../../engine/stamps-layout.js';
+import { mountStampTool, optionHeading, loadStampsEngine } from '../page-numbers/stamp-screen.js';
 
 const COLOR_LABELS = { gray: 'color_gray', black: 'color_black', red: 'color_red', blue: 'color_blue', green: 'color_green' };
 
@@ -28,6 +28,7 @@ export async function mount(ctx) {
     options: ({ changed }) => watermarkOptions(state, changed),
     async prepare() {
       if (!/\S/.test(state.text)) return null;
+      const { watermarkStamp, canDrawWatermark, addWatermark } = await loadStampsEngine();
       // Checked here, so the message comes at once rather than after the progress dialog.
       if (!canDrawWatermark(state.text)) {
         snackbar(tWeb('watermark_no_font'));
@@ -188,13 +189,18 @@ function watermarkPreview(state) {
   let pageBitmap = null;
   let renderAbort = null;
   let stamp = null;
+  /** The engine's paintWatermark, once it has loaded (a stamp needs it loaded first). */
+  let paint = null;
   let token = 0;
   let destroyed = false;
 
   const box = () => (isWide() ? { w: 420, h: 330 } : { w: 280, h: 220 });
   const size = () => {
     const b = box();
-    const width = Math.min(b.w, b.h * aspect);
+    // Never wider than the column it is in (two narrow panes just past 840 px), as the app's
+    // preview always fits its full-width column.
+    const room = el.clientWidth || b.w;
+    const width = Math.min(b.w, room, b.h * aspect);
     return { width, height: width / aspect };
   };
   const dpr = () => Math.min(3, Math.max(1, window.devicePixelRatio || 1));
@@ -219,11 +225,11 @@ function watermarkPreview(state) {
     const ctx = markCanvas.getContext('2d');
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, markCanvas.width, markCanvas.height);
-    if (!stamp) return;
+    if (!stamp || !paint) return;
     const { width, height } = size();
     const d = dpr();
     ctx.setTransform(d, 0, 0, d, 0, 0);
-    paintWatermark(ctx, stamp, width, height);
+    paint(ctx, stamp, width, height);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
   };
 
@@ -235,7 +241,10 @@ function watermarkPreview(state) {
     let next = null;
     if (text) {
       try {
-        next = await watermarkStamp(text, state.color);
+        // The engine loads the first time there is text to show.
+        const engine = await loadStampsEngine();
+        paint = engine.paintWatermark;
+        next = await engine.watermarkStamp(text, state.color);
       } catch {
         // Text no font can draw, or fonts that can't be fetched now: the page alone, as the app's
         // preview shows nothing it can't draw.
@@ -283,6 +292,15 @@ function watermarkPreview(state) {
   };
 
   const unwide = onWideChange(() => drawPage(false));
+  // Laid out again when its column changes width (the window resized, the panes appearing).
+  let roomWas = -1;
+  const sizer = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
+    const room = el.clientWidth;
+    if (room === roomWas || destroyed) return;
+    roomWas = room;
+    layout();
+  }) : null;
+  sizer?.observe(el);
   layout();
   update();
   return {
@@ -293,6 +311,7 @@ function watermarkPreview(state) {
       destroyed = true;
       renderAbort?.abort();
       unwide();
+      sizer?.disconnect();
     },
   };
 }

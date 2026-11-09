@@ -2,6 +2,8 @@
 <html lang="en" dir="ltr">
 <head>
   <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-uV6IylYgKgoUsU/DM1wlVm+EeyaxGyy5NCSJ1M5zBlM='; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self' blob: data:; connect-src 'self' blob: data:; worker-src 'self' blob:; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'none'; frame-src 'none'">
+  <meta name="referrer" content="no-referrer">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Usugami</title>
   <meta name="description" content="Usugami's PDF tools in your browser: make PDFs from images and Office files, and split, merge, edit, sign and compress PDFs. Files never leave your device.">
@@ -9,6 +11,9 @@
   <meta name="theme-color" content="#fff8f7" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#171717" media="(prefers-color-scheme: dark)">
   <script>
+    // The address usugami.com reached over plain http (as GitHub's redirects can lead): the app
+    // goes to https, where it can work offline, be installed and receive shared files.
+    if (location.protocol === 'http:' && /^(www\.)?usugami\.com$/i.test(location.hostname)) location.replace('https://usugami.com' + location.pathname + location.search + location.hash);
     // The appearance and language saved in Settings, applied before the page is drawn so it
     // doesn't flash in the wrong theme.
     try {
@@ -30,7 +35,28 @@
   <link rel="stylesheet" href="../assets/css/tokens.css">
   <link rel="stylesheet" href="css/app.css">
   <link rel="stylesheet" href="css/components.css">
+  <!-- Every module Home starts with (tests/shell.test.mjs checks the list against the imports),
+       so they download together rather than one level of imports after another. -->
   <link rel="modulepreload" href="js/main.js">
+  <link rel="modulepreload" href="js/core/settings.js">
+  <link rel="modulepreload" href="js/core/i18n.js">
+  <link rel="modulepreload" href="locales/languages.js">
+  <link rel="modulepreload" href="js/core/dom.js">
+  <link rel="modulepreload" href="js/core/router.js">
+  <link rel="modulepreload" href="js/core/tools.js">
+  <link rel="modulepreload" href="js/core/icons.js">
+  <link rel="modulepreload" href="js/core/share-inbox.js">
+  <link rel="modulepreload" href="locales/en/common.js">
+  <link rel="modulepreload" href="locales/en/kit.js">
+  <link rel="modulepreload" href="locales/en/mark.js">
+  <link rel="modulepreload" href="js/screens/home.js">
+  <link rel="modulepreload" href="js/core/search.js">
+  <link rel="modulepreload" href="js/core/recent.js">
+  <link rel="modulepreload" href="js/core/ui.js">
+  <link rel="modulepreload" href="js/core/files.js">
+  <link rel="modulepreload" href="js/core/names.js">
+  <link rel="modulepreload" href="js/screens/recent.js">
+  <link rel="modulepreload" href="js/engine/images/image-type.js">
   <script type="module" src="js/main.js"></script>
 </head>
 <body>

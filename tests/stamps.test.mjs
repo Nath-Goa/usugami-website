@@ -975,11 +975,11 @@ async function screenTests(browser, label, viewport) {
       await addFiles(page, browser, '.ui-empty', [file('beta.pdf', betaPdf)]);
       await page.waitForSelector('.watermark-options');
       await page.getByLabel(watermarkStrings.watermark_text).fill('गोपनीय प्रति');
-      // On computers, dropped onto the screen; on phones, Add PDFs. Firefox drops them too: the page
-      // is busy laying out the Hindi preview, and Playwright's Firefox sends the input's change event
-      // more than the kit's 300 ms after its cancel event then (a real Firefox sends no cancel).
+      // On computers, dropped onto the screen; on phones, Add PDFs, picked through its input in every
+      // browser (the kit waits 1.5 s after Playwright's Firefox's cancel event for its change event,
+      // which comes late while the page lays out the Hindi preview).
       if (wide) await drop(page, '.stamps-page', [file('alpha.pdf', alphaPdf), file('cover.pdf', coverPdf)]);
-      else await addFiles(page, browser, '.stamps-add', [file('alpha.pdf', alphaPdf), file('cover.pdf', coverPdf)], { dropped: browser === 'firefox' });
+      else await addFiles(page, browser, '.stamps-add', [file('alpha.pdf', alphaPdf), file('cover.pdf', coverPdf)]);
       await page.waitForSelector('.ui-batch-list');
       eq(await page.textContent('.ui-bottombar .ui-btn'), 'Add watermark to 3 PDFs', 'button');
       eq(await page.textContent('.stamps-hint'), watermarkStrings.watermark_for_all_hint, 'hint');
@@ -1076,6 +1076,155 @@ if (!quick) {
       }
     }, { viewport: { width: 320, height: 700 } });
   });
+}
+
+// ---- Review fixes: the focus while PDFs are added, the names shown, one PDF's problem, loading ----
+
+const notPdf = Buffer.from('This is not a PDF at all.');
+
+async function reviewTests(browser) {
+  await test(`${browser}: typing a name while PDFs are added keeps the focus in it`, async () => {
+    await withPage(async (page, url) => {
+      await openTool(page, url, 'watermark');
+      eq(await page.locator('main[data-main]').count(), 1, 'one main landmark');
+      await drop(page, '.ui-empty', [file('alpha.pdf', alphaPdf), file('beta.pdf', betaPdf)]);
+      await page.waitForFunction(() => document.querySelectorAll('.ui-batch-item').length === 2);
+      const field = page.locator('.ui-batch-item').nth(1).locator('input');
+      await field.click();
+      await page.keyboard.press('End');
+      await page.keyboard.type('ab');
+      await field.evaluate((input) => {
+        window.__blurs = 0;
+        input.addEventListener('blur', () => { window.__blurs++; });
+      });
+      await drop(page, '.stamps-page', [file('cover.pdf', coverPdf)]);
+      await page.waitForFunction(() => document.querySelectorAll('.ui-batch-item').length === 3);
+      eq(await page.evaluate(() => window.__blurs), 0, 'the name field never lost the focus while the PDF was added');
+      await page.keyboard.type(' cd');
+      eq(await page.locator('.ui-batch-item').count(), 3, 'no PDF removed');
+      assert((await field.inputValue()).endsWith('ab cd'), `typing went on in the name: ${await field.inputValue()}`);
+
+      // One PDF, its File name being typed in: a second dropped turns it into the list, the focus in
+      // the same PDF's name there.
+      await page.reload();
+      await openTool(page, url, 'watermark');
+      await drop(page, '.ui-empty', [file('alpha.pdf', alphaPdf)]);
+      await page.waitForSelector('.ui-file-card');
+      const one = page.getByRole('textbox', { name: kitFileName, exact: true });
+      await one.click();
+      await page.keyboard.press('End');
+      await page.keyboard.type('X');
+      await drop(page, '.stamps-page', [file('beta.pdf', betaPdf)]);
+      await page.waitForFunction(() => document.querySelectorAll('.ui-batch-item').length === 2);
+      const focusedIn = await page.evaluate(() => [...document.querySelectorAll('.ui-batch-item')].findIndex((c) => c.contains(document.activeElement) && document.activeElement.tagName === 'INPUT'));
+      eq(focusedIn, 0, "the focus is in the first card's name");
+      await page.keyboard.type(' ');
+      eq(await page.locator('.ui-batch-item').count(), 2, 'Space typed there removes nothing');
+      eq(await page.locator('.ui-batch-item').nth(0).locator('input').inputValue(), 'alpha_watermarkedX ', 'the name typed goes on');
+    }, { browser, viewport: PHONE, mobile: false });
+  });
+
+  await test(`${browser}: the name shown is the name the PDF gets, from one PDF to several and back`, async () => {
+    await withPage(async (page, url) => {
+      await openTool(page, url, 'page-numbers');
+      await drop(page, '.ui-empty', [file('alpha.pdf', alphaPdf)]);
+      await page.waitForSelector('.ui-file-card');
+      eq(await page.getByRole('textbox', { name: kitFileName, exact: true }).inputValue(), 'alpha_numbered', 'the one PDF\'s name');
+      await drop(page, '.stamps-page', [file('beta.pdf', betaPdf)]);
+      await page.waitForFunction(() => document.querySelectorAll('.ui-batch-item').length === 2);
+      await page.locator('.ui-batch-item').nth(0).locator('input').fill('Renamed in the list');
+      await page.getByRole('button', { name: common.remove_file.replace('{1}', 'beta.pdf') }).click();
+      await page.waitForFunction(() => !document.querySelector('.ui-batch-item'));
+      eq(await page.getByRole('textbox', { name: kitFileName, exact: true }).inputValue(), 'Renamed in the list', 'File name shows the name given in the list');
+      await page.getByRole('textbox', { name: kitFileName, exact: true }).fill('Typed for one');
+      await drop(page, '.stamps-page', [file('cover.pdf', coverPdf)]);
+      await page.waitForFunction(() => document.querySelectorAll('.ui-batch-item').length === 2);
+      const shown = [];
+      for (let i = 0; i < 2; i++) shown.push(await page.locator('.ui-batch-item').nth(i).locator('input').inputValue());
+      eq(shown, ['Typed for one', 'cover_numbered'], 'the list shows the name typed for one');
+      await press(page);
+      await page.waitForSelector('.ui-result', { timeout: 30000 });
+      const saved = await saveAll(page, 2);
+      eq(saved.map((d) => d.name).sort(), shown.map((n) => n + '.pdf').sort(), 'the PDFs get the names shown');
+    }, { browser, viewport: PHONE, mobile: false });
+  });
+
+  await test(`${browser}: one PDF that can't be opened is told about without its name`, async () => {
+    await withPage(async (page, url) => {
+      for (const tool of ['page-numbers', 'watermark']) {
+        await openTool(page, url, tool);
+        await drop(page, '.ui-empty', [file('text.pdf', notPdf)]);
+        await snack(page, common.pdf_import_failed);
+        await page.reload();
+        await openTool(page, url, tool);
+        await drop(page, '.ui-empty', [file('text.pdf', notPdf), file('empty.pdf', Buffer.alloc(0))]);
+        await snack(page, `text.pdf, empty.pdf: ${common.pdf_import_failed_many}`);
+        await page.reload();
+      }
+    }, { browser, viewport: PHONE, mobile: false, allowConsole: [/./] });
+  });
+}
+
+await test('chromium: the screens load pdf-lib and the text engine only once a PDF is added', async () => {
+  await withPage(async (page, url) => {
+    for (const tool of ['page-numbers', 'watermark']) {
+      const asked = [];
+      const log = (r) => asked.push(r.url());
+      await page.goto(url + 'app/');
+      await page.waitForSelector('html[data-ready="true"]');
+      page.on('request', log);
+      await page.evaluate(async (id) => (await import('./js/core/router.js')).navigate('/tool/' + id), tool);
+      await page.waitForSelector(`#app > .screen[data-tool="${tool}"]:not([aria-busy]) .ui-empty`);
+      await page.waitForTimeout(500);
+      const heavy = asked.filter((u) => /vendor\/(pdf-lib|fontkit)|engine\/text\/|engine\/stamps\.js/.test(u));
+      eq(heavy, [], `${tool}: nothing heavy before a PDF is added`);
+      await drop(page, '.ui-empty', [file('alpha.pdf', alphaPdf)]);
+      await page.waitForSelector('.ui-file-card');
+      await page.waitForFunction(() => performance.getEntriesByType('resource').some((e) => /vendor\/pdf-lib/.test(e.name)), null, { timeout: 15000 });
+      page.off('request', log);
+    }
+  }, { viewport: PHONE });
+});
+
+await test('chromium: the watermark preview of a landscape page stays in its column', async () => {
+  for (const [w, size] of [[840, null], [900, null], [412, [280, 198]], [1366, [420, 297]]]) {
+    await withPage(async (page, url) => {
+      await openTool(page, url, 'watermark');
+      await drop(page, '.ui-empty', [file('beta.pdf', betaPdf)]);
+      await page.waitForSelector('.ui-file-card');
+      await page.waitForFunction(() => {
+        const p = document.querySelector('.watermark-preview')?.getBoundingClientRect();
+        return p && p.width / p.height > 1.3;
+      }, null, { timeout: 15000 });
+      const r = await page.evaluate(() => {
+        const box = (s) => { const b = document.querySelector(s).getBoundingClientRect(); return { left: b.left, right: b.right, width: b.width, height: b.height }; };
+        return { preview: box('.watermark-preview'), options: box('.watermark-options') };
+      });
+      assert(r.preview.left >= r.options.left - 0.5 && r.preview.right <= r.options.right + 0.5, `${w} px: the preview (${r.preview.left}–${r.preview.right}) is inside its column (${r.options.left}–${r.options.right})`);
+      if (size) near(r.preview.width, size[0], 1, `${w} px: preview width`), near(r.preview.height, size[1], 1.5, `${w} px: preview height`);
+    }, { viewport: { width: w, height: 900 }, mobile: false });
+  }
+});
+
+await test('chromium 1920 px: the main button ends where the column above it ends', async () => {
+  await withPage(async (page, url) => {
+    for (const tool of ['page-numbers', 'watermark']) {
+      await openTool(page, url, tool);
+      await drop(page, '.ui-empty', [file('alpha.pdf', alphaPdf)]);
+      await page.waitForSelector('.ui-file-card');
+      const r = await page.evaluate(() => ({
+        button: document.querySelector('.ui-bottombar .ui-btn--filled').getBoundingClientRect().right,
+        column: document.querySelector('.stamps-content').getBoundingClientRect().right,
+      }));
+      near(r.button, r.column, 1, `${tool}: the button's right edge`);
+    }
+  }, { viewport: { width: 1920, height: 1000 } });
+});
+
+await reviewTests('chromium');
+if (!quick) {
+  await reviewTests('firefox');
+  await reviewTests('webkit');
 }
 
 if (failures) {

@@ -313,11 +313,12 @@ async function press(page, selector, { touch }) {
   if (touch) await target.tap(); else await target.click();
 }
 
-/** Picks `files` with the button `selector` opens; in Firefox they are dropped on the screen instead. */
-async function pickWith(page, selector, files, { touch = false, browser = 'chromium' } = {}) {
-  // Playwright's Firefox fires the input's cancel event before its change event (a real Firefox
-  // doesn't), so there the PDFs are dropped instead.
-  if (browser === 'firefox') return drop(page, files, (await page.$('.ui-empty')) ? '.ui-empty' : '.compress-page');
+/**
+ * Picks `files` with the button `selector` opens, through the real file input in every browser (the
+ * kit's pickFiles takes the files of Playwright's Firefox, which sends the input's cancel event just
+ * before its change event).
+ */
+async function pickWith(page, selector, files, { touch = false } = {}) {
   const [chooser] = await Promise.all([page.waitForEvent('filechooser'), press(page, selector, { touch })]);
   await chooser.setFiles(files);
 }
@@ -575,7 +576,8 @@ async function testCompress(page, url, fx, { touch, label }) {
   const downloads = [];
   page.on('download', (d) => downloads.push(d.suggestedFilename()));
   await press(page, `.ui-result-actions .ui-btn:has-text("${common.save_to_downloads}")`, opts);
-  await snack(page, sayN('msg_saved_downloads_many', 2, 2), 'saved');
+  // A PDF tool's result says it in its own words (PdfToolsViewModel: pdf_saved_downloads).
+  await snack(page, common.pdf_saved_downloads, 'saved');
   eq(downloads.sort(), ['scan_compressed (2).pdf', 'scan_compressed.pdf'], 'both downloaded');
   eq(await page.$$eval('.ui-result-saved', (els) => els.map((e) => !e.hidden)), [true, true], 'each marked saved');
   page.removeAllListeners('download');
@@ -810,6 +812,117 @@ async function testCompressMark(page, url, fx, { touch }) {
   console.log('ok compress and the Usugami watermark');
 }
 
+/**
+ * The edges of the screen both tools share: the single PDF's name after a trip through the list,
+ * Start over while more PDFs are still opening (PdfToolsViewModel.startOver abandons them),
+ * leaving with a password question open, a reload on the result's history step, and the main
+ * landmark "Skip to content" goes to.
+ */
+async function testScreenEdges(page, url, fx, { touch }) {
+  const opts = { touch };
+  await openTool(page, url, 'compress');
+
+  // The main part of the screen is one main landmark, past the top bar.
+  eq(await page.$$eval('#app main, #app [role="main"]', (els) => els.map((e) => e.hasAttribute('data-main'))), [true], 'one main landmark');
+  await page.focus('.skip-link');
+  await page.keyboard.press('Enter');
+  ok(await page.evaluate(() => document.activeElement?.matches('#app main')), 'Skip to content goes to it');
+  await page.keyboard.press('Tab');
+  ok(await page.evaluate(() => !!document.activeElement?.closest('#app main') && !document.activeElement.closest('.ui-topbar')), 'the next Tab is past the top bar');
+
+  // The single PDF's File name shows the name it will be made with, after the list renamed it.
+  await pickWith(page, '.ui-empty', [fx.scan], opts);
+  await listed(page, 1);
+  await page.fill('.compress-name input', 'First name');
+  await pickWith(page, '.compress-add', [fx.compact], opts);
+  await listed(page, 2);
+  eq(await nameFields(page), ['First name', 'compact_compressed'], 'the name typed goes with it into the list');
+  await page.fill(`${itemSelector(0)} .ui-field-input`, 'Renamed in the list');
+  await press(page, `${itemSelector(1)} .ui-file-head .ui-icon-btn`, opts);
+  await listed(page, 1);
+  eq(await page.$eval('.compress-name input', (i) => i.value), 'Renamed in the list', 'one PDF again: the name from the list');
+  eq((await handleState(page))[0].outputName, 'Renamed in the list', 'the name it will get');
+  await runToResult(page, opts);
+  eq((await resultRows(page)).map((r) => r.name), ['Renamed in the list.pdf'], 'made under the name shown');
+
+  // A reload on the result's step: the result is gone, and so is its step in the history.
+  ok(await page.evaluate(() => history.state?.step === 'result'), 'the result is a step of its own');
+  // The browser asks before a reload loses the unsaved result: leave.
+  const leave = (d) => d.accept();
+  page.on('dialog', leave);
+  await page.reload();
+  page.off('dialog', leave);
+  await page.waitForSelector('html[data-ready="true"]', { timeout: 20000 });
+  await arrive(page, '#app .screen[data-tool="compress"]:not([aria-busy]) .compress-content--empty');
+  await page.waitForFunction(() => history.state?.step == null, null, { timeout: 10000 });
+  checks++;
+  // Forward to it again finds no result to show: the screen stays as it is.
+  await page.goForward();
+  await page.waitForTimeout(300);
+  await page.waitForFunction(() => history.state?.step == null, null, { timeout: 10000 });
+  ok(!(await page.$('.ui-result')) && !!(await page.$('.compress-content--empty')), 'forward: still the PDFs to pick');
+
+  // Start over (Remove on the one PDF) while more are opening: they are abandoned, and their
+  // password isn't asked for.
+  const many = [];
+  {
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    for (let i = 0; i < 1500; i++) doc.addPage([300, 300]).drawText(`PAGE ${i + 1}`, { x: 20, y: 150, size: 18, font });
+    many.push({ name: 'long.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await doc.save()) });
+  }
+  many.push(fx.locked, fx.scan2);
+  await pickWith(page, '.ui-empty', [fx.scan], opts);
+  await listed(page, 1);
+  const cdp = await page.context().newCDPSession(page);
+  try {
+    // Slowed down, so the first PDF added (1500 pages) takes long enough to open to start over
+    // meanwhile. Only once the files are in: throttled, Playwright's own handing over of them (its
+    // decoding in the page, some 6 MB) outlasts its timeout on Windows, where Chrome's throttling
+    // slows more than the rate says.
+    await pickWith(page, '.compress-add', many, opts);
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: 30 });
+    // Remove on the one PDF's card, pressed while the bar says the others are opening (done in the
+    // page, so it lands before the first of them is open).
+    await page.waitForFunction(() => {
+      const bar = document.querySelector('.compress-progress');
+      const remove = document.querySelector('.compress-content--one .compress-card .ui-file-head .ui-icon-btn');
+      if (!bar || bar.hidden || !remove) return false;
+      remove.click();
+      return true;
+    }, null, { timeout: 10000 });
+    checks++;
+    ok(await page.$eval('.compress-progress', (p) => p.hidden), 'no longer opening');
+    ok(await page.$eval('.ui-empty', (e) => !e.hasAttribute('aria-disabled')), 'picking is on again at once');
+    await page.evaluate(async () => (await import(new URL('js/core/router.js', location.href).href)).currentHandle().settled);
+  } finally {
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+    await cdp.detach();
+  }
+  await page.waitForTimeout(300);
+  ok(!!(await page.$('.compress-content--empty')), 'started over: none listed');
+  eq(await handleState(page), [], 'none added once open');
+  ok(!(await page.$('dialog[open]')), 'no password asked for one abandoned');
+  await noSnack(page, 300);
+
+  // Back closes the password question first, as Android's Back closes a dialog.
+  await pickWith(page, '.ui-empty', [fx.locked], opts);
+  await page.waitForSelector('dialog[open] input[type="password"]');
+  await page.goBack();
+  await page.waitForSelector('dialog[open]', { state: 'detached', timeout: 5000 });
+  await page.waitForTimeout(300);
+  ok(!!(await page.$('#app .screen[data-tool="compress"] .compress-content--empty')), 'Back with the question open: the question goes, the screen stays');
+  // Leaving the screen another way while a password is asked for (a PDF shared to the app opens
+  // another screen) takes the question away with the screen.
+  await pickWith(page, '.ui-empty', [fx.locked], opts);
+  await page.waitForSelector('dialog[open] input[type="password"]');
+  await page.evaluate(async () => (await import(new URL('js/core/router.js', location.href).href)).navigate('/'));
+  await page.waitForSelector('#app .screen[data-route="home"]:not([aria-busy])');
+  await page.waitForSelector('dialog[open]', { state: 'detached', timeout: 5000 });
+  checks++;
+  console.log('ok screen edges');
+}
+
 // ---------------------------------------------------------------------------------------------
 // Flatten PDF
 
@@ -940,6 +1053,17 @@ async function testDesktopKeyboard(page, url, fx) {
 await testStrings();
 const fx = await fixtures();
 
+// --edges: only the shared screen's edges (testScreenEdges), at phone size in Chromium.
+if (process.argv.includes('--edges')) {
+  await withPage(async (page, url) => {
+    await page.goto(url + 'app/');
+    await page.waitForSelector('html[data-ready="true"]');
+    await testScreenEdges(page, url, fx, { touch: true });
+  }, { viewport: PHONE });
+  console.log(`batch-ui (edges): all ${checks} checks passed`);
+  process.exit(0);
+}
+
 await withPage(async (page, url) => {
   await page.goto(url + 'app/');
   await page.waitForSelector('html[data-ready="true"]');
@@ -947,6 +1071,7 @@ await withPage(async (page, url) => {
   await testCompress(page, url, fx, { touch: true, label: 'phone' });
   await testCompressMore(page, url, fx, { touch: true, label: 'phone' });
   await testCompressMark(page, url, fx, { touch: true });
+  await testScreenEdges(page, url, fx, { touch: true });
   await testFlatten(page, url, fx, { touch: true, label: 'phone' });
 }, { viewport: PHONE });
 

@@ -9,13 +9,32 @@ import {
 } from '../../core/ui.js';
 import { icon } from '../../core/icons.js';
 import { pickFiles } from '../../core/files.js';
-import { openPdf, reportFileProblems } from '../../core/pdfdoc.js';
+import { openPdf, preloadPdfJs } from '../../core/pdfdoc.js';
 import { showResult } from '../../core/output.js';
 import { baseName, withSuffix } from '../../core/names.js';
 import { UserError, CancelledError } from '../../core/errors.js';
-import { signPdf } from '../../engine/sign.js';
 import { openSignaturePad, closeSignaturePad } from './pad.js';
 import { pageStrip, signaturePlacer, signatureSvg } from './placer.js';
+
+/** The engine that signs (with pdf-lib), loaded on its own: only Sign PDF needs it. */
+let engine = null;
+/** Loads the signing engine (once; again after a failure). */
+function loadEngine() {
+  engine ??= import('../../engine/sign.js').catch((e) => {
+    engine = null;
+    throw e;
+  });
+  return engine;
+}
+
+/**
+ * Turns a control off for a moment without `disabled`, which would throw the keyboard focus out of
+ * it; its click handler checks for itself.
+ */
+function setOff(el, off) {
+  if (off) el.setAttribute('aria-disabled', 'true');
+  else el.removeAttribute('aria-disabled');
+}
 
 /** The signature drawn this visit (a Signature), or null. Gone when the page is reloaded or closed. */
 let sessionSignature = null;
@@ -27,6 +46,8 @@ export function keptSignature() {
 
 /** Renders Sign PDF into ctx.root. */
 export async function mount(ctx) {
+  // pdf.js (about 460 kB) loads while a PDF is being chosen; pdfdoc.js imports it only on demand.
+  preloadPdfJs();
   await Promise.all([loadStrings('sign'), ensureCss(new URL('./sign.css', import.meta.url))]);
 
   const state = {
@@ -47,6 +68,10 @@ export async function mount(ctx) {
   const life = new AbortController();
   let runBtn = null;
   let detachDrop = null;
+  let empty = null;
+  /** The signing under way and its progress dialog, both stopped when the screen goes. */
+  let running = null;
+  let runningDialog = null;
   let strip = null;
   let placer = null;
   let parts = null;
@@ -57,6 +82,9 @@ export async function mount(ctx) {
   function dropEditor() {
     detachDrop?.();
     detachDrop = null;
+    // The empty card's drop zone goes with it (the kit keeps paste targets until told).
+    empty?.detachDrop?.();
+    empty = null;
     strip?.destroy();
     strip = null;
     placer?.destroy();
@@ -74,7 +102,8 @@ export async function mount(ctx) {
     try {
       src = await openPdf(item, { password: item.password, signal: life.signal });
     } catch (e) {
-      if (!(e instanceof CancelledError)) reportFileProblems([{ name: item.name, error: e }]);
+      // One PDF picked is told about without its name, as the app's addPdfs.
+      if (!(e instanceof CancelledError) && !unmounted) snackbar(e instanceof UserError ? t(e.key, ...(e.args ?? [])) : t('pdf_import_failed'));
     }
     state.opening = false;
     if (unmounted) {
@@ -89,12 +118,17 @@ export async function mount(ctx) {
       state.fileName = withSuffix(baseName(src.name), '_signed', 'Usugami');
     }
     render();
-    // The card picked from has gone: the focus goes on to the signature, what comes next.
+    // The card picked from has gone: the focus goes on to the signature, what comes next. Nothing
+    // opened (the password dialog cancelled, say): it stays on Choose PDF.
     const active = document.activeElement;
-    if (src && (!active || active === document.body || !active.isConnected)) parts?.signatureCard.focus({ preventScroll: true });
+    if (!active || active === document.body || !active.isConnected) {
+      if (src) parts?.signatureCard.focus({ preventScroll: true });
+      else empty?.focus({ preventScroll: true });
+    }
   }
 
   async function pick() {
+    if (state.opening) return;
     const items = await pickFiles({ accept: 'pdf', multiple: false });
     if (items.length) openItem(items[0]);
   }
@@ -146,6 +180,8 @@ export async function mount(ctx) {
     const src = state.src;
     const has = !!sessionSignature;
     parts.layout.classList.toggle('has-place', has);
+    // The main button lines up with the column above it: the page's width once the preview shows.
+    ctx.root.querySelector('.sign-bottombar')?.classList.toggle('sign-bottombar--wide', has);
     if (has && src.pageCount > 1 && !strip) {
       strip = pageStrip({
         src, selected: state.page, label: t('sign_page'),
@@ -177,21 +213,29 @@ export async function mount(ctx) {
   // ---- Screens
 
   function render() {
+    // Choose PDF made again (a PDF starting or ending to open) keeps the focus it had.
+    const hadEmpty = !!empty && empty.contains(document.activeElement);
     dropEditor();
     state.view = 'edit';
     const bar = topBar({ title: t('tool_sign'), onBack: () => ctx.back() });
-    const page = h('div', { class: 'page sign-page' });
+    // The screen's main landmark, which the skip link goes to.
+    const page = h('main', { class: 'page sign-page', 'data-main': '' });
     runBtn = button({ label: t('pdf_sign_action'), onClick: run, cls: 'sign-run' });
-    ctx.root.replaceChildren(bar, page, bottomBar(runBtn));
+    const bottom = bottomBar(runBtn);
+    bottom.classList.add('sign-bottombar');
+    ctx.root.replaceChildren(bar, page, bottom);
     updateButton();
     if (state.opening) page.append(linearProgress({ value: null, label: t('pdf_working') }));
     if (!state.src) {
-      const empty = emptyState({
+      empty = emptyState({
         icon: 'add', title: t('pick_pdf'), onClick: () => { if (!state.opening) pick(); },
         onFiles: (items) => openItem(items[0]), accept: 'pdf', multiple: false,
       });
-      if (state.opening) empty.disabled = true;
+      // Off while a PDF opens, but kept in the focus order (`disabled` would throw the focus out,
+      // and a cancelled password dialog would then have nowhere to give it back).
+      setOff(empty, state.opening);
       page.append(h('div', { class: 'sign-empty' }, empty));
+      if (hadEmpty) empty.focus({ preventScroll: true });
       return;
     }
     const src = state.src;
@@ -235,21 +279,32 @@ export async function mount(ctx) {
     state.processing = true;
     updateButton();
     const controller = new AbortController();
+    running = controller;
     const dialog = progressDialog({ title: t('pdf_working'), onCancel: () => controller.abort() });
+    runningDialog = dialog;
     let out = null;
+    let failure = null;
     try {
+      // Offline before the engine was ever fetched: said as the router says a tool that can't load.
+      const { signPdf } = await loadEngine().catch(() => { throw new UserError('web_tool_load_failed', t('tool_sign')); });
       out = await signPdf(
         { name: src.name, bytes: src.bytes, password: src.password },
         { signature: sessionSignature, page: state.page, placement: state.placement, name: state.fileName },
         { signal: controller.signal },
       );
     } catch (e) {
-      if (!(e instanceof CancelledError) && !unmounted) snackbar(e instanceof UserError ? t(e.key, ...e.args) : t('pdf_process_failed'));
+      if (!(e instanceof CancelledError) && !controller.signal.aborted) failure = e;
     } finally {
       await dialog.close();
       state.processing = false;
+      if (running === controller) {
+        running = null;
+        runningDialog = null;
+      }
     }
     if (unmounted) return;
+    // Said once the progress dialog has gone: while it is open, a screen reader hears nothing outside it.
+    if (failure) snackbar(failure instanceof UserError ? t(failure.key, ...(failure.args ?? [])) : t('pdf_process_failed'));
     if (out) {
       showResultView(out);
       ctx.pushStep?.('result');
@@ -303,11 +358,17 @@ export async function mount(ctx) {
   // A reload on the result step: the result is gone, so its history step goes too.
   if (ctx.step) ctx.popStep?.();
   if (ctx.files?.length) openItem(ctx.files[0]);
+  // The signing engine loads while the screen is used, so Sign PDF doesn't wait for it.
+  setTimeout(() => { if (!unmounted) loadEngine().catch(() => {}); }, 0);
 
   return {
     unmount() {
       unmounted = true;
       life.abort();
+      // A signing under way stops, and its progress dialog goes with the screen at once rather than
+      // once the work notices (the next screen would be covered meanwhile).
+      running?.abort();
+      runningDialog?.close();
       closeSignaturePad();
       dropEditor();
       putAwayResult();

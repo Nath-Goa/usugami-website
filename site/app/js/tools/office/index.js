@@ -15,17 +15,30 @@ import {
   segmented, dropdown, switchRow, alertDialog, uid,
 } from '../../core/ui.js';
 import { pickFiles } from '../../core/files.js';
-import { reportFileProblems } from '../../core/pdfdoc.js';
 import { showResult } from '../../core/output.js';
 import { batchList, reportBatchFailures, BatchChoices } from '../../core/batch.js';
+// pdfdoc.js loads pdf.js only when a PDF is opened, so the screen doesn't load it before a file is picked.
+import { reportFileProblems } from '../../core/pdfdoc.js';
 import { CancelledError, UserError } from '../../core/errors.js';
 import { baseName, uniqueNames } from '../../core/names.js';
 import { icon } from '../../core/icons.js';
+// Only what the screen shows before a file is picked; the engine that checks and converts files
+// (ZIP and XML reading, the converters and their libraries) is loaded meanwhile (see loadEngine).
 import {
-  OFFICE_KINDS, BOOK_PAGES, SHEET_PAPERS, SHEET_ORIENTATIONS, convertOffice, verifyOfficeFile,
-  defaultOfficeOptions, officeErrorKey, OfficeNotRecognized,
-} from '../../engine/office/index.js';
+  OFFICE_KINDS, BOOK_PAGES, SHEET_PAPERS, SHEET_ORIENTATIONS, defaultOfficeOptions, officeErrorKey,
+} from '../../engine/office/kinds.js';
+import { OfficeNotRecognized } from '../../engine/office/problems.js';
 import { officeProgressDialog } from './progress.js';
+
+/** The office engine (engine/office/index.js), loaded once, again after a failure (offline). */
+let engineLoading = null;
+function loadEngine() {
+  engineLoading ??= import(new URL('../../engine/office/index.js', import.meta.url).href).catch((e) => {
+    engineLoading = null;
+    throw e;
+  });
+  return engineLoading;
+}
 
 /** What each kind of file is called and shown with (OfficeOptions.kt, PdfToolScreen.kt). */
 export const OFFICE_SCREENS = Object.freeze({
@@ -125,9 +138,10 @@ export async function mount(ctx) {
   // chose to keep it: they wait (see receiveFiles).
   let waiting = [];
 
-  // The kind's converter is loaded while files are picked, so it is there when the button is
-  // pressed (convertOffice imports the same module). Failing to load (offline before it was
-  // saved for offline use) is said as such, not as a problem with the file.
+  // The engine and the kind's converter are loaded while files are picked, so they are there
+  // when a file is checked and the button is pressed (convertOffice imports the same module); the
+  // empty screen shows without waiting for them. Failing to load (offline before they were saved
+  // for offline use) is said as such, not as a problem with the file.
   let converter = null;
   const loadConverter = () => {
     converter ??= import(new URL(officeKind.module, new URL('../../engine/office/', import.meta.url)).href).catch((e) => {
@@ -136,7 +150,9 @@ export async function mount(ctx) {
     });
     return converter;
   };
+  loadEngine().catch(() => { /* tried again when a file is added */ });
   loadConverter().catch(() => { /* tried again when the button is pressed */ });
+  const toolName = () => t(ctx.tool?.title ?? `tool_${kind}`);
 
   const documentOf = (id) => documents.find((d) => d.id === id);
   const nameOf = (id) => choices.nameOf(id) ?? baseName(documentOf(id)?.name ?? '');
@@ -149,7 +165,8 @@ export async function mount(ctx) {
   const progress = linearProgress({ value: null, label: t('web_opening_files') });
   progress.classList.add('office-progress');
   const content = h('div', { class: 'office-content' });
-  const page = h('div', { class: 'page office-page' }, progress, content);
+  // The screen's main landmark, which the app's "Skip to content" link moves to.
+  const page = h('main', { class: 'page office-page', 'data-main': '' }, progress, content);
   const runButton = button({ label: t('convert'), onClick: () => run(), cls: 'office-run' });
   const bottom = bottomBar(runButton);
 
@@ -402,11 +419,19 @@ export async function mount(ctx) {
   const addNow = async (items, mine) => {
     const failed = [];
     const abandoned = () => closed || mine !== generation;
+    let engine;
+    try {
+      engine = await loadEngine();
+    } catch {
+      // Offline before the engine was saved for offline use: said as such, not as a problem with the files.
+      if (!abandoned()) snackbar(t('web_tool_load_failed', toolName()));
+      return;
+    }
     for (const item of items) {
       if (abandoned()) return;
       const name = item.name || `${officeKind.fallbackName}.${officeKind.extension}`;
       try {
-        await verifyOfficeFile(kind, item, { signal: importStop.signal });
+        await engine.verifyOfficeFile(kind, item, { signal: importStop.signal });
         if (abandoned()) return;
         documents.push({ id: nextId++, item, name, size: item.size ?? item.bytes?.length ?? 0 });
         choices = choices.following(documents.map((d) => d.id));
@@ -457,12 +482,14 @@ export async function mount(ctx) {
     const chosen = { ...options };
     processing = true;
     refreshButton();
+    let engine;
     try {
+      engine = await loadEngine();
       await loadConverter();
     } catch {
       processing = false;
       refreshButton();
-      if (!closed) snackbar(t('web_tool_load_failed', t(ctx.tool?.title ?? `tool_${kind}`)));
+      if (!closed) snackbar(t('web_tool_load_failed', toolName()));
       return;
     }
     if (closed) return;
@@ -477,7 +504,7 @@ export async function mount(ctx) {
         if (stop.aborted) throw new CancelledError();
         if (many) dialog.next(i + 1, taken.length, taken[i].name);
         try {
-          const out = await convertOffice(kind, taken[i].item, { ...chosen, name: names[i] }, {
+          const out = await engine.convertOffice(kind, taken[i].item, { ...chosen, name: names[i] }, {
             signal: stop,
             onProgress: (done, total, more) => dialog.progress(done, total, more),
           });
@@ -586,6 +613,8 @@ export async function mount(ctx) {
   };
 
   showEditing();
+  // Opened on the result's step (a reload there): the result is gone, so its history step goes too.
+  if (ctx.step) ctx.popStep?.();
   if (ctx.files?.length) add(ctx.files);
 
   return {
@@ -606,13 +635,22 @@ export async function mount(ctx) {
       // the PDFs are being made the app ignores Back; here leaving asks first, and stops the run.
       return processing || (!!resultEl && !resultEl.isSaved());
     },
+    /**
+     * The router's step, as the other tools take it: the browser's Back from the result returns to
+     * the files; Forward shows the result left with Back again, and one that has gone (Start over,
+     * a run since) goes back to where it was.
+     */
     onStep(step) {
-      if (step == null && resultEl) {
+      if (step == null) {
         stepPushed = false;
-        showEditing();
-      } else if (step === 'result' && !resultEl && lastResult) {
+        if (resultEl) showEditing();
+      } else if (resultEl) {
+        stepPushed = true;
+      } else if (lastResult && !processing) {
         stepPushed = true;
         showOutputs();
+      } else {
+        ctx.popStep?.();
       }
     },
     receiveFiles: (files) => receive(files),

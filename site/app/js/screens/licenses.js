@@ -21,15 +21,15 @@ export const THIRD_PARTY = [
   },
   {
     name: 'fontkit', version: '@cantoo/fontkit', purpose: 'web_lic_fontkit', license: 'MIT License',
-    copyright: 'Copyright (c) 2014-present Devon Govett. Fork by Cantoo.', text: 'vendor/fontkit/LICENSE', home: 'https://github.com/cantoo-scribe/fontkit',
+    copyright: 'Copyright (c) 2014-present Devon Govett. Fork by Cantoo.', text: 'vendor/fontkit/fontkit.esm.min.js.LICENSE.txt', home: 'https://github.com/cantoo-scribe/fontkit',
   },
   {
     name: 'fflate', version: 'fflate', purpose: 'web_lic_fflate', license: 'MIT License',
-    copyright: 'Copyright (c) Arjun Barrett', text: 'vendor/fflate/LICENSE', home: 'https://github.com/101arrowz/fflate',
+    copyright: 'Copyright (c) Arjun Barrett', text: 'vendor/fflate/LICENSE.txt', home: 'https://github.com/101arrowz/fflate',
   },
   {
     name: 'PDF.js', version: 'pdfjs-dist', purpose: 'web_lic_pdfjs', license: 'Apache License 2.0',
-    copyright: 'Copyright Mozilla Foundation and contributors', text: 'vendor/pdfjs/LICENSE', home: 'https://mozilla.github.io/pdf.js/',
+    copyright: 'Copyright Mozilla Foundation and contributors', text: 'vendor/pdfjs/LICENSE.txt', home: 'https://mozilla.github.io/pdf.js/',
   },
   {
     name: 'Tesseract.js', version: 'tesseract.js', purpose: 'web_lic_tesseract', license: 'Apache License 2.0',
@@ -40,17 +40,17 @@ export const THIRD_PARTY = [
     license: 'Apache License 2.0; Leptonica: BSD 2-Clause; libjpeg: IJG License; libpng, zlib, LibTIFF, libwebp, GIFLIB: their own licenses',
     copyright: 'Tesseract OCR: Copyright Hewlett-Packard, Google and the Tesseract authors. Leptonica: Copyright (C) 2001-2020 Leptonica. '
       + 'This software is based in part on the work of the Independent JPEG Group.',
-    text: 'vendor/tesseract/core/LICENSE', home: 'https://github.com/naptha/tesseract.js-core',
+    text: 'vendor/tesseract/core/LICENSE.txt', home: 'https://github.com/naptha/tesseract.js-core',
   },
   {
     name: 'Tesseract trained data (eng, fra, spa, hin)', version: '@tesseract.js-data/eng',
     packages: ['@tesseract.js-data/eng', '@tesseract.js-data/fra', '@tesseract.js-data/spa', '@tesseract.js-data/hin'],
     purpose: 'web_lic_tessdata', license: 'Apache License 2.0',
-    copyright: 'Copyright Google and the Tesseract OCR authors (tessdata_best)', text: 'vendor/tesseract/core/LICENSE', home: 'https://github.com/tesseract-ocr/tessdata_best',
+    copyright: 'Copyright Google and the Tesseract OCR authors (tessdata_best)', text: 'vendor/tesseract/core/LICENSE.txt', home: 'https://github.com/tesseract-ocr/tessdata_best',
   },
   {
     name: 'libheif', version: 'libheif-js', purpose: 'web_lic_libheif', license: 'GNU Lesser General Public License v3.0',
-    copyright: 'Copyright struktur AG and Dirk Farin; libheif-js by Kiril Vatev', text: 'vendor/libheif/LICENSE', home: 'https://github.com/strukturag/libheif',
+    copyright: 'Copyright struktur AG and Dirk Farin; libheif-js by Kiril Vatev', text: 'vendor/libheif/LICENSE.txt', home: 'https://github.com/strukturag/libheif',
   },
   {
     name: 'Noto Sans, Noto Serif, Noto Sans Mono, Noto Sans Devanagari, Noto Serif Devanagari', purpose: 'web_lic_noto', license: 'SIL Open Font License 1.1',
@@ -59,7 +59,7 @@ export const THIRD_PARTY = [
   },
   {
     name: ICON_SET.name, fixedVersion: ICON_SET.version, purpose: 'web_lic_icons', license: 'Apache License 2.0',
-    copyright: ICON_SET.copyright, text: 'vendor/material-icons/LICENSE', home: 'https://github.com/google/material-design-icons',
+    copyright: ICON_SET.copyright, text: 'vendor/material-icons/LICENSE.txt', home: 'https://github.com/google/material-design-icons',
   },
 ];
 
@@ -81,7 +81,7 @@ async function vendoredVersions() {
 }
 
 function link(href, label) {
-  return h('a', { href, target: '_blank', rel: 'noopener' },
+  return h('a', { href, target: '_blank', rel: 'noopener noreferrer' },
     label, h('span', { class: 'visually-hidden' }, ' ' + t('web_opens_elsewhere')),
     icon('open_in_new', { size: 16 }));
 }

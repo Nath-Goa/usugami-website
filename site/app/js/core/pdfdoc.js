@@ -5,12 +5,30 @@
 // is the PDF's view (PdfToolsEngine.previewView): the PDF itself, or, when its page tree had to be
 // mended or it carries Usugami's own mark, a copy without them, so the pages show as the tools find
 // them and as they come out.
-import { openPdfJs, pdfjsLib } from '../lib/pdfjs.js';
 import { PasswordError, UserError, CancelledError, checkCancelled } from './errors.js';
 import { passwordDialog, snackbar } from './ui.js';
 import { t } from './i18n.js';
+import { listOfNames } from './names.js';
 
 let sourceSeq = 0;
+
+// pdf.js (about 460 kB) is loaded once a PDF is opened, not with the screen: a tool shows its
+// "Choose PDF" card without waiting for it.
+let pdfjsModule = null;
+
+/**
+ * Starts loading pdf.js, if it isn't loaded yet, without waiting for it: a tool calls it as it
+ * shows, so a PDF picked a moment later opens at once. Resolves with lib/pdfjs.js's module.
+ * @returns {Promise<{ openPdfJs: Function, pdfjsLib: object }>}
+ */
+export function preloadPdfJs() {
+  if (!pdfjsModule) {
+    pdfjsModule = import('../lib/pdfjs.js');
+    // Tried again next time (the network came back, say); a tool that doesn't wait isn't told.
+    pdfjsModule.catch(() => { pdfjsModule = null; });
+  }
+  return pdfjsModule;
+}
 
 /**
  * Opens a PDF FileItem. When it needs a password and `ask` is true (the default), asks for it as
@@ -114,12 +132,12 @@ export function reportFileProblems(problems, { fallback = 'pdf_import_failed' } 
       const many = t(key + '_many', ...args);
       if (many && many !== key + '_many') text = many;
     }
-    snackbar(t('file_problem', names.join(', '), text));
+    snackbar(t('file_problem', listOfNames(names), text));
   }
 }
 
-function isPasswordException(e) {
-  return e?.name === 'PasswordException' || e instanceof pdfjsLib.PasswordException;
+function isPasswordException(e, pdfjsLib) {
+  return e?.name === 'PasswordException' || (!!pdfjsLib?.PasswordException && e instanceof pdfjsLib.PasswordException);
 }
 
 /** The error to show for a PDF pdf.js couldn't open. */
@@ -138,11 +156,19 @@ function openError(e, bytes) {
  * refused) when it needs another password, and the UserError to show when it can't be opened.
  */
 async function openView(bytes, password, signal) {
+  let lib;
+  try {
+    lib = await preloadPdfJs();
+  } catch {
+    throw new UserError('pdf_import_failed');
+  }
+  checkCancelled(signal);
+  const { openPdfJs, pdfjsLib } = lib;
   let doc;
   try {
     doc = await openPdfJs(bytes, password != null ? { password } : {});
   } catch (e) {
-    if (isPasswordException(e)) throw new PasswordError(password != null && e.code === pdfjsLib.PasswordResponses?.INCORRECT_PASSWORD);
+    if (isPasswordException(e, pdfjsLib)) throw new PasswordError(password != null && e.code === pdfjsLib.PasswordResponses?.INCORRECT_PASSWORD);
     throw openError(e, bytes);
   }
   try {
@@ -356,6 +382,10 @@ function makeSource(item, { doc, pageCount, viewBytes }, password) {
       throw e;
     } finally {
       signal?.removeEventListener('abort', stop);
+      // pdf.js keeps a drawn page's operator list and its decoded images (full size: a scanned page
+      // is tens of MB) until the page is cleaned up. The canvas has what is needed; the cache keeps
+      // the thumbnails. While another drawing of the page is under way it waits for that one.
+      cleanUp(page);
     }
     return canvas;
   };
@@ -479,6 +509,15 @@ function makeSource(item, { doc, pageCount, viewBytes }, password) {
     get closed() { return closed; },
   };
   return source;
+}
+
+/** Frees what pdf.js keeps of a page it has drawn (see drawPage); never fails. */
+function cleanUp(page) {
+  try {
+    page.cleanup();
+  } catch {
+    // The document is being closed.
+  }
 }
 
 /** Where `text` (ASCII) first is in `bytes`, or -1. */

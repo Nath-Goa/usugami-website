@@ -3,14 +3,16 @@
 //
 // The app draws pictures at 200 dpi and then runs the whole PDF through Compress PDF
 // (Recommended: 150 dpi, JPEG quality 75). Here each picture is decoded once, straight to what that
-// gives (no more than 150 pixels per inch where it is shown, JPEG at quality 75, lossless with its
-// transparency when it has any), so there is no second pass. Pages are drawn with the text engine
-// (PdfCanvas), in points, with the origin at the top-left corner.
+// gives (no more than 150 pixels per inch where it is shown; JPEG at quality 75 when that is
+// smaller, as Compress PDF only replaces a picture of 2 KB or more with a smaller JPEG; lossless,
+// with its transparency, otherwise), so there is no second pass. Pages are drawn with the text
+// engine (PdfCanvas), in points, with the origin at the top-left corner.
 import { createPdf, savePdf } from '../pdf-common.js';
 import { PdfCanvas, embedImage, ensureFonts, fontsReady, layoutParagraphSync } from '../text/index.js';
 import { imageFileType, IMAGE_MIME } from '../images/image-type.js';
 import { readImageInfo, withoutExifOrientation } from '../images/image-meta.js';
-import { makeCanvas, releaseCanvas, context2d } from '../images/image-canvas.js';
+import { makeCanvas, releaseCanvas, context2d, encodeCanvas } from '../images/image-canvas.js';
+import { Zlib } from '../../lib/fflate.js';
 import { checkCancelled } from '../../core/errors.js';
 import { box } from './drawingml.js';
 
@@ -28,6 +30,12 @@ export const MAX_PIXELS = 12000000;
 
 /** Pictures claiming more pixels than this aren't decoded: what a crafted file claims to make a browser run out of memory. */
 export const MAX_DECODE_PIXELS = 220000000;
+
+/**
+ * Pictures whose lossless stream is smaller than this stay lossless (Compress PDF leaves streams
+ * under 2 KB as they are): small flat pictures, such as logos and diagrams, shown large.
+ */
+export const MIN_JPEG_BYTES = 2048;
 
 const roundToInt = (x) => Math.round(x);
 const clampInt = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
@@ -177,24 +185,83 @@ export class OfficeImages {
       [w, h] = decodedSize(bitmap.width, bitmap.height, targetW, targetH);
     }
     checkCancelled(this.signal);
-    let source = bitmap;
-    let canvas = null;
+    // The picture at its size, on a canvas of its own: read for its pixels, and encoded as a JPEG.
+    const canvas = makeCanvas(w, h);
     try {
-      if (bitmap.width !== w || bitmap.height !== h) {
-        // A browser that doesn't resize while decoding: scaled here.
-        canvas = makeCanvas(w, h);
-        const ctx = context2d(canvas);
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(bitmap, 0, 0, w, h);
-        source = canvas;
-      }
-      return embedImage(this.doc, source, { format: 'auto', quality: JPEG_QUALITY });
-    } finally {
+      const ctx = context2d(canvas, { willReadFrequently: true });
+      // A browser that doesn't resize while decoding: scaled here.
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(bitmap, 0, 0, w, h);
       bitmap.close?.();
+      bitmap = null;
+      return await storePicture(this.doc, canvas, ctx.getImageData(0, 0, w, h).data, w, h);
+    } finally {
+      bitmap?.close?.();
       releaseCanvas(canvas);
     }
   }
+}
+
+/**
+ * Puts the picture on `canvas` (its RGBA `data`, `w` × `h`) into `doc` as Compress PDF's
+ * Recommended level leaves the app's: as a JPEG at JPEG_QUALITY when that is smaller than the
+ * picture stored losslessly and the lossless stream is MIN_JPEG_BYTES or more
+ * (PdfToolsEngine.compressResources), else losslessly; with transparency, always losslessly with
+ * its soft mask (Compress PDF leaves masked pictures as they are). Returns { ref, width, height,
+ * format } for PdfCanvas.drawImage.
+ */
+async function storePicture(doc, canvas, data, w, h) {
+  let alpha = false;
+  for (let i = 3; i < data.length; i += 4) {
+    if (data[i] !== 255) {
+      alpha = true;
+      break;
+    }
+  }
+  if (alpha) return embedImage(doc, canvas, { format: 'png' });
+  const rgb = new Uint8Array(w * h * 3);
+  for (let i = 0, j = 0; i < data.length; i += 4, j += 3) {
+    rgb[j] = data[i];
+    rgb[j + 1] = data[i + 1];
+    rgb[j + 2] = data[i + 2];
+  }
+  let jpeg = null;
+  try {
+    jpeg = await encodeCanvas(canvas, 'jpeg', JPEG_QUALITY);
+  } catch {
+    jpeg = null;
+  }
+  // Deflated only as far as needed to tell: once past the JPEG's size (and 2 KB), the JPEG it is.
+  const lossless = deflateBelow(rgb, jpeg ? Math.max(MIN_JPEG_BYTES, jpeg.length + 1) : Infinity);
+  const ctx = doc.context;
+  const dict = { Type: 'XObject', Subtype: 'Image', Width: w, Height: h, ColorSpace: 'DeviceRGB', BitsPerComponent: 8 };
+  if (lossless) return { ref: ctx.register(ctx.stream(lossless, { ...dict, Filter: 'FlateDecode' })), width: w, height: h, format: 'png' };
+  return { ref: ctx.register(ctx.stream(jpeg, { ...dict, Filter: 'DCTDecode' })), width: w, height: h, format: 'jpeg' };
+}
+
+/** `bytes` as a zlib stream (a PDF's FlateDecode), or null as soon as it reaches `limit` bytes. */
+export function deflateBelow(bytes, limit = Infinity) {
+  const parts = [];
+  let size = 0;
+  const zlib = new Zlib({ level: 6 }, (chunk) => {
+    parts.push(chunk);
+    size += chunk.length;
+  });
+  const STEP = 64 * 1024;
+  for (let p = 0; p < bytes.length || p === 0; p += STEP) {
+    const end = Math.min(bytes.length, p + STEP);
+    zlib.push(bytes.subarray(p, end), end >= bytes.length);
+    if (size >= limit) return null;
+  }
+  if (size >= limit) return null;
+  const out = new Uint8Array(size);
+  let at = 0;
+  for (const part of parts) {
+    out.set(part, at);
+    at += part.length;
+  }
+  return out;
 }
 
 /**

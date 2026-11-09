@@ -286,7 +286,9 @@ export function digitWidth(style) {
  */
 export function widthScale(officeDigitEm, style) {
   if (officeDigitEm == null || !(officeDigitEm > 0)) return 1;
-  const phone = fileMetrics(resolveStyle(style).stack[0].file).digit;
+  // The digit as the family draws it (a condensed family 90 % wide), not the font file's: the
+  // scale found goes on top of the family's own, so that would draw it 10 % too narrow.
+  const phone = digitWidth({ ...style, scaleX: 1 });
   return phone > 0 ? Math.min(1.25, Math.max(0.75, officeDigitEm / phone)) : 1;
 }
 

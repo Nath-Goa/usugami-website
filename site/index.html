@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-jMe6rNJgQiAWDTIKU+Ry6cW9fksKi/2lF8vxcgEekyQ='; style-src 'self'; img-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
   <title>Usugami: free PDF tools, with no ads, tracking or uploads</title>
   <meta name="description" content="Usugami (薄紙, “thin paper”) turns photos, Word, PowerPoint, Excel and EPUB files into PDFs, and splits, merges, edits, signs, compresses and redacts PDFs, on your Android phone or in your browser. No ads, no tracking, no account, no uploads. Free and open source.">
   <meta name="color-scheme" content="light dark">
@@ -26,7 +27,7 @@
   <link rel="apple-touch-icon" href="assets/img/apple-touch-icon.png">
   <link rel="stylesheet" href="assets/css/tokens.css">
   <link rel="stylesheet" href="assets/css/site.css">
-  <!-- Once the domain is linked, add these (they need absolute URLs; see docs/website.md):
+  <!-- The page's address on usugami.com, for search engines and link previews (absolute URLs; see docs/website.md). -->
   <link rel="canonical" href="https://usugami.com/">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Usugami">
@@ -37,7 +38,6 @@
   <meta property="og:image:width" content="1280">
   <meta property="og:image:height" content="640">
   <meta name="twitter:card" content="summary_large_image">
-  -->
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -101,9 +101,9 @@
         </div>
         <div class="hero-art" aria-hidden="true">
           <div class="fan">
-            <img class="fan-1" src="assets/img/screenshots/tools.png" width="540" height="1200" alt="" loading="lazy">
-            <img class="fan-2" src="assets/img/screenshots/editor.png" width="540" height="1200" alt="" loading="lazy">
-            <img class="fan-3" src="assets/img/screenshots/home.png" width="540" height="1200" alt="" loading="lazy">
+            <picture><source type="image/webp" srcset="assets/img/screenshots/tools.webp"><img class="fan-1" src="assets/img/screenshots/tools.png" width="540" height="1200" alt="" loading="lazy"></picture>
+            <picture><source type="image/webp" srcset="assets/img/screenshots/editor.webp"><img class="fan-2" src="assets/img/screenshots/editor.png" width="540" height="1200" alt="" loading="lazy"></picture>
+            <picture><source type="image/webp" srcset="assets/img/screenshots/home.webp"><img class="fan-3" src="assets/img/screenshots/home.png" width="540" height="1200" alt="" loading="lazy"></picture>
           </div>
         </div>
       </div>
@@ -122,7 +122,7 @@
             <p>The same tools on this website, for phones, tablets and computers. Nothing to install, nothing to sign up for.</p>
             <ul>
               <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 16.17 5.53 12.7a.996.996 0 1 0-1.41 1.41l4.18 4.18c.39.39 1.02.39 1.41 0L20.29 7.71a.996.996 0 1 0-1.41-1.41L9 16.17z"/></svg> <span>Your files are worked on in the browser, on your device, and never uploaded.</span></li>
-              <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 16.17 5.53 12.7a.996.996 0 1 0-1.41 1.41l4.18 4.18c.39.39 1.02.39 1.41 0L20.29 7.71a.996.996 0 1 0-1.41-1.41L9 16.17z"/></svg> <span>Once it has loaded, it works offline too.</span></li>
+              <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 16.17 5.53 12.7a.996.996 0 1 0-1.41 1.41l4.18 4.18c.39.39 1.02.39 1.41 0L20.29 7.71a.996.996 0 1 0-1.41-1.41L9 16.17z"/></svg> <span>Tools you have used once keep working offline.</span></li>
               <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 16.17 5.53 12.7a.996.996 0 1 0-1.41 1.41l4.18 4.18c.39.39 1.02.39 1.41 0L20.29 7.71a.996.996 0 1 0-1.41-1.41L9 16.17z"/></svg> <span>In current Chrome, Edge, Firefox and Safari.</span></li>
             </ul>
             <a class="btn btn-filled" href="app/">Open the web app <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 13h11.17l-4.88 4.88c-.39.39-.39 1.03 0 1.42.39.39 1.02.39 1.41 0l6.59-6.59a.996.996 0 0 0 0-1.41l-6.58-6.6a.996.996 0 1 0-1.41 1.41L16.17 11H5c-.55 0-1 .45-1 1s.45 1 1 1z"/></svg></a>
@@ -150,10 +150,10 @@
           <p>Usugami on an Android phone. The web app follows the same design.</p>
         </div>
         <ul class="shots" aria-label="Screenshots" tabindex="0">
-          <li><img src="assets/img/screenshots/home.png" width="540" height="1200" alt="Usugami home screen with search and its tools in sections" loading="lazy"></li>
-          <li><img src="assets/img/screenshots/editor.png" width="540" height="1200" alt="Arranging images before making a PDF" loading="lazy"></li>
-          <li><img src="assets/img/screenshots/convert.png" width="540" height="1200" alt="Options for creating the PDF" loading="lazy"></li>
-          <li><img src="assets/img/screenshots/tools.png" width="540" height="1200" alt="One of the PDF tools" loading="lazy"></li>
+          <li><picture><source type="image/webp" srcset="assets/img/screenshots/home.webp"><img src="assets/img/screenshots/home.png" width="540" height="1200" alt="Usugami home screen with search and its tools in sections" loading="lazy"></picture></li>
+          <li><picture><source type="image/webp" srcset="assets/img/screenshots/editor.webp"><img src="assets/img/screenshots/editor.png" width="540" height="1200" alt="Arranging images before making a PDF" loading="lazy"></picture></li>
+          <li><picture><source type="image/webp" srcset="assets/img/screenshots/convert.webp"><img src="assets/img/screenshots/convert.png" width="540" height="1200" alt="Options for creating the PDF" loading="lazy"></picture></li>
+          <li><picture><source type="image/webp" srcset="assets/img/screenshots/tools.webp"><img src="assets/img/screenshots/tools.png" width="540" height="1200" alt="One of the PDF tools" loading="lazy"></picture></li>
         </ul>
         <p class="shots-hint">Swipe to see more.</p>
       </div>

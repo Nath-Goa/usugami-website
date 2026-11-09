@@ -7,9 +7,10 @@ import { PDFImage, PDFName, PDFString, PDFHexString, PDFRef, PDFDict, PDFArray, 
 import { docState, track, finishText } from './docstate.js';
 import { embeddedFont, utf16Hex } from './pdffont.js';
 import { parseColor, BLACK } from './color.js';
-import { resolveStyle, ensureFonts, fontsReady, ITALIC_SKEW } from './fonts.js';
+import { resolveStyle, ensureFonts, fontsReady, graphemes, ITALIC_SKEW } from './fonts.js';
 import { measureTextSync } from './layout.js';
 import { fallbackBitmap, fallbackResolution, usesMask } from './fallback.js';
+import { UserError } from '../../core/errors.js';
 
 export { finishText };
 
@@ -523,10 +524,34 @@ export class PdfCanvas {
 
   // ---- State ----
 
+  /**
+   * Saves the state (q). Returns the save count before it, as Android's Canvas.save() does, for
+   * restoreToCount().
+   */
   save() {
+    const count = this.saveCount;
     this._w('q');
     this.stack.push({ ...this.state, dash: this.state.dash.slice() });
     this.emittedStack.push({ ...this.emitted });
+    return count;
+  }
+
+  /**
+   * How many states are saved, counted as Android's Canvas.getSaveCount(): 1 with none saved, one
+   * more for each save() not yet restored.
+   */
+  get saveCount() {
+    return this.stack.length + 1;
+  }
+
+  /**
+   * Restores saved states until `count` is left (Android's Canvas.restoreToCount): with the count
+   * saveCount gave (or save() returned) before some drawing, everything that drawing saved and
+   * left unrestored is undone, as when it fails partway. Below 1 counts as 1.
+   */
+  restoreToCount(count) {
+    const keep = Math.max(1, Math.floor(Number(count) || 1));
+    while (this.stack.length + 1 > keep) this.restore();
   }
 
   restore() {
@@ -1326,8 +1351,12 @@ export class PdfCanvas {
     const font = it.carrier;
     if (!font || !it.width) return;
     const ef = embeddedFont(this.doc, font);
-    const text = it.text.replace(/[\p{Cc}]/gu, '');
+    let text = it.text.replace(/[\p{Cc}]/gu, '');
     if (!text) return;
+    // Viewers read a line's text in the order it is drawn, left to right, and turn right-to-left
+    // runs back to reading order themselves (pdf.js does, as for any PDF made from visual glyphs):
+    // so a right-to-left run's text goes in drawing order, whole characters reversed.
+    if (it.rtl) text = graphemes(text).reverse().join('');
     const { font: f, code } = ef.code(font.blankGid, text, (it.width / (S * hs)) * 1000);
     const name = this.res.name('Font', 'UT', f.ref);
     const ops = [];
@@ -1593,9 +1622,21 @@ function asciiUrl(url) {
   }
 }
 
+/**
+ * The pages of `doc`. A page tree that loops or is damaged makes pdf-lib overflow its stack or
+ * throw a TypeError: that is a PDF that can't be opened, UserError('pdf_import_failed').
+ */
+function pagesOf(doc) {
+  try {
+    return doc.getPages();
+  } catch {
+    throw new UserError('pdf_import_failed');
+  }
+}
+
 /** [page /XYZ left top null] for a point on page `index`, `y` points from the top of the page as shown. */
 function explicitDest(doc, index, y = 0, x = null) {
-  const pages = doc.getPages();
+  const pages = pagesOf(doc);
   if (!pages.length) return null;
   const page = pages[Math.max(0, Math.min(pages.length - 1, index))];
   const f = pageFrame(page);
@@ -1648,7 +1689,7 @@ function writeDests(doc, s) {
  */
 export function addOutline(doc, items) {
   const ctx = doc.context;
-  const pages = doc.getPages();
+  const pages = pagesOf(doc);
   const list = (items ?? []).filter((it) => it && it.title != null);
   if (!list.length || !pages.length) return null;
   const rootRef = ctx.nextRef();

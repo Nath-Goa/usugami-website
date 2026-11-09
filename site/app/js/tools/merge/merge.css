@@ -232,22 +232,65 @@
   cursor: grabbing;
 }
 
-/* Move earlier and later: over the page's picture while the row is pointed at or focused, and
-   always there for screen readers (the app's accessibility actions). */
+/* Move earlier and later (the app's accessibility actions): always there for screen readers, and
+   shown among the row's buttons, before Rotate, for the keyboard and the mouse. Never over the
+   picture or the text, which a press drags (the app's whole card is its drag handle).
+   Touch screens: out of sight and out of the way (a tap or a drag never brings them), unless the
+   keyboard is in the row. */
 .merge-moves {
   position: absolute;
-  top: var(--space-2);
-  inset-inline-start: var(--space-2);
-  z-index: 2;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
   display: flex;
+  flex: none;
   flex-direction: column;
   justify-content: space-between;
   align-items: center;
-  width: 55px;
+}
+
+.merge-page-row:focus-visible .merge-moves {
+  position: static;
+  width: auto;
   height: 72px;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--ui-short);
+  overflow: visible;
+  clip-path: none;
+}
+
+/* Apart from the rule above, as a browser without :has() would drop both. */
+.merge-page-row:has(:focus-visible) .merge-moves {
+  position: static;
+  width: auto;
+  height: 72px;
+  overflow: visible;
+  clip-path: none;
+}
+
+/* With a mouse their room is kept, so the row doesn't change as the pointer goes over it; they
+   show while it is pointed at, or the keyboard is in it. */
+@media (hover: hover) and (pointer: fine) {
+  .merge-moves {
+    position: static;
+    width: auto;
+    height: 72px;
+    overflow: visible;
+    clip-path: none;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--ui-short);
+  }
+
+  .merge-page-row:hover .merge-moves,
+  .merge-page-row:focus-visible .merge-moves {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .merge-page-row:has(:focus-visible) .merge-moves {
+    opacity: 1;
+    pointer-events: auto;
+  }
 }
 
 .merge-move {
@@ -271,19 +314,36 @@
   visibility: hidden;
 }
 
-.merge-page-row:focus-within .merge-moves {
-  opacity: 1;
-  pointer-events: auto;
+/* Not while a row is dragged (their room stays, so the rows keep their shape). */
+.merge-list.is-dragging .merge-page-row .merge-moves {
+  opacity: 0;
+  pointer-events: none;
 }
 
-@media (hover: hover) and (pointer: fine) {
-  .merge-page-row:hover .merge-moves {
-    opacity: 1;
-    pointer-events: auto;
-  }
+/* Off for a moment (PDFs being opened or one made) while keeping the focus: as off as disabled. */
+.merge-view .ui-btn[aria-disabled="true"],
+.merge-view .ui-empty[aria-disabled="true"] {
+  cursor: default;
+  color: color-mix(in srgb, var(--on-surface) 38%, transparent);
 }
 
-.merge-list.is-dragging .merge-moves {
+.merge-view .ui-btn--filled[aria-disabled="true"] {
+  background: color-mix(in srgb, var(--on-surface) 12%, transparent);
+  box-shadow: none;
+}
+
+.merge-view .ui-btn--outlined[aria-disabled="true"] {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--on-surface) 12%, transparent);
+}
+
+.merge-view .ui-empty[aria-disabled="true"] .ui-empty-icon,
+.merge-view .ui-empty[aria-disabled="true"] .ui-empty-detail,
+.merge-view .ui-empty[aria-disabled="true"] .ui-empty-drop {
+  color: inherit;
+}
+
+.merge-view .ui-btn[aria-disabled="true"]::before,
+.merge-view .ui-empty[aria-disabled="true"]::before {
   display: none;
 }
 
@@ -324,6 +384,13 @@
 }
 
 /* ---- Wider screens: the page list in two columns ---- */
+
+/* The main button ends where the column above it ends (Merge's .page--narrow: 760 px; Reorganize's
+   .page: 1120 px, each less its padding), as on the other PDF tools' screens: the kit reads
+   --ui-column. */
+.merge-view {
+  --ui-column: calc(760px - 2 * var(--space-6));
+}
 
 @media (min-width: 840px) {
   .merge-pages {

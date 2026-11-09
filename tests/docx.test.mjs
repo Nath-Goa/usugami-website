@@ -1053,7 +1053,8 @@ await withPage(async (page, url) => {
 });
 console.log(`Chromium: ${passed} checks passed`);
 
-// The same documents in Firefox and Safari's engine.
+// The same documents in Firefox and Safari's engine, and damaged and hostile ones (Firefox writes
+// each XML error DOMParser meets to the console: those, and only those, are let through there).
 for (const browser of ['firefox', 'webkit']) {
   const before = passed;
   await withPage(async (page, url) => {
@@ -1075,7 +1076,8 @@ for (const browser of ['firefox', 'webkit']) {
     check(`${browser}: header, footer, picture, link`, r.pages[0].text.includes('Annual report') && r.pages[0].text.includes('Page 1') && r.pages[0].images === 1 && r.pages[0].links === 1, r.pages[0]);
     check(`${browser}: landscape last page`, near(842, r.pages[4].width, 1.5), r.pages[4].width);
     check(`${browser}: notes`, r.notes.pages >= 4 && near(150, r.notes.picture?.width) && /1\.\s*First step/.test(r.notes.text), r.notes);
-  }, { browser });
+    await robustness(page);
+  }, { browser, allowConsole: browser === 'firefox' ? [/XML Parsing Error/] : [] });
   console.log(`${browser}: ${passed - before} checks passed`);
 }
 

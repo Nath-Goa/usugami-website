@@ -22,6 +22,10 @@ const ZIP = 'application/zip';
 if (typeof document !== 'undefined') ensureCss(new URL('../../css/mark.css', import.meta.url));
 loadStrings('mark').catch(() => {});
 
+/** Result rows made at once (a screenful), then a batch at a time between frames. */
+const FIRST_ROWS = 40;
+const ROW_BATCH = 100;
+
 /** How long a change of the watermark settles before the PDFs are rewritten (ResultMarker.SETTLE_MS). */
 const SETTLE_MS = 250;
 
@@ -78,27 +82,30 @@ function objectUrl(file) {
 
 /**
  * Saves `file` ({ name, bytes, type }) into the browser's downloads, under its name, and lists it
- * on Recent files. The browser picks a free name if one is taken ("Report (1).pdf").
+ * on Recent files (unless `recent` is false). The browser picks a free name if one is taken
+ * ("Report (1).pdf").
+ * @param {{ recent?: boolean }} [options]
  * @returns {Promise<void>}
  */
-export async function download(file) {
+export async function download(file, { recent = true } = {}) {
   const url = URL.createObjectURL(new Blob([file.bytes], { type: file.type || PDF }));
   const a = h('a', { href: url, download: file.name, rel: 'noopener', style: 'display:none' });
   document.body.append(a);
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 60 * 1000);
-  await addToRecent(file);
+  if (recent) await addToRecent(file);
 }
 
 /**
  * Opens `file` in a new browser tab (its own PDF viewer). Call it straight from a click, as
- * browsers open tabs only then. A ZIP file is downloaded instead. Returns false when the browser
- * blocked the tab (a snackbar then says so).
+ * browsers open tabs only then. A ZIP file is downloaded instead, without listing it on Recent
+ * files again (opening a file there leaves the list as it is, as the app's does). Returns false
+ * when the browser blocked the tab (a snackbar then says so).
  */
 export function openFile(file) {
   if ((file.type || '').toLowerCase() === ZIP) {
-    download(file);
+    download(file, { recent: false });
     return true;
   }
   const tab = window.open(objectUrl(file), '_blank');
@@ -442,6 +449,33 @@ export function savedPercent(original, now) {
   return pct >= 1 ? pct : null;
 }
 
+// The page's listeners that outlive a result screen left without destroy() (closing the tab, the
+// watermark's setting) hold it only weakly: made out here, they reach nothing of showResult's.
+
+/** Asks before the tab closes or reloads while the result screen `ref` holds is shown and unsaved. */
+function unloadGuard(ref) {
+  const guard = (e) => {
+    const screen = ref.deref();
+    if (!screen || !screen.isConnected || screen.isSaved()) {
+      window.removeEventListener('beforeunload', guard);
+      return;
+    }
+    e.preventDefault();
+    e.returnValue = '';
+  };
+  return guard;
+}
+
+/** Passes each change of the watermark's setting to the result screen `ref` holds, while there is one. */
+function followSetting(ref) {
+  const stop = onMarkSettingChange((setting) => {
+    const screen = ref.deref();
+    if (screen?.onMarkSetting) screen.onMarkSetting(setting);
+    else stop();
+  });
+  return stop;
+}
+
 /** Waits `ms`, or stops with CancelledError once `signal` is aborted. */
 function settle(ms, signal) {
   return new Promise((resolve, reject) => {
@@ -483,11 +517,16 @@ function settle(ms, signal) {
  * counts as not saved again. `onReady(files)` is called once the PDFs are as the setting asks, with
  * the files as they show (in the order given); not if the screen goes first.
  *
+ * `wording`: what saving says, as the app's two view models do: 'pdf' (the PDF tools'
+ * PdfToolsViewModel, the default) "Saved to Downloads" and "Saved" for the folder; 'images'
+ * (Images to PDF's MainViewModel) "Saved to Downloads as Report.pdf", "Saved 3 PDFs to Downloads"
+ * and "Saved 3 PDFs to the folder". A file's own Save says "Saved to Downloads as Report.pdf" in both.
+ *
  * Returns the screen: el.isSaved(), el.destroy(), el.files (the files as they show now, which
  * Open, Share, Save and the ZIP file use), el.ready (a promise of them once ready), el.markCard.
  */
 export function showResult(root, {
-  files, title, message, details, onStartOver, onBack, zipName, passwordRemoved = false, heading, onReady,
+  files, title, message, details, onStartOver, onBack, zipName, passwordRemoved = false, heading, onReady, wording = 'pdf',
 } = {}) {
   clear(root);
   const marker = new ResultMarker(files);
@@ -528,17 +567,30 @@ export function showResult(root, {
     page: async () => drawFirstPage(await marker.firstMade()),
   }) : null;
   const content = h('div', { class: 'ui-result-content' }, check, headingEl, card, list);
-  const screen = h('div', { class: 'ui-result' }, bar, h('div', { class: 'ui-result-scroll' }, content));
+  // The screen's main landmark while it shows (the tool's own <main> is taken away with the rest),
+  // where Skip to content leads.
+  const main = h('main', { class: 'ui-result-scroll', 'data-main': '' }, content);
+  const screen = h('div', { class: 'ui-result' }, bar, main);
   let startOver = null;
   let pendingFollow = false;
 
+  // A button turned off while the work it started runs drops the focus to the page; it comes back
+  // to it once it is on again (unless the focus went somewhere else meanwhile).
+  let lostFocus = null;
   const refresh = () => {
+    const active = document.activeElement;
     for (const btn of busyButtons) btn.disabled = busy || zipping || marking;
     for (const btn of zipBlocked) btn.disabled = zipping || marking;
     for (const btn of markBlocked) btn.disabled = marking;
     if (bar.back) bar.back.disabled = busy;
     if (startOver) startOver.disabled = busy;
     card?.setEnabled(!busy && !zipping);
+    if (active?.disabled && screen.contains(active)) lostFocus = active;
+    if (lostFocus && !lostFocus.disabled) {
+      const now = document.activeElement;
+      if (lostFocus.isConnected && (!now || now === document.body || now === lostFocus)) lostFocus.focus({ preventScroll: true });
+      lostFocus = null;
+    }
   };
   const setBusy = (b) => {
     busy = b;
@@ -558,14 +610,7 @@ export function showResult(root, {
 
   // The app keeps a result through Android stopping it (KeptResult); a browser keeps nothing
   // through a reload, so closing or reloading the tab asks first while the result isn't saved.
-  const guard = (e) => {
-    if (!screen.isConnected || saved) {
-      window.removeEventListener('beforeunload', guard);
-      return;
-    }
-    e.preventDefault();
-    e.returnValue = '';
-  };
+  const guard = unloadGuard(new WeakRef(screen));
   window.addEventListener('beforeunload', guard);
 
   const markSaved = (saving) => {
@@ -615,14 +660,16 @@ export function showResult(root, {
     }
   };
 
-  const saveDownloads = (saving) => run(async () => {
+  // `one`: a file's own Save, which says its name with either wording (saveOneToDownloads).
+  const saveDownloads = (saving, { one = false } = {}) => run(async () => {
     for (let i = 0; i < saving.length; i++) {
       await download(saving[i]);
       // Browsers take downloads one at a time better than at once.
       if (i < saving.length - 1) await new Promise((r) => setTimeout(r, 250));
     }
     markSaved(saving);
-    snackbar(saving.length === 1 ? t('msg_saved_downloads', saving[0].name) : tp('msg_saved_downloads_many', saving.length, saving.length));
+    if (wording !== 'images' && !one) snackbar(t('pdf_saved_downloads'));
+    else snackbar(saving.length === 1 ? t('msg_saved_downloads', saving[0].name) : tp('msg_saved_downloads_many', saving.length, saving.length));
   });
 
   const saveOneAs = (file) => run(async () => {
@@ -639,7 +686,7 @@ export function showResult(root, {
     if (!r) return;
     inFolder = r;
     markSaved(saving);
-    snackbar(tp('msg_saved_folder', saving.length, saving.length));
+    snackbar(wording === 'images' ? tp('msg_saved_folder', saving.length, saving.length) : t('msg_saved'));
   });
 
   const zipThen = async (then) => {
@@ -692,17 +739,20 @@ export function showResult(root, {
     }
   }, 'zip_failed'));
 
-  // The files
-  for (const file of files) {
-    const row = fileRow(file, {
+  // The files, each as it shows now: a result shown again may show its PDFs with the mark at once,
+  // and its rows say their size, open, share and save that version. The first screenful is made
+  // at once, the others a batch at a time (Split into every page makes hundreds), so the screen
+  // shows and answers meanwhile.
+  const makeRow = (i) => {
+    const row = fileRow(current()[i] ?? files[i], {
       single, shareable, details,
       onOpen: () => { if (!marking) openFile(row.file); },
       onShare: () => doShare([row.file]),
       onSave: (anchor) => {
         if (marking) return;
-        if (!canSaveAs()) { saveDownloads([row.file]); return; }
+        if (!canSaveAs()) { saveDownloads([row.file], { one: true }); return; }
         menu(anchor, [
-          { label: t('save_to_downloads'), icon: 'download', onClick: () => saveDownloads([row.file]) },
+          { label: t('save_to_downloads'), icon: 'download', onClick: () => saveDownloads([row.file], { one: true }) },
           { label: t('save_as'), icon: 'save_as', onClick: () => saveOneAs(row.file) },
         ]);
       },
@@ -710,8 +760,23 @@ export function showResult(root, {
     if (row.openButton) markBlocked.push(row.openButton);
     if (row.saveButton) busyButtons.push(row.saveButton);
     if (row.shareButton) zipBlocked.push(row.shareButton);
+    if (!single && savedNames.has(row.file)) row.setSaved(true);
     rows.push(row);
-    list.append(row.el);
+    return row;
+  };
+  for (let i = 0; i < Math.min(files.length, FIRST_ROWS); i++) list.append(makeRow(i).el);
+  if (files.length > FIRST_ROWS) {
+    (async () => {
+      for (let i = FIRST_ROWS; i < files.length;) {
+        await yieldToUI();
+        if (destroyed) return;
+        const batch = document.createDocumentFragment();
+        for (const end = Math.min(files.length, i + ROW_BATCH); i < end; i++) batch.append(makeRow(i).el);
+        list.append(batch);
+        refresh();
+        countMore();
+      }
+    })();
   }
 
   const note = [message, passwordRemoved ? tp('pdf_password_removed', files.length) : null].filter(Boolean).join(' ');
@@ -784,23 +849,29 @@ export function showResult(root, {
   }
 
   root.append(screen);
+  if (!document.getElementById('content')) main.id = 'content';
   // A screen reader starts at "Your PDF is ready".
   const focusHeading = () => headingEl.focus({ preventScroll: true });
   requestAnimationFrame(focusHeading);
 
-  // Pages are counted for the files on screen, a few at a time.
-  const pending = rows.filter((r) => r.needsCount);
-  if (pending.length) {
-    let next = 0;
+  // Pages are counted for the files on screen, two at a time, as their rows come.
+  let counted = 0;
+  let counting = 0;
+  function countMore() {
     const work = async () => {
-      while (next < pending.length && screen.isConnected) {
-        const r = pending[next++];
-        const n = await countPages(r.file);
-        r.setPages(n);
+      counting++;
+      try {
+        while (counted < rows.length && screen.isConnected && !destroyed) {
+          const r = rows[counted++];
+          if (r.needsCount) r.setPages(await countPages(r.file));
+        }
+      } finally {
+        counting--;
       }
     };
-    setTimeout(() => { work(); work(); }, 0);
+    for (let k = counting; k < 2; k++) work();
   }
+  setTimeout(countMore, 0);
 
   // ---- The Usugami watermark on the PDFs ----
 
@@ -838,6 +909,9 @@ export function showResult(root, {
     pendingFollow = false;
     const wanted = wantedMark();
     if (marker.isAt(wanted)) {
+      // The rows show the versions showing (shown again, they may differ from the files made).
+      const shown = current();
+      rows.forEach((r, i) => { if (r.file !== shown[i]) r.update(shown[i]); });
       setMarking(false);
       finishReady();
       return;
@@ -883,7 +957,8 @@ export function showResult(root, {
   }
 
   let seenConnected = false;
-  const stopListening = card ? onMarkSettingChange((setting) => {
+  // Held weakly by the settings' listeners: a screen left without destroy() can still go.
+  screen.onMarkSetting = card ? (setting) => {
     if (screen.isConnected) seenConnected = true;
     else if (seenConnected) {
       // Taken off the page without destroy(): it follows the setting no more.
@@ -892,7 +967,8 @@ export function showResult(root, {
     }
     card.setSetting(setting);
     follow({ wait: true });
-  }) : () => {};
+  } : null;
+  const stopListening = card ? followSetting(new WeakRef(screen)) : () => {};
 
   refresh();
   if (card) follow({ first: true, wait: false });
@@ -904,6 +980,7 @@ export function showResult(root, {
     job?.controller.abort();
     job = null;
     stopListening();
+    screen.onMarkSetting = null;
     window.removeEventListener('beforeunload', guard);
     for (const url of objectUrls) URL.revokeObjectURL(url);
     objectUrls.clear();

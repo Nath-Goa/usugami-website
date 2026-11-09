@@ -76,7 +76,9 @@ export async function chooseDialog({ title, options, value }) {
       rows[next].focus();
     });
   });
-  const closed = alertDialog({ title, message: list, confirm: t('cancel') });
+  // The list of choices isn't a description of the dialog: read as one, the choices would be
+  // read out run together before the one focused.
+  const closed = alertDialog({ title, message: list, confirm: t('cancel'), describe: false });
   // The focus starts on the choice made, as a radio group's does.
   (rows.find((r) => r.dataset.value === value) ?? rows[0])?.focus();
   await closed;
@@ -117,7 +119,8 @@ export function externalRow({ icon: name, title, detail, href }) {
   const link = row.querySelector('a');
   if (link) {
     link.target = '_blank';
-    link.rel = 'noopener';
+    // The other site isn't told it was opened from Usugami.
+    link.rel = 'noopener noreferrer';
   }
   return row;
 }

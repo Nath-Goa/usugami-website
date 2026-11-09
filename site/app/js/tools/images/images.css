@@ -72,7 +72,7 @@
 
 .images-import-progress {
   position: sticky;
-  top: 64px;
+  top: calc(64px + env(safe-area-inset-top, 0px));
   z-index: 9;
   flex: none;
 }
@@ -102,12 +102,20 @@
   display: none;
 }
 
-/* The page size, orientation and margin chips, in a row that scrolls sideways. */
+/* The page size, orientation and margin chips, in a row that scrolls sideways. It stays under the
+   top bar while the pages scroll, as the app's (only its page grid scrolls); the import progress
+   (z-index 9) goes over its top edge. Each chip takes 48 px to tap, as the app's (4 dp of padding
+   around a 48 dp chip): the 12 px of padding keep the chips' tap area inside the scroller, which
+   would clip it. */
 .images-options {
+  position: sticky;
+  top: calc(64px + env(safe-area-inset-top, 0px));
+  z-index: 8;
   display: flex;
   gap: var(--space-2);
   overflow-x: auto;
-  padding: var(--space-1) var(--space-3);
+  padding: var(--space-3);
+  background: var(--surface);
   scrollbar-width: none;
 }
 
@@ -177,6 +185,23 @@
   min-width: 220px;
 }
 
+/* Off while images are being added, as the app's, yet keeping the focus on the button pressed
+   (`disabled` would throw it out): drawn as a disabled button. */
+.images-empty-buttons > .ui-btn[aria-disabled="true"] {
+  cursor: default;
+  color: color-mix(in srgb, var(--on-surface) 38%, transparent);
+}
+
+.images-empty-buttons > .ui-btn--filled[aria-disabled="true"],
+.images-empty-buttons > .ui-btn--tonal[aria-disabled="true"] {
+  background: color-mix(in srgb, var(--on-surface) 12%, transparent);
+  box-shadow: none;
+}
+
+.images-empty-buttons > .ui-btn[aria-disabled="true"]::before {
+  display: none;
+}
+
 .images-empty-hint {
   max-width: 34em;
   margin: var(--space-5) 0 0;
@@ -193,6 +218,12 @@
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: var(--space-3);
   padding: var(--space-1) var(--space-3) var(--space-4);
+}
+
+/* A page's control brought into view (by the keyboard) clears the top bar and the chips over the
+   pages, and the bottom bar. */
+.images-grid :is(button, [tabindex]) {
+  scroll-margin-block: calc(136px + env(safe-area-inset-top, 0px)) calc(88px + env(safe-area-inset-bottom, 0px));
 }
 
 @media (min-width: 840px) {

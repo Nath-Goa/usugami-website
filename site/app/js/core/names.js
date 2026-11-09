@@ -1,5 +1,6 @@
 // File names, as the app makes them (FileNames.kt): safe on every file system, never too long,
-// and unique among files made together.
+// and unique among files made together; and as messages list them (NameList.kt).
+import { tp } from './i18n.js';
 
 /** Leaves room for " (99).pdf" within the usual 255-byte limit of file systems. */
 const MAX_UTF8_BYTES = 200;
@@ -179,6 +180,46 @@ export const sanitize = sanitizeName;
  * works the same): { sanitize, withSuffix, withSuffixes, unique, baseName }, plus uniqueNames.
  */
 export const fileNames = Object.freeze({ sanitize: sanitizeName, withSuffix, withSuffixes, unique: uniqueName, baseName, uniqueNames });
+
+/** How many names a message lists before it only counts the rest (FileNames.LISTED). */
+export const LISTED_NAMES = 3;
+
+/**
+ * The names a message about the files `names` lists, and how many more it only counts
+ * (FileNames.listed): all of them when there are few, else the first LISTED_NAMES, so a message
+ * about hundreds of files stays short. One name more is listed rather than counted as one more.
+ * @param {string[]} names
+ * @returns {{ listed: string[], more: number }}
+ * @example listedNames(['a', 'b', 'c', 'd', 'e']) // { listed: ['a', 'b', 'c'], more: 2 }
+ */
+export function listedNames(names) {
+  const all = Array.from(names ?? []);
+  return all.length <= LISTED_NAMES + 1 ? { listed: all, more: 0 } : { listed: all.slice(0, LISTED_NAMES), more: all.length - LISTED_NAMES };
+}
+
+/**
+ * `names` as a message lists them (NameList.kt's listOfNames): "a.pdf, b.pdf", or with many the
+ * first few and how many more, "a.pdf, b.pdf, c.pdf and 247 more". The message counts them all
+ * itself.
+ * @param {string[]} names
+ */
+export function listOfNames(names) {
+  const { listed, more } = listedNames(names);
+  const list = listed.join(', ');
+  return more ? tp('names_and_more', more, list, more) : list;
+}
+
+/**
+ * listOfNames for an engine's message arguments, put in words by the screen: the names as one
+ * string, or with many the message `{ key: 'names_and_more', count, args }`.
+ * @param {string[]} names
+ * @returns {string | { key: string, count: number, args: [string, number] }}
+ */
+export function namesArg(names) {
+  const { listed, more } = listedNames(names);
+  const list = listed.join(', ');
+  return more ? { key: 'names_and_more', count: more, args: [list, more] } : list;
+}
 
 /** 'Usugami_20261031_172104': the name the app gives a new PDF (no extension). */
 export function defaultPdfName(date = new Date()) {

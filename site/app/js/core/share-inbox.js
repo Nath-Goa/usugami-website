@@ -5,6 +5,7 @@
 // the kind most of them are (PDFs first on a tie), naming the files left out and those that
 // can't be opened.
 import { t, tp } from './i18n.js';
+import { listOfNames } from './names.js';
 import { navigate, currentRoute, currentHandle, onRouteChange } from './router.js';
 
 /** The kinds in the order they win a tie (SharedKind's order). */
@@ -128,8 +129,14 @@ export function fallbackName(kind) {
 
 /** The PDFs shared, waiting on Choose a tool. */
 let sharedPdfs = [];
-/** A share that waits until the user leaves a tool with unsaved work, which they chose to keep. */
+/**
+ * Files shared that wait until the user leaves the screen showing ({ item, kind }[]): a tool with
+ * unsaved work they chose to keep (more shares then join them without asking again, as the app's
+ * stayOnPdf), or the first launch's language choice. Null when none wait.
+ */
 let waiting = null;
+/** Files shared while the question about unsaved work is open ({ item, kind }[]), else null. */
+let asked = null;
 let unwatchRoute = null;
 
 /** The PDFs on Choose a tool (FileItems), in the order they came. */
@@ -193,12 +200,49 @@ export async function receiveFiles(files, { unreadable = 0 } = {}) {
   items.forEach((item, i) => {
     if (!item.name) item.name = fallbackName(kinds[i]);
   });
+  const joining = waiting ?? asked;
+  if (joining) {
+    // Files wait already (the user kept the tool's work, is being asked about it, or chooses a
+    // language first): these join them, with no question, and all are sorted together.
+    const sorted = sortShared(items, kinds, (item) => item.name);
+    if (sorted.unsupported.length) say(ui, tp('share_unsupported', sorted.unsupported.length, sorted.unsupported.length, listOfNames(sorted.unsupported)));
+    if (failed > 0) say(ui, tp('msg_share_unreadable', failed, failed));
+    items.forEach((item, i) => {
+      if (SHARED_KINDS.includes(kinds[i])) joining.push({ item, kind: kinds[i] });
+    });
+    return;
+  }
   const sorted = sortShared(items, kinds, (item) => item.name);
-  if (sorted.unsupported.length) say(ui, tp('share_unsupported', sorted.unsupported.length, sorted.unsupported.length, sorted.unsupported.join(', ')));
-  if (sorted.otherKind.length) say(ui, tp('share_other_kind', sorted.otherKind.length, sorted.otherKind.length, sorted.otherKind.join(', ')));
+  if (sorted.unsupported.length) say(ui, tp('share_unsupported', sorted.unsupported.length, sorted.unsupported.length, listOfNames(sorted.unsupported)));
+  if (sorted.otherKind.length) say(ui, tp('share_other_kind', sorted.otherKind.length, sorted.otherKind.length, listOfNames(sorted.otherKind)));
   if (failed > 0) say(ui, tp('msg_share_unreadable', failed, failed));
   if (!sorted.target) return;
   await open(sorted.kind, sorted.target, sorted.taken, ui);
+}
+
+/** Sorts files that waited ({ item, kind }[]) as one share, naming those of other kinds left out. */
+function sortWaited(entries, ui) {
+  const sorted = sortShared(entries.map((x) => x.item), entries.map((x) => x.kind), (item) => item.name);
+  if (sorted.otherKind.length) say(ui, tp('share_other_kind', sorted.otherKind.length, sorted.otherKind.length, listOfNames(sorted.otherKind)));
+  return sorted;
+}
+
+/**
+ * Keeps files ({ item, kind }[]) until the screen showing is left, then opens what waits: the
+ * kind most of them are, the others named (as the app sorts its shared files once it can open
+ * them).
+ */
+function wait(entries, ui) {
+  waiting = entries.slice();
+  unwatchRoute ??= onRouteChange(() => {
+    const w = waiting;
+    waiting = null;
+    unwatchRoute?.();
+    unwatchRoute = null;
+    if (!w?.length) return;
+    const sorted = sortWaited(w, ui);
+    if (sorted.target) setTimeout(() => open(sorted.kind, sorted.target, sorted.taken, ui), 0);
+  });
 }
 
 /**
@@ -209,10 +253,18 @@ const SAME_SCREEN = {
   '/tool/images': ['/tool/images', '/tool/scan'],
 };
 
-/** Opens `target` with the files, asking first when the screen showing has unsaved work. */
+/**
+ * Opens `target` with the files, in place of the screen showing (as the app's openForShare: Back
+ * then leads Home, not to it), asking first when that screen has unsaved work.
+ */
 async function open(kind, target, files, ui) {
   const route = currentRoute();
   const handle = currentHandle();
+  // The first launch asks for the language first: the files wait for the choice.
+  if (route?.name === 'language') {
+    wait(files.map((item) => ({ item, kind })), ui);
+    return;
+  }
   const here = !!route && (SAME_SCREEN[target] ?? [target]).includes(route.path);
   // The tool showing takes more files itself (Images to PDF adds shared images to its list).
   if (here && typeof handle?.receiveFiles === 'function') {
@@ -226,31 +278,43 @@ async function open(kind, target, files, ui) {
     unsaved = false;
   }
   if (unsaved) {
-    const discard = await ui.alertDialog({
-      title: t('tool_discard_title'),
-      message: t(kind === 'image' ? 'pdf_discard_shared_changes' : 'share_discard_changes'),
-      confirm: t('discard'),
-      dismiss: t('keep'),
-      destructive: true,
-    });
+    // A PDF made and not saved yet is asked about as the app does, rather than changes to it.
+    const atResult = route?.step === 'result';
+    // Files shared while it is asked join these (the app asks once).
+    const all = files.map((item) => ({ item, kind }));
+    asked = all;
+    let discard = false;
+    try {
+      discard = await ui.alertDialog({
+        title: t(atResult ? 'pdf_discard_title' : 'tool_discard_title'),
+        message: t(kind === 'image'
+          ? (atResult ? 'pdf_discard_shared_body' : 'pdf_discard_shared_changes')
+          : (atResult ? 'share_discard_body' : 'share_discard_changes')),
+        confirm: t('discard'),
+        dismiss: t('keep'),
+        destructive: true,
+      });
+    } finally {
+      asked = null;
+    }
     if (!discard) {
       // The files wait until the user leaves this screen.
-      waiting = { kind, target, files };
-      unwatchRoute ??= onRouteChange(() => {
-        const w = waiting;
-        waiting = null;
-        unwatchRoute?.();
-        unwatchRoute = null;
-        if (w) setTimeout(() => open(w.kind, w.target, w.files, ui), 0);
-      });
+      wait(all, ui);
       return;
+    }
+    if (all.length > files.length) {
+      const sorted = sortWaited(all, ui);
+      if (!sorted.target) return;
+      ({ kind, target } = sorted);
+      files = sorted.taken;
     }
   }
   if (kind === 'pdf') {
-    sharedPdfs = files.slice();
-    navigate('/choose', { force: true });
+    // PDFs shared while Choose a tool shows join those listed there (the app's addShared).
+    sharedPdfs = route?.path === '/choose' ? [...sharedPdfs, ...files] : files.slice();
+    navigate('/choose', { force: true, replaceScreen: true });
   } else {
-    navigate(target, { files, force: true });
+    navigate(target, { files, force: true, replaceScreen: true });
   }
 }
 

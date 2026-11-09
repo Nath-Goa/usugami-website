@@ -137,20 +137,122 @@ export function nextFrame() {
   });
 }
 
-/**
- * Lets the browser paint and handle input during long work. Call it between pages.
- * @example for (const page of pages) { await work(page); await yieldToUI(); }
- */
-export function yieldToUI() {
-  const s = globalThis.scheduler;
-  if (s && typeof s.yield === 'function') return s.yield();
+// yieldToUI() continues in a MessageChannel task. scheduler.yield() continuations run before the
+// page's own timers and its painting (measured: no frame and no timer for seconds in a loop that
+// yields every 30 ms, in Chromium and Firefox), and setTimeout is slowed to once a second in a
+// background tab and by its 4 ms clamp. A message task lets timers run; where the browser still
+// skips frames between them (Firefox), a pause until the next frame comes every PAINT_EVERY ms.
+const PAINT_EVERY = 50;
+let channel = null;
+let nextId = 0;
+const waiting = new Map();
+let lastFrame = 0;
+let frameAsked = false;
+// Where the run loop is slow to deliver messages (Playwright's WebKit on Windows: 30 ms each,
+// twice its setTimeout), a timer races the message. Only where there is no scheduler API (the
+// WebKit family): Chromium's timers would stop in a background tab.
+const canRace = typeof globalThis.scheduler === 'undefined';
+let samples = 0;
+let slowSamples = 0;
+let slowMessages = false;
+// In a page or a worker; elsewhere (Node, running the engines' tests) a message port would keep
+// the process alive, and timers do.
+const inBrowser = typeof document !== 'undefined' || typeof WorkerGlobalScope !== 'undefined';
+
+function timerTask() {
   return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function messageTask() {
+  if (typeof MessageChannel !== 'function' || !inBrowser) return timerTask();
+  if (!channel) {
+    channel = new MessageChannel();
+    channel.port1.onmessage = (e) => {
+      const done = waiting.get(e.data);
+      waiting.delete(e.data);
+      done?.(true);
+    };
+  }
+  const id = nextId++;
+  const sent = performance.now();
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (byMessage) => {
+      if (settled) return;
+      settled = true;
+      waiting.delete(id);
+      if (byMessage && canRace && samples < 8) {
+        samples++;
+        if (performance.now() - sent > 8) slowSamples++;
+        if (samples === 8 && slowSamples >= 6) slowMessages = true;
+      }
+      resolve();
+    };
+    waiting.set(id, done);
+    channel.port2.postMessage(id);
+    if (slowMessages) setTimeout(() => done(false), 0);
+  });
+}
+
+/** Notes when the browser next draws a frame (only one request at a time). */
+function watchFrames() {
+  if (frameAsked) return;
+  frameAsked = true;
+  requestAnimationFrame(() => {
+    frameAsked = false;
+    lastFrame = performance.now();
+  });
+}
+
+/**
+ * Lets the browser paint and handle input during long work. Call it between pages. Safe in
+ * workers, and it keeps going in a background tab.
+ * @example for (const page of pages) { await work(page); await yieldToUI(); }
+ * @returns {Promise<void>}
+ */
+export async function yieldToUI() {
+  const page = typeof document !== 'undefined' && typeof requestAnimationFrame === 'function';
+  if (!page || document.visibilityState === 'hidden') return messageTask();
+  const now = performance.now();
+  if (!lastFrame) lastFrame = now;
+  if (now - lastFrame > PAINT_EVERY) {
+    // No frame for a while: wait for one (or 100 ms, should frames stop), then a task after it,
+    // so it is painted.
+    await new Promise((resolve) => {
+      let done = false;
+      const go = () => { if (!done) { done = true; resolve(); } };
+      requestAnimationFrame(() => { lastFrame = performance.now(); messageTask().then(go); });
+      setTimeout(go, 100);
+    });
+    return;
+  }
+  watchFrames();
+  return messageTask();
 }
 
 let liveRegion = null;
 let announceTimer = 0;
 
-/** Says `text` politely to screen readers (without moving focus). */
+/** The modal dialog open that `node` isn't in (assistive technology can't reach it then), or null. */
+function modalOver(node) {
+  for (const dialog of Array.from(document.querySelectorAll('dialog[open]')).reverse()) {
+    let modal = true;
+    try {
+      modal = dialog.matches(':modal');
+    } catch {
+      // No :modal: an open dialog counts.
+    }
+    if (modal && !dialog.contains(node)) return dialog;
+  }
+  return null;
+}
+
+/**
+ * Says `text` politely to screen readers (without moving focus). While a modal dialog is open
+ * the rest of the page is inert and its announcements aren't heard: one said then waits until
+ * that dialog has gone (a progress dialog closing as the work ends) — or, when the dialog stays,
+ * is said from inside it.
+ */
 export function announce(text) {
   if (!liveRegion || !liveRegion.isConnected) {
     liveRegion = h('div', { class: 'visually-hidden', 'aria-live': 'polite', 'aria-atomic': 'true', id: 'announcer' });
@@ -159,9 +261,32 @@ export function announce(text) {
   // Emptied first, so the same message said twice is heard twice.
   liveRegion.textContent = '';
   clearTimeout(announceTimer);
-  announceTimer = setTimeout(() => {
+  const started = Date.now();
+  const say = () => {
+    const over = modalOver(liveRegion);
+    if (over) {
+      const closing = over.classList.contains('is-closing');
+      if (closing || Date.now() - started < 400) {
+        // It may be on its way out (its exit takes 150 ms): wait a little, then look again.
+        if (Date.now() - started < 3000) {
+          announceTimer = setTimeout(say, 50);
+          return;
+        }
+      } else {
+        // It stays: say it from inside the dialog.
+        let inner = over.querySelector(':scope > .ui-announcer');
+        if (!inner) {
+          inner = h('div', { class: 'visually-hidden ui-announcer', 'aria-live': 'polite', 'aria-atomic': 'true' });
+          over.appendChild(inner);
+        }
+        inner.textContent = '';
+        announceTimer = setTimeout(() => { inner.textContent = String(text); }, 50);
+        return;
+      }
+    }
     liveRegion.textContent = String(text);
-  }, 50);
+  };
+  announceTimer = setTimeout(say, 50);
 }
 
 const WIDE = '(min-width: 840px)';

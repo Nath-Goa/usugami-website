@@ -287,6 +287,9 @@ export function iconNames() {
  * @param {{ size?: number, label?: string }} [options]
  * @returns {SVGSVGElement}
  */
+/** Each icon's <svg>, parsed the first time it is drawn. */
+const parsed = new Map();
+
 export function icon(name, { size = 24, label } = {}) {
   let body = ICONS[name];
   if (body === undefined) {
@@ -296,9 +299,17 @@ export function icon(name, { size = 24, label } = {}) {
       console.warn(`Icon "${name}" isn't in core/icons.js yet: run node tools/build-icons.mjs --js`);
     }
   }
-  const template = document.createElement('template');
-  template.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="${size}" height="${size}" fill="currentColor">${body}</svg>`;
-  const svg = template.content.firstChild;
+  // Parsed once per icon, then copied: a long list (a result of 300 files) draws hundreds.
+  let shape = parsed.get(body);
+  if (!shape) {
+    const template = document.createElement('template');
+    template.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">${body}</svg>`;
+    shape = template.content.firstChild;
+    parsed.set(body, shape);
+  }
+  const svg = document.importNode(shape, true);
+  svg.setAttribute('width', String(size));
+  svg.setAttribute('height', String(size));
   svg.setAttribute('class', 'icon');
   svg.dataset.icon = name;
   svg.setAttribute('focusable', 'false');

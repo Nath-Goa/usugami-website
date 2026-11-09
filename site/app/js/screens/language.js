@@ -14,7 +14,10 @@ export async function mount(ctx) {
     if (chosen) return;
     chosen = true;
     await setLanguage(code);
-    ctx.navigate('/', { replace: true });
+    // On to the screen the app was opened at (main.js passes it as ?next=), else Home. Files
+    // shared meanwhile open then (core/share-inbox.js waits for this screen to be left).
+    const next = typeof ctx.params?.next === 'string' && ctx.params.next.startsWith('/') && ctx.params.next !== '/language' ? ctx.params.next : '/';
+    ctx.navigate(next, { replace: true });
   };
   ctx.root.append(h('main', { class: 'language-page', 'data-main': '' },
     h('div', { class: 'app-icon' }, h('img', { src: new URL('../../icons/icon-maskable-512.png', import.meta.url).href, alt: '' })),

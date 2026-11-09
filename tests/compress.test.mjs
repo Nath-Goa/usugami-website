@@ -25,6 +25,8 @@ import { transformsAgree, jpegForDecoding } from '../site/app/js/engine/compress
 import { encodeGrayJpeg, filterRow } from '../site/app/js/engine/images/encode.js';
 import { parseJpeg, withExifOrientation } from '../site/app/js/engine/images/jpeg.js';
 import { runSync } from '../site/app/js/engine/images/canvas.js';
+import { markPdf } from '../site/app/js/engine/page-mark.js';
+import { MarkStyle, mayCarryMark } from '../site/app/js/engine/mark-layout.js';
 
 const A4 = [595.2756, 841.8898];
 const near = (a, b, tolerance, msg) => assert(Math.abs(a - b) <= tolerance, `${msg}: ${a} vs ${b}`);
@@ -986,11 +988,92 @@ await withPage(async (page, url) => {
       assert(!r.keptOriginal && !opened.context.trailerInfo.Encrypt && opened.getPageCount() === (await PDFDocument.load(real, { password: 'secret' })).getPageCount(), `${name}: saved without its password`);
     }
 
-    // Locked only against changes (no password to open it): kept as it was when nothing is saved, as in the app.
+    // Locked only against changes (no password to open it): never kept as it was, but saved anew
+    // without the restriction, as every tool's PDFs are (PageMarkDeviceTest's
+    // aRestrictedPdfIsNeitherMarkedNorKeptAsItIs).
     const owner = await c.compress({ name: 'owner.pdf', bytes: ownerOnly }, { level: 'less' });
     ok(owner, 'owner password only');
-    assert(owner.keptOriginal && Buffer.from(owner.bytes).equals(Buffer.from(ownerOnly)), `no password to open it: the original kept (${owner.keptOriginal}, ${owner.bytes.length} from ${ownerOnly.length})`);
+    assert(savedPercent(ownerOnly.length, owner.bytes.length) == null, `can't get 1% smaller (${owner.bytes.length} from ${ownerOnly.length})`);
+    assert(!owner.keptOriginal, 'restricted by an owner password: not kept as it was');
+    const ownerBack = await PDFDocument.load(owner.bytes);
+    assert(!ownerBack.context.trailerInfo.Encrypt && !Buffer.from(owner.bytes).toString('latin1').includes('/Encrypt'), 'no restriction any more');
+    assert((await c.text(owner.bytes))[0].includes('ALPHA ONE'), 'its text');
+    same(compressNotes([{ name: 'owner.pdf', result: owner }]), [{ key: 'pdf_not_smaller', args: [] }], 'said as for a PDF with a password');
+    same(compressDetail(owner), null, 'nothing under it');
     console.log('ok passwords');
+  }
+
+  // --- Usugami's own watermark: compressed without it, never kept as it was ------------------------
+  {
+    let content = '0 0.5 0 RG ';
+    for (let i = 0; i < 20000; i++) content += `${(random() * 595).toFixed(2)} ${(random() * 842).toFixed(2)} m ${(random() * 595).toFixed(2)} ${(random() * 842).toFixed(2)} l S `;
+    const plain = await onePage(async (doc, page) => {
+      draw(doc, page, content);
+      await caption(doc, page, 'MARKED BEFORE');
+    });
+    const marked = await markPdf(plain, new MarkStyle({ size: 100, opacity: 100 }));
+    assert(marked && mayCarryMark(marked), 'made with the watermark');
+    const out = await c.compress({ name: 'marked.pdf', bytes: marked }, { level: 'recommended' });
+    ok(out, 'marked');
+    assert(savedPercent(marked.length, out.bytes.length) == null, `can't get 1% smaller (${out.bytes.length} from ${marked.length})`);
+    assert(!out.keptOriginal, 'with Usugami\'s watermark: not kept as it was');
+    assert(!mayCarryMark(out.bytes), 'the watermark taken off');
+    assert(!(await PDFDocument.load(out.bytes)).context.trailerInfo.Encrypt, 'not encrypted');
+    same((await c.text(out.bytes)).map((t) => t.includes('MARKED BEFORE') && !t.includes('Usugami')), [true], 'its own text, without the watermark\'s');
+    console.log('ok the Usugami watermark');
+  }
+
+  // --- Damaged page trees: mended as the app mends them, the pages viewers show --------------------
+  {
+    const threePages = async (n = 3) => {
+      const doc = await PDFDocument.create();
+      for (let i = 0; i < n; i++) {
+        const page = doc.addPage(A4);
+        const im = flateImage(doc, photo(1200, 900, 10 + i), { Width: 1200, Height: 900, BitsPerComponent: 8, ColorSpace: 'DeviceRGB' });
+        draw(doc, page, 'q 288 0 0 216 50 500 cm /Im0 Do Q', { Im0: im });
+        await caption(doc, page, `TREE PAGE ${i + 1}`);
+      }
+      return doc;
+    };
+    const rootOf = (doc) => [doc.catalog.get(N('Pages')), doc.context.lookup(doc.catalog.get(N('Pages')))];
+    // A tree that leads back into itself (pdf-lib's own getPages() overflows its stack).
+    const looping = await threePages();
+    {
+      const [rootRef, root] = rootOf(looping);
+      root.get(N('Kids')).push(looping.context.register(looping.context.obj({ Type: 'Pages', Kids: [rootRef], Count: 3, Parent: rootRef })));
+    }
+    // A lone page in the tree's place (pdf-lib's getPages() throws a TypeError).
+    const lone = await threePages(1);
+    {
+      const [, root] = rootOf(lone);
+      const pageRef = root.get(N('Kids')).get(0);
+      lone.context.lookup(pageRef).delete(N('Parent'));
+      lone.catalog.set(N('Pages'), pageRef);
+    }
+    // A page without its /Type (pdf-lib skips it; viewers show it).
+    const untyped = await threePages();
+    {
+      const [, root] = rootOf(untyped);
+      untyped.context.lookup(root.get(N('Kids')).get(1)).delete(N('Type'));
+    }
+    for (const [what, doc, pages] of [['looping', looping, 3], ['lone page', lone, 1], ['untyped page', untyped, 3]]) {
+      const source = await doc.save({ addDefaultPage: false });
+      const out = await c.compress({ name: 'tree.pdf', bytes: source }, { level: 'recommended' });
+      ok(out, what);
+      assert(out.pageCount === pages && !out.keptOriginal, `${what}: ${out.pageCount} pages, kept ${out.keptOriginal}`);
+      const back = await PDFDocument.load(out.bytes);
+      assert(back.getPageCount() === pages, `${what}: the mended tree is read the same by pdf-lib (${back.getPageCount()})`);
+      same((await c.text(out.bytes)).map((t) => t.trim()), [...Array(pages).keys()].map((i) => `TREE PAGE ${i + 1}`), `${what}: every page, in order`);
+      for (let i = 0; i < pages; i++) same([imagesOf(back, i)[0].width, imagesOf(back, i)[0].filter], [600, '/DCTDecode'], `${what}: page ${i + 1}'s image reduced`);
+    }
+    // A tree without a page to find: as damaged as one that isn't a PDF.
+    const empty = await PDFDocument.create();
+    empty.addPage(A4);
+    rootOf(empty)[1].set(N('Kids'), empty.context.obj([]));
+    rootOf(empty)[1].set(N('Count'), empty.context.obj(0));
+    const none = await c.compress({ name: 'none.pdf', bytes: await empty.save({ addDefaultPage: false }) }, {});
+    assert(none.error?.name === 'UserError' && none.error.key === 'pdf_import_failed', `no pages: ${JSON.stringify(none.error)}`);
+    console.log('ok damaged page trees');
   }
 
   // --- Damaged and hostile PDFs -----------------------------------------------------------------
@@ -1080,6 +1163,43 @@ await withPage(async (page, url) => {
     }, { base: url, bytes: b64(source) });
     assert(r.worst < 400, `the page painted at least every 400 ms (worst ${r.worst.toFixed(0)} ms, ${r.ms.toFixed(0)} ms in all; long tasks ${r.long})`);
     console.log(`ok responsive (worst frame ${r.worst.toFixed(0)} ms, ${r.ms.toFixed(0)} ms for 12 MP)`);
+  }
+
+  // --- Responsiveness on a slow phone: a scan of JPEG pages at 4x CPU throttling -----------------
+  // Each page used to hold the page for ~300 ms (the browser converting the picture on the page's
+  // own thread for premultiplyAlpha: 'none', then RGBA -> RGB -> RGBA copies in one go).
+  {
+    const pages = 8;
+    const scan = await c.jpeg('photo', 1654, 2339, 0.9);
+    const doc = await PDFDocument.create();
+    for (let i = 0; i < pages; i++) {
+      const p = doc.addPage(A4);
+      draw(doc, p, `q ${A4[0]} 0 0 ${A4[1]} 0 0 cm /Im0 Do Q`, { Im0: jpegImage(doc, scan, { Width: 1654, Height: 2339, ColorSpace: 'DeviceRGB' }) });
+    }
+    const source = await doc.save();
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
+    let r;
+    try {
+      r = await page.evaluate(async ({ base, bytes }) => {
+        const { compressPdf } = await import(new URL('app/js/engine/compress.js', base).href);
+        const input = window.__c.unb64(bytes);
+        const long = [];
+        const observer = new PerformanceObserver((list) => { for (const e of list.getEntries()) long.push(Math.round(e.duration)); });
+        observer.observe({ type: 'longtask' });
+        const out = await compressPdf({ name: 'scan.pdf', bytes: input }, { level: 'recommended' });
+        await new Promise((res) => setTimeout(res, 100));
+        observer.disconnect();
+        return { long, reduced: out.imagesReduced, size: out.bytes.length };
+      }, { base: url, bytes: b64(source) });
+    } finally {
+      await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+      await cdp.detach();
+    }
+    const over = r.long.filter((d) => d > 200);
+    assert(r.reduced === pages, `every page's picture reduced (${r.reduced})`);
+    assert(over.length < pages / 2, `at 4x, few tasks over 200 ms for ${pages} pages: ${JSON.stringify(r.long)}`);
+    console.log(`ok responsive at 4x (${over.length} of ${r.long.length} long tasks over 200 ms, ${pages} pages)`);
   }
 });
 

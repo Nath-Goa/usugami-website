@@ -268,6 +268,27 @@ async function formats(page) {
   ]), r.symbols);
   check('table columns fit the space', eq(r.columns, [[100, 200], [150, 300], [150, 150, 150], [100, 100], [100, 300, 200], [50, 50]]), r.columns);
   check('single lines are kept off page edges', eq(r.breaks, [5, 3, 3, 4, 0, 0, 2, 1, 1, 0]), r.breaks);
+  // PageBreaking is ported here so the converter screens load no fonts; it must give what the text engine's gives.
+  const same = await page.evaluate(async () => {
+    const { linesThatFit } = await import(window.O.base + 'app/js/engine/text/layout.js');
+    const B = window.O.fmt.PageBreaking;
+    let seed = 11;
+    const rand = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+    const differ = [];
+    for (let k = 0; k < 2000; k++) {
+      const n = Math.floor(rand() * 7);
+      const bottoms = [];
+      let at = 0;
+      for (let i = 0; i < n; i++) bottoms.push((at += 1 + Math.round(rand() * 400) / 20));
+      const space = k % 3 === 0 && n ? bottoms[Math.floor(rand() * n)] + (rand() < 0.5 ? 1e-7 : -1e-7) : rand() * at;
+      const args = [space, rand() < 0.7, rand() < 0.3, rand() < 0.8, rand() < 0.8];
+      const a = B.linesThatFit(new Float32Array(bottoms), ...args);
+      const b = linesThatFit(Array.from(new Float32Array(bottoms)), ...args);
+      if (a !== b) differ.push([bottoms, ...args, a, b]);
+    }
+    return differ.slice(0, 3);
+  });
+  check("page breaking gives what the text engine's does", same.length === 0, same);
   check('groups stretch, offset and mirror their children', eq(r.groups, [
     [150, 60, 100, 50], [10, 20, 30, 40], [60, 20, 30, 40], [-30, true, false], [10, 40, 30, 40], [30, false, true], [6, 6, 2, 2],
   ]), r.groups);
@@ -823,10 +844,25 @@ async function drawingPdf(page) {
       ctx.fillStyle = 'rgba(0, 0, 255, 0.5)';
       ctx.fillRect(0, 0, 40, 40);
     });
+    // A photo: colours changing all over, which a JPEG stores in far fewer bytes.
+    const photo = await O.png(960, 720, (ctx) => {
+      const img = ctx.createImageData(960, 720);
+      let seed = 7;
+      const noise = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) % 41) - 20;
+      for (let y = 0, i = 0; y < 720; y++) {
+        for (let x = 0; x < 960; x++, i += 4) {
+          img.data[i] = 120 + 80 * Math.sin(x / 37) + noise();
+          img.data[i + 1] = 110 + 70 * Math.cos(y / 23) + noise();
+          img.data[i + 2] = 100 + 60 * Math.sin((x + y) / 51) + noise();
+          img.data[i + 3] = 255;
+        }
+      }
+      ctx.putImageData(img, 0, 0);
+    });
     const slide = 'ppt/slides/slide1.xml';
     const pkg = await OfficePackage.open(O.makeZip({
       'ppt/slides/_rels/slide1.xml.rels': O.rels(['rId2', 'image', '../media/image1.png'], ['rId3', 'image', '../media/big.png'], ['rId4', 'image', '../media/broken.emf'], ['rId5', 'image', '../media/alpha.png']),
-      'ppt/media/image1.png': halves, 'ppt/media/big.png': big, 'ppt/media/broken.emf': O.u8('\u0001\u0000\u0000\u0000 not a picture'), 'ppt/media/alpha.png': seeThrough,
+      'ppt/media/image1.png': halves, 'ppt/media/big.png': big, 'ppt/media/broken.emf': O.u8('\u0001\u0000\u0000\u0000 not a picture'), 'ppt/media/alpha.png': seeThrough, 'ppt/media/photo.png': photo,
     }));
     const theme = D.OfficeTheme.DEFAULT;
     const scheme = (n) => theme.color(n);
@@ -888,6 +924,9 @@ async function drawingPdf(page) {
     const again = await images.picture('ppt/media/big.png', 72, 36, null);
     shape({ picture: true, rect: R(320, 500, 72, 36), fill: D.Fill.image('ppt/media/big.png'), pictureObject: bigPicture });
     shape({ picture: true, rect: R(320, 540, 72, 36), fill: D.Fill.image('ppt/media/big.png'), pictureObject: again });
+    // A photo 0.8 inch wide: 120 × 90 pixels.
+    const photoPicture = await images.picture('ppt/media/photo.png', 57.6, 43.2, null);
+    shape({ picture: true, rect: R(420, 600, 57.6, 43.2), fill: D.Fill.image('ppt/media/photo.png'), pictureObject: photoPicture });
     // A chart's stand-in, with its title.
     const chart = await O.opdf.StandInPicture.create('Sales by region');
     chart.draw(c, R(20, 600, 200, 100));
@@ -949,7 +988,7 @@ async function drawing(page) {
         arcIn: p(430, 470), arcOut: p(382, 422),
         shapePicture: p(30, 520), shapePictureRight: p(95, 520),
         curveEnd: p(217, 540), alphaPicture: p(280, 520), bigPicture: p(356, 518),
-        standIn: p(30, 610), standInEdge: p(20.2, 650), emptyStandIn: p(270, 605),
+        standIn: p(30, 610), standInEdge: p(20.2, 650), emptyStandIn: p(270, 605), photo: p(448, 621),
       },
       dashes: along(230, 25, 215),
       text,
@@ -986,8 +1025,15 @@ async function drawing(page) {
   check("a chart's stand-in is a grey box with its title as text", near(P.standIn, [241, 241, 241], 6) && P.standInEdge[0] < 230 && r.text.includes('Sales by region') && near(P.emptyStandIn, [241, 241, 241], 6), [P.standIn, r.text]);
   const pictures = r.images.filter((i) => !i.mask);
   const big = pictures.find((i) => i.width === 150 && i.height === 75);
+  const halves = pictures.find((i) => i.width === 100 && i.height === 50);
+  const photo = pictures.find((i) => i.width === 120 && i.height === 90);
   const alpha = pictures.find((i) => i.smask);
-  check('pictures are stored as JPEG, or losslessly with their transparency', big?.filter === '/DCTDecode' && alpha?.filter === '/FlateDecode' && pictures.filter((i) => i.width === 150).length === 1, r.images);
+  // As Compress PDF leaves the app's pictures: replaced by a JPEG only when that is smaller and the
+  // picture took 2 KB or more, so flat ones shown large (logos, diagrams) keep sharp edges.
+  check('a photo is stored as a JPEG', photo?.filter === '/DCTDecode' && !photo.smask, r.images);
+  check('flat pictures are stored losslessly, without JPEG blocks', big?.filter === '/FlateDecode' && !big.smask && halves?.filter === '/FlateDecode' && !halves.smask, r.images);
+  check('a see-through picture is stored losslessly with its transparency', alpha?.filter === '/FlateDecode' && pictures.filter((i) => i.width === 150).length === 1, r.images);
+  check('a photo is drawn at its place', P.photo[0] > 20 && P.photo[1] > 20 && !near(P.photo, white, 10), P.photo);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1197,6 +1243,61 @@ async function largePart(page) {
   check('the page stays responsive while a large part is read', r.ticks >= 2, r.ticks);
 }
 
+/**
+ * In a tab in the background, timers run once a second at most: the pauses between slices are new
+ * tasks instead, so reading a large part there takes no longer. Timers are slowed so here.
+ */
+async function backgroundTab(page) {
+  const slowed = await page.evaluate(async () => {
+    const O = window.O;
+    const rows = [];
+    for (let i = 1; i <= 20000; i++) rows.push(`<row r="${i}"><c r="A${i}"><v>${i}</v></c><c r="B${i}" t="inlineStr"><is><t>Row ${i} of a long sheet</t></is></c></row>`);
+    const xml = `<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="${O.S}"><sheetData>${rows.join('').repeat(4)}</sheetData></worksheet>`;
+    const pkg = await O.ox.OfficePackage.open(O.makeZip({ 'xl/worksheets/sheet1.xml': xml }));
+    const real = window.setTimeout;
+    let timers = 0;
+    window.setTimeout = (fn, ms, ...rest) => {
+      if (!(ms > 0)) timers++;
+      return real(fn, Math.max(1000, ms || 0), ...rest);
+    };
+    try {
+      const t = performance.now();
+      const root = await pkg.xml('xl/worksheets/sheet1.xml');
+      const guarded = await O.guard.guardXmlAsync('<a>' + '<b>x</b>'.repeat(1200000) + '</a>');
+      return { ms: performance.now() - t, timers, rows: root.child('sheetData').el.childElementCount, guarded: guarded.length };
+    } finally {
+      window.setTimeout = real;
+    }
+  });
+  check('a large part reads as fast in a tab in the background', slowed.ms < 6000 && slowed.timers === 0 && slowed.rows === 80000 && slowed.guarded === 1200000 * 8 + 7, { ...slowed, ms: Math.round(slowed.ms) });
+}
+
+/** A picture's lossless stream, deflated only as far as needed to tell it from its JPEG's size. */
+async function deflating(page) {
+  const deflated = await page.evaluate(() => {
+    const O = window.O;
+    const { deflateBelow } = O.opdf;
+    const flat = new Uint8Array(300 * 200 * 3).fill(200);
+    const noisy = new Uint8Array(300 * 200 * 3);
+    let seed = 3;
+    for (let i = 0; i < noisy.length; i++) {
+      seed ^= seed << 13;
+      seed ^= seed >>> 17;
+      seed ^= seed << 5;
+      noisy[i] = seed & 255;
+    }
+    const whole = deflateBelow(flat);
+    const back = O.fflate.unzlibSync(whole);
+    return {
+      flat: whole.length, same: back.length === flat.length && back.every((v) => v === 200),
+      flatUnder: deflateBelow(flat, 2048)?.length ?? null, noisyStopped: deflateBelow(noisy, 5000), noisyAll: deflateBelow(noisy).length,
+      tiny: O.fflate.unzlibSync(deflateBelow(new Uint8Array([1, 2, 3]))).join(),
+    };
+  });
+  check('a lossless stream is a zlib stream, given up once past the limit', deflated.same && deflated.flat < 2048 && deflated.flatUnder === deflated.flat &&
+    deflated.noisyStopped === null && deflated.noisyAll > 150000 && deflated.tiny === '1,2,3', deflated);
+}
+
 // ---------------------------------------------------------------------------------------------
 
 await withPage(async (page, url) => {
@@ -1211,6 +1312,8 @@ await withPage(async (page, url) => {
   await tables(page);
   await pagesAndMeasures(page);
   await largePart(page);
+  await backgroundTab(page);
+  await deflating(page);
 }, { viewport: { width: 1366, height: 900 }, mobile: false });
 console.log(`Chromium: ${passed} checks passed`);
 
@@ -1221,23 +1324,22 @@ console.log(`Dispatcher: ${passed} checks passed`);
 
 for (const browser of ['firefox', 'webkit']) {
   const before = passed;
+  // Firefox writes each XML error DOMParser meets to the console: those (and only those) are let
+  // through there, so broken XML is checked in every browser.
   await withPage(async (page, url) => {
     await setup(page, url);
+    await formats(page);
     await colors(page);
     await guard(page, { quick: true });
-    if (browser === 'webkit') await brokenXml(page);
+    await brokenXml(page);
     await zips(page, { quick: true });
     await packages(page);
     await drawing(page);
     await tables(page);
-  }, { browser });
+    await backgroundTab(page);
+    await deflating(page);
+  }, { browser, allowConsole: browser === 'firefox' ? [/XML Parsing Error/] : [] });
   console.log(`${browser}: ${passed - before} checks passed`);
 }
-
-// Firefox writes each XML error DOMParser meets to the console: broken XML is checked on its own there.
-await withPage(async (page, url) => {
-  await setup(page, url);
-  await brokenXml(page);
-}, { browser: 'firefox', ignoreProblems: true });
 
 console.log(`office-core: all ${passed} checks passed`);

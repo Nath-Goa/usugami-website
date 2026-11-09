@@ -1013,15 +1013,36 @@ await test('OCR reads each page as it shows: its own image, turned, in colour wh
   ok(Math.max(...s.pages[0].pixels) < 1600, `the PDF keeps a smaller copy (${s.pages[0].pixels})`);
 }, { viewport: DESKTOP, mobile: false }));
 
+/**
+ * Records what the live region (#announcer) says, and whether a dialog was open then: a message
+ * announced while the progress dialog is modal is never heard (the rest of the page is inert).
+ */
+async function watchAnnouncer(page) {
+  await page.evaluate(() => {
+    window.__said = [];
+    new MutationObserver(() => {
+      const text = document.getElementById('announcer')?.textContent;
+      if (text && window.__said.at(-1)?.text !== text) window.__said.push({ text, modal: !!document.querySelector('dialog[open]') });
+    }).observe(document.body, { subtree: true, childList: true, characterData: true });
+  });
+}
+async function saidWithoutDialog(page, text) {
+  await page.waitForFunction((t) => window.__said.some((s) => s.text.includes(t)), text, { timeout: 30000 });
+  const said = await page.evaluate((t) => window.__said.filter((s) => s.text.includes(t)), text);
+  ok(said.every((s) => !s.modal), `"${text}" announced once the progress dialog had gone (${JSON.stringify(said)})`);
+}
+
 await test('OCR: no text found says so; reading that fails keeps the PDF, without text', () => withPage(async (page, url) => {
   await watchOcr(page);
   await openApp(page, url, '#/tool/images');
+  await watchAnnouncer(page);
   await choose(page, '.images-empty-buttons .ui-btn:has-text("Photos")', [asPng('Red.png', red)]);
   await settled(page, 1);
   await openSheet(page);
   await page.locator('dialog[open] .ui-switch-row:has-text("Make text searchable")').click();
   await create(page);
   await snackWith(page, 'No text was recognized. The PDF was created without a text layer.');
+  await saidWithoutDialog(page, 'No text was recognized.');
   eq(await page.$eval('.ui-result-name', (e) => e.textContent), 'Red.pdf', 'named as it would be without text recognition');
   // The browser's Back goes back to editing; then reading fails.
   await page.goBack();
@@ -1034,6 +1055,7 @@ await test('OCR: no text found says so; reading that fails keeps the PDF, withou
   await page.locator('dialog[open] .ui-switch-row:has-text("Make text searchable")').click();
   await create(page);
   await snackWith(page, 'Text recognition failed, so the PDF was created without searchable text.');
+  await saidWithoutDialog(page, 'Text recognition failed');
   eq(await page.$eval('.ui-result-name', (e) => e.textContent), 'Red.pdf', 'the PDF made, as it was');
   const [file] = await saveAll(page, 1);
   const r = await inspect(page, file.bytes);
@@ -1086,6 +1108,215 @@ await test('a HEIC photo: upright, as a JPEG page; Back from the result to editi
   await settled(page, 1);
   eq(await page.evaluate(() => [location.hash, history.state?.stepDepth ?? 0]), ['#/tool/images', 0], 'back to editing, no step left');
 }, { viewport: DESKTOP, mobile: false }));
+
+// ---------------------------------------------------------------------------------------------
+// The editor's chips stay over the pages (the app's grid scrolls under them), each 48 px to tap;
+// the first pages start at the top with the keyboard's focus on the first; the Create PDF sheet is
+// a history step; a failed PDF is said once the progress dialog has gone.
+
+/** Whether points 4 px above and below `selector`'s element (the first) still reach it. */
+const tapReach = (page, selector) => page.$eval(selector, (el) => {
+  const r = el.getBoundingClientRect();
+  const x = r.left + r.width / 2;
+  const hits = (y) => document.elementFromPoint(x, y)?.closest('.ui-chip') === el;
+  return { above: hits(r.top - 4), below: hits(r.bottom + 4), height: r.height };
+});
+
+await test('editor: the chips stay over the scrolled pages, 48 px to tap; new pages start at the top, focused', () => withPage(async (page, url) => {
+  await openApp(page, url, '#/tool/images');
+  const many = Array.from({ length: 8 }, (_, i) => asPng(`P${i + 1}.png`, [red, green, blue][i % 3]));
+  await choose(page, '.images-empty-buttons .ui-btn:has-text("Photos")', many);
+  await settled(page, 8);
+  const reach = await tapReach(page, '.images-options .ui-chip');
+  ok(reach.above && reach.below, `a chip takes taps 4 px beyond its edges (${JSON.stringify(reach)})`);
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await page.waitForTimeout(300);
+  ok(await page.evaluate(() => window.scrollY) > 300, 'the pages scrolled');
+  const top = await page.$eval('.images-options', (e) => e.getBoundingClientRect().top);
+  ok(top >= 63 && top <= 66, `the chips stay under the top bar (top ${top})`);
+  const chip = await page.$eval('.images-options .ui-chip', (e) => e.getBoundingClientRect().top);
+  ok(chip >= 64 && chip < 120, `the Page size chip shows (top ${chip})`);
+  const hit = await page.$eval('.images-options .ui-chip', (e) => {
+    const r = e.getBoundingClientRect();
+    return document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)?.closest('.ui-chip') === e;
+  });
+  ok(hit, 'nothing covers the chip');
+  await page.locator('.ui-dropdown:has-text("Page size")').click();
+  await page.waitForSelector('.ui-menu-item:has-text("Letter")');
+  await page.locator('.ui-menu-item:has-text("Letter")').click();
+  eq(await page.$eval('.ui-dropdown:has-text("Page size")', (e) => e.textContent), 'Page size: US Letter', 'changed while scrolled');
+  await shot(page, 'phone-editor-scrolled');
+
+  // Remove all, then a landscape phone: the empty screen scrolls to reach its buttons; the pages
+  // added start at their top, and the keyboard's focus goes to the first of them (not lost to
+  // the document, where the next Tab would start again from the top).
+  await page.locator('.images-editor .ui-topbar [aria-label="Remove all"]').click();
+  await page.locator('dialog[open] .ui-btn:has-text("Remove all")').click();
+  await page.waitForSelector('.images-empty:not([hidden])');
+  await page.setViewportSize({ width: 780, height: 360 });
+  await page.waitForTimeout(200);
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await page.waitForTimeout(200);
+  ok(await page.evaluate(() => window.scrollY) > 0, 'the empty screen scrolled');
+  await page.locator('.images-empty-buttons .ui-btn:has-text("Files")').focus();
+  // Playwright catches the picker once its listener is set up, which takes a moment.
+  const picking = page.waitForEvent('filechooser');
+  await page.waitForTimeout(200);
+  await page.keyboard.press('Enter');
+  const chooser = await picking;
+  await chooser.setFiles([asPng('One.png', red), asPng('Two.png', green)]);
+  await settled(page, 2);
+  await page.waitForTimeout(200);
+  eq(await page.evaluate(() => window.scrollY), 0, 'the pages start at their top');
+  ok(await page.$eval('.images-options', (e) => e.getBoundingClientRect().top) >= 64, 'the chips show under the top bar');
+  eq(await page.evaluate(() => document.activeElement?.closest('.images-card') === document.querySelector('.images-card')), true, 'the focus is on the first page');
+  ok(await page.$$eval('.images-empty-buttons .ui-btn', (els) => els.every((e) => !e.disabled)), 'the empty screen\'s buttons are never `disabled` (which drops the focus)');
+}, { viewport: PHONE }));
+
+for (const browser of QUICK ? ['chromium'] : ['chromium', 'firefox', 'webkit']) {
+  await test(`${browser}: the Create PDF sheet: the browser's Back closes it and keeps the images; a failed PDF is said after the dialog`, () => withPage(async (page, url) => {
+    // Making the PDF fails as an unreadable image would.
+    await page.route((u) => u.pathname.endsWith('/app/js/engine/images/build-pdf.js'), (route) => route.fulfill({
+      contentType: 'text/javascript',
+      body: `import { UserError } from '../../core/errors.js';
+export async function buildImagesPdf(pages) {
+  await new Promise((r) => setTimeout(r, 700));
+  throw new UserError('msg_image_unreadable', pages[0].name);
+}`,
+    }));
+    await openApp(page, url, '#/tool/images');
+    await watchAnnouncer(page);
+    // Playwright's Firefox takes the file picker's cancel event first (see below): dropped there.
+    if (browser === 'firefox') await put(page, 'drop', [['Red.png', red], ['Green.png', green]]);
+    else await choose(page, '.images-empty-buttons .ui-btn:has-text("Photos")', [asPng('Red.png', red), asPng('Green.png', green)]);
+    await settled(page, 2);
+    await openSheet(page);
+    eq(await page.evaluate(() => history.state?.stepDepth ?? 0), 1, 'the sheet is a step');
+    await page.goBack();
+    await page.waitForSelector('dialog[open]', { state: 'detached', timeout: 10000 });
+    await page.waitForTimeout(300);
+    ok(!(await page.$('dialog[open]')), 'Back closed the sheet, asking nothing');
+    await settled(page, 2);
+    eq(await page.evaluate(() => [location.hash, history.state?.stepDepth ?? 0]), ['#/tool/images', 0], 'still editing, no step left');
+    // Escape closes it too, and its step goes.
+    await openSheet(page);
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('dialog[open]', { state: 'detached', timeout: 10000 });
+    await page.waitForFunction(() => (history.state?.stepDepth ?? 0) === 0, null, { timeout: 5000 });
+    ok(true, 'Escape closes it, its step taken back');
+    // Create: the PDF can't be made; that is said once the progress dialog has gone.
+    await openSheet(page);
+    await page.locator('dialog[open] .images-create-button').click();
+    await snackWith(page, 'Couldn\'t create the PDF: "Red.png" could not be read');
+    await saidWithoutDialog(page, 'Couldn\'t create the PDF');
+    eq(await page.evaluate(() => [location.hash, history.state?.stepDepth ?? 0]), ['#/tool/images', 0], 'back to editing, no step left');
+    await settled(page, 2);
+  }, { browser, viewport: PHONE, mobile: browser !== 'firefox' }));
+}
+
+await test('the tool shows before the PDF writer and text recognition have loaded', () => withPage(async (page, url) => {
+  // pdf-lib, fontkit, pdf.js and Tesseract held back, as on a slow connection.
+  const held = [];
+  let holding = true;
+  await page.route((u) => /\/vendor\/(pdf-lib|fontkit|pdfjs|tesseract)\//.test(u.pathname), (route) => {
+    if (holding) held.push(route);
+    else route.continue();
+  });
+  await page.goto(url + 'app/#/tool/images');
+  await page.waitForSelector('.screen[data-tool="images"]:not([aria-busy]) .images-empty-buttons', { timeout: 15000 });
+  ok(true, 'the empty editor shows');
+  await choose(page, '.images-empty-buttons .ui-btn:has-text("Photos")', [asPng('Red.png', red)]);
+  await settled(page, 1);
+  await previewsDrawn(page);
+  ok(true, 'images are added and shown meanwhile');
+  holding = false;
+  for (const route of held.splice(0)) await route.continue();
+  await openSheet(page);
+  await create(page);
+  const [file] = await saveAll(page, 1);
+  eq((await structure(file.bytes)).pages.length, 1, 'once they come, the PDF is made');
+}, { viewport: PHONE }));
+
+await test('leaving through the router\'s Discard starts the next photo on Enhanced again', () => withPage(async (page, url) => {
+  const openImages = async () => {
+    await page.evaluate(async () => (await import('./js/core/router.js')).navigate('/tool/images'));
+    await page.waitForSelector('.screen[data-tool="images"]:not([aria-busy]) .images-editor');
+  };
+  // From Home, so the browser's Back has the app to go back to.
+  await openApp(page, url, '#/');
+  await openImages();
+  await choose(page, '.images-empty-buttons .ui-btn:has-text("Take photo")', [asPng('image.png', photo)]);
+  await cropReady(page);
+  await stepButton(page, 'Next').click();
+  await filtersReady(page);
+  await page.locator('.images-look[data-look="black_white"]').click();
+  await stepButton(page, 'Done').click();
+  await page.waitForSelector('.images-editor');
+  await settled(page, 1);
+  await page.goBack();
+  await page.waitForSelector('dialog[open] .ui-dialog-title');
+  await page.locator('dialog[open] .ui-btn:has-text("Discard")').click();
+  await page.waitForSelector('.screen[data-route="home"]');
+  await openImages();
+  await choose(page, '.images-empty-buttons .ui-btn:has-text("Take photo")', [asPng('image.png', photo)]);
+  await cropReady(page);
+  await stepButton(page, 'Next').click();
+  await filtersReady(page);
+  eq(await chosenLook(page), 'enhanced', 'the next photo starts on Enhanced, as after the app\'s Discard');
+}, { viewport: PHONE }));
+
+for (const browser of QUICK ? ['chromium'] : ['chromium', 'firefox', 'webkit']) {
+  await test(`${browser} desktop: Filters' looks scroll with the mouse wheel; Crop page shows grab cursors over its handles`, () => withPage(async (page, url) => {
+    await openApp(page, url, '#/tool/images');
+    if (browser === 'firefox') await put(page, 'drop', [['Photo.png', photo]]);
+    else await choose(page, '.images-empty-buttons .ui-btn:has-text("Files")', [asPng('Photo.png', photo)]);
+    await settled(page, 1);
+    await page.locator('[aria-label="Crop page 1"]').click();
+    await cropReady(page);
+    const canvas = page.locator('.images-crop-canvas');
+    const cursor = () => canvas.evaluate((c) => getComputedStyle(c).cursor);
+    const corner = await handleBox(page, 0);
+    await page.mouse.move(corner.x, corner.y);
+    eq(await cursor(), 'grab', 'grab over a corner');
+    await page.mouse.down();
+    eq(await cursor(), 'grabbing', 'grabbing while it is dragged');
+    await page.mouse.move(corner.x + 10, corner.y + 10, { steps: 3 });
+    await page.mouse.up();
+    eq(await cursor(), 'grab', 'grab again once let go over it');
+    const box = await canvas.boundingBox();
+    const a = await handleBox(page, 0);
+    const c = await handleBox(page, 2);
+    await page.mouse.move((a.x + c.x) / 2, (a.y + c.y) / 2);
+    eq(await cursor(), 'auto', 'the default cursor away from the handles');
+    await page.mouse.move(box.x + box.width + 40, box.y + 10);
+    await stepButton(page, 'Next').click();
+    await filtersReady(page);
+    ok(await page.$eval('.images-step', (e) => e.classList.contains('is-wide')), 'the controls beside the picture');
+    const hidden = () => page.evaluate(() => {
+      const panel = document.querySelector('.images-step-panel').getBoundingClientRect();
+      return [...document.querySelectorAll('.images-look')].filter((b) => {
+        const r = b.getBoundingClientRect();
+        return r.left < panel.left - 1 || r.right > panel.right + 1;
+      }).map((b) => b.dataset.look);
+    });
+    ok((await hidden()).length > 0, `some looks don't fit beside the picture (${await hidden()})`);
+    const strip = await page.locator('.images-looks').boundingBox();
+    await page.mouse.move(strip.x + strip.width / 2, strip.y + strip.height / 2);
+    await page.mouse.wheel(0, 400);
+    await page.waitForFunction(() => document.querySelector('.images-looks').scrollLeft > 0, null, { timeout: 5000 });
+    await page.mouse.wheel(0, 1200);
+    await page.waitForTimeout(300);
+    const last = await page.evaluate(() => {
+      const panel = document.querySelector('.images-step-panel').getBoundingClientRect();
+      const r = [...document.querySelectorAll('.images-look')].at(-1).getBoundingClientRect();
+      return r.right <= panel.right + 1 && r.left >= panel.left - 1;
+    });
+    ok(last, 'the wheel brought the last look into sight');
+    await page.mouse.wheel(0, -2000);
+    await page.waitForFunction(() => document.querySelector('.images-looks').scrollLeft === 0, null, { timeout: 5000 });
+    ok(true, 'and back to the first');
+  }, { browser, viewport: { width: 1280, height: 900 }, mobile: false }));
+}
 
 // ---------------------------------------------------------------------------------------------
 // Home's Take photo (Scan document with the photo given), images shared while the tool shows, and

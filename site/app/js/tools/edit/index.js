@@ -5,24 +5,65 @@
 // sit under the page (beside it on wide screens). Everything but drawing itself also works with
 // buttons and the keyboard, for those who can't drag.
 import { h, ensureCss, isWide, onWideChange } from '../../core/dom.js';
-import { t, tp, tWeb, loadStrings, formatSize } from '../../core/i18n.js';
+import { t, tp, tWeb, loadStrings, formatSize, formatNumber } from '../../core/i18n.js';
 import {
   topBar, button, iconButton, bottomBar, emptyState, fileCard, textField, linearProgress, progressDialog,
   snackbar, alertDialog, dropZone, menu,
 } from '../../core/ui.js';
 import { icon } from '../../core/icons.js';
 import { pickFiles } from '../../core/files.js';
-import { openPdf } from '../../core/pdfdoc.js';
+import { openPdf, preloadPdfJs } from '../../core/pdfdoc.js';
 import { showResult } from '../../core/output.js';
 import { withSuffix, baseName } from '../../core/names.js';
 import { UserError, CancelledError } from '../../core/errors.js';
+import { EditHistory } from '../../engine/edit/history.js';
 import {
-  EditHistory, DEFAULT_STYLE, inkItem, newShape, newText, newPicture, clearOf, onPage, moved, copy,
-  isBox, unitSize, textLayout, importPicture, decodePicture, editPages, shownPageSizes,
-  PREVIEW_SIDE, TEXT_MAX_LENGTH,
-} from '../../engine/edit.js';
-import { createStage, ZOOM_MAX } from './stage.js';
-import { toolbar, properties, pageStrip, textDialog, SHAPES } from './controls.js';
+  DEFAULT_STYLE, inkItem, newShape, newText, newPicture, clearOf, onPage, moved, copy, isBox,
+} from '../../engine/edit/layout.js';
+
+/**
+ * The editor's heavier parts: the engine (with pdf-lib and the text engine), the page and its
+ * controls. Only the "Choose PDF" card shows without them, so they load while it shows and are
+ * waited for once a PDF is chosen.
+ * @type {Promise<{ engine: object, stage: object, controls: object }> | null}
+ */
+let loadingEditor = null;
+/** The same, once loaded. */
+let lib = null;
+
+/** Loads the editor's parts (once). */
+export function loadEditor() {
+  loadingEditor ??= Promise.all([import('../../engine/edit.js'), import('./stage.js'), import('./controls.js')])
+    .then(([engine, stage, controls]) => {
+      lib = { engine, stage, controls };
+      return lib;
+    }, (e) => {
+      // Tried again next time (back online, say).
+      loadingEditor = null;
+      throw e;
+    });
+  return loadingEditor;
+}
+
+/** The controls text is typed in, which keep their own keys (Undo, Delete, Escape). */
+const TEXT_ENTRY = 'textarea, select, [contenteditable="true"], [contenteditable=""], '
+  + 'input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not([type="button"])'
+  + ':not([type="submit"]):not([type="reset"]):not([type="file"]):not([type="color"])';
+
+/**
+ * Turns a control off for a moment without `disabled`, which would throw the keyboard focus out of
+ * it; its click handler checks for itself.
+ */
+function setOff(el, off) {
+  if (off) el.setAttribute('aria-disabled', 'true');
+  else el.removeAttribute('aria-disabled');
+}
+
+/** Gives `el` the focus when nothing (or something no longer on the screen) has it. */
+function focusIfLost(el) {
+  const active = document.activeElement;
+  if (el?.isConnected && (!active || active === document.body || !active.isConnected)) el.focus({ preventScroll: true });
+}
 
 /** The message a problem shows: a UserError's own, else `fallback`'s. */
 function problemText(error, fallback) {
@@ -34,10 +75,12 @@ function problemText(error, fallback) {
   return t(fallback);
 }
 
-/** The zoom steps the buttons go through. */
-const ZOOMS = [1, 1.5, 2, 3, 4, ZOOM_MAX];
+/** The zoom steps the buttons go through, up to the stage's largest. */
+const zoomSteps = () => [1, 1.5, 2, 3, 4, lib.stage.ZOOM_MAX];
 
 export async function mount(ctx) {
+  // pdf.js (about 460 kB) loads while a PDF is being chosen; pdfdoc.js imports it only on demand.
+  preloadPdfJs();
   await Promise.all([loadStrings('edit'), ensureCss(new URL('./edit.css', import.meta.url))]);
 
   let src = null;           // the PdfSource being edited
@@ -57,6 +100,7 @@ export async function mount(ctx) {
   /** Aborted when the screen goes: a password dialog still open closes. */
   const life = new AbortController();
   let run = null;
+  let runDialog = null;     // the progress dialog of the save under way
   let dialog = null;        // the text dialog, while open
   let editor = null;        // the editor's parts, while a PDF is open
   let empty = null;
@@ -71,7 +115,7 @@ export async function mount(ctx) {
   loading.classList.add('edit-loading');
   loading.hidden = true;
   const body = h('div', { class: 'edit-body' });
-  const content = h('main', { class: 'page edit-main' }, loading, body);
+  const content = h('main', { class: 'page edit-main', 'data-main': '' }, loading, body);
   const screen = h('div', { class: 'edit-screen' }, bar, content, bottomBar(saveBtn));
   ctx.root.append(screen);
 
@@ -79,11 +123,19 @@ export async function mount(ctx) {
 
   const look = {
     text(item) {
+      const { TEXT_MAX_LENGTH, textLayout, textLayoutNow } = lib.engine;
       const text = item.text.slice(0, TEXT_MAX_LENGTH);
       const key = `${item.color}\n${text}`;
       const got = layouts.get(key);
       if (got && got !== 'pending') return got;
       if (!got) {
+        // Its fonts already loaded (another colour picked, say): laid out at once, so the text
+        // doesn't vanish for a frame.
+        const now = textLayoutNow(text, item.color);
+        if (now) {
+          layouts.set(key, now);
+          return now;
+        }
         layouts.set(key, 'pending');
         textLayout(text, item.color).then((layout) => {
           layouts.set(key, layout);
@@ -97,7 +149,7 @@ export async function mount(ctx) {
       if (got && typeof got !== 'string') return got;
       if (!got) {
         previews.set(item.picture.id, 'pending');
-        decodePicture(item.picture, PREVIEW_SIDE).then((bitmap) => {
+        lib.engine.decodePicture(item.picture, lib.engine.PREVIEW_SIDE).then((bitmap) => {
           if (gone) { bitmap.close?.(); return; }
           previews.set(item.picture.id, bitmap);
           editor?.stage.redraw();
@@ -118,7 +170,8 @@ export async function mount(ctx) {
   const ready = () => !!src && validItems().length > 0 && !importing && !adding && !processing;
 
   const hint = () => {
-    if (mode !== 'select') return tWeb('edit_hint_draw');
+    // The app's finger wording on touch screens; with a mouse, the web's.
+    if (mode !== 'select') return t(matchMedia('(pointer: fine)').matches ? 'web_edit_hint_draw' : 'edit_hint_draw');
     if (chosen()) return isWide() ? t('web_edit_hint_selected_wide') : t('edit_hint_selected');
     if (itemsOnPage().length) return t('edit_hint_select');
     return t('edit_hint_start');
@@ -127,7 +180,9 @@ export async function mount(ctx) {
   /** Puts everything on the screen in step with the items, the page and the mode. */
   function refresh() {
     saveBtn.disabled = !ready();
-    if (empty) empty.disabled = importing;
+    // Off while a PDF opens, but kept in the focus order: `disabled` would throw the focus out of
+    // it, and a cancelled password dialog would then have nowhere to give it back.
+    if (empty) setOff(empty, importing);
     if (!editor || gone) return;
     const e = editor;
     const size = shownSize();
@@ -151,9 +206,10 @@ export async function mount(ctx) {
     if (e.prev) e.prev.disabled = pageIndex <= 0;
     if (e.next) e.next.disabled = pageIndex >= src.pageCount - 1;
     const z = e.stage.zoom;
-    e.zoomLabel.textContent = new Intl.NumberFormat(undefined, { style: 'percent', maximumFractionDigits: 0 }).format(z);
+    // In the app's language, as the rest of the screen.
+    e.zoomLabel.textContent = formatNumber(z, { style: 'percent', maximumFractionDigits: 0 });
     e.zoomOut.disabled = z <= 1.001 || !known();
-    e.zoomIn.disabled = z >= ZOOM_MAX - 0.001 || !known();
+    e.zoomIn.disabled = z >= lib.stage.ZOOM_MAX - 0.001 || !known();
     e.zoomGroup.setAttribute('aria-label', t('web_edit_zoom_level', e.zoomLabel.textContent));
     e.addingBar.hidden = !adding;
   }
@@ -208,13 +264,13 @@ export async function mount(ctx) {
     refresh();
     const page = pageIndex;
     const { width, height } = shownSize();
-    dialog = textDialog({ title: t('edit_text_add') });
+    dialog = lib.controls.textDialog({ title: t('edit_text_add') });
     const text = await dialog;
     dialog = null;
     if (!text || gone || processing || !src) return;
     let unit;
     try {
-      unit = await unitSize(text);
+      unit = await lib.engine.unitSize(text);
     } catch (e) {
       snackbar(problemText(e, 'pdf_process_failed'));
       return;
@@ -226,13 +282,13 @@ export async function mount(ctx) {
 
   const editText = async (item) => {
     if (!item || item.type !== 'text' || processing) return;
-    dialog = textDialog({ title: t('edit_text_change'), initial: item.text });
+    dialog = lib.controls.textDialog({ title: t('edit_text_change'), initial: item.text });
     const text = await dialog;
     dialog = null;
     if (!text || gone || processing) return;
     let unit;
     try {
-      unit = await unitSize(text);
+      unit = await lib.engine.unitSize(text);
     } catch (e) {
       snackbar(problemText(e, 'pdf_process_failed'));
       return;
@@ -254,7 +310,7 @@ export async function mount(ctx) {
 
   const openShapes = (anchor) => {
     if (!known() || processing) return;
-    menu(anchor, SHAPES.map((s) => ({ label: t(s.label), icon: s.icon, onClick: () => addShape(s) })));
+    menu(anchor, lib.controls.SHAPES.map((s) => ({ label: t(s.label), icon: s.icon, onClick: () => addShape(s) })));
   };
 
   /** Takes in the picture `file` and puts it in the middle of page `page`. */
@@ -268,7 +324,7 @@ export async function mount(ctx) {
     refresh();
     const source = src;
     try {
-      const picture = await importPicture(file);
+      const picture = await lib.engine.importPicture(file);
       if (gone || src !== source) return;
       if (!picture) {
         snackbar(t('edit_picture_failed'));
@@ -312,6 +368,8 @@ export async function mount(ctx) {
   // ---- The editor ----
 
   const buildEditor = () => {
+    const { createStage } = lib.stage;
+    const { toolbar, properties, pageStrip } = lib.controls;
     const count = src.pageCount;
     let navEl = null;
     const card = fileCard({
@@ -339,10 +397,12 @@ export async function mount(ctx) {
     const hintRow = h('div', { class: 'edit-hintrow' }, hintEl, undoBtn, redoBtn);
     const stage = createStage({
       look,
+      // A press only chooses: the page mustn't scroll under the finger or the mouse (EditPreview.kt
+      // follows the finger exactly). An item chosen with the keys or a screen reader is scrolled to
+      // by the stage.
       onSelect: (id) => {
         if (processing) return;
         history.select(id);
-        if (id != null) stage.reveal(id);
       },
       onBegin: () => { if (!processing) history.begin(); },
       onDrag: (was, next) => !processing && history.drag(was, next),
@@ -379,7 +439,8 @@ export async function mount(ctx) {
     }
     const zoomStep = (dir) => {
       const z = stage.zoom;
-      const target = dir > 0 ? ZOOMS.find((v) => v > z + 0.01) ?? ZOOM_MAX : [...ZOOMS].reverse().find((v) => v < z - 0.01) ?? 1;
+      const zooms = zoomSteps();
+      const target = dir > 0 ? zooms.find((v) => v > z + 0.01) ?? lib.stage.ZOOM_MAX : [...zooms].reverse().find((v) => v < z - 0.01) ?? 1;
       stage.setZoom(target);
     };
     const zoomOut = iconButton({ icon: 'zoom_out', label: t('web_edit_zoom_out'), onClick: () => zoomStep(-1) });
@@ -473,6 +534,8 @@ export async function mount(ctx) {
     forgetPictures();
     mode = 'select';
     pageIndex = 0;
+    // As the app, whose style lives with the open PDF's options: the next PDF starts from the defaults.
+    style = { ...DEFAULT_STYLE };
   };
 
   const showEmpty = () => {
@@ -494,14 +557,30 @@ export async function mount(ctx) {
     const mine = ++opening;
     setImporting(true);
     let opened = null;
+    let failed = false;
     try {
+      // The editor's code loads alongside: both are needed before it can show.
+      const parts = loadEditor();
+      parts.catch(() => {});
       opened = await openPdf(item, { ...(item.password != null ? { password: item.password } : {}), signal: life.signal });
+      if (opened) {
+        try {
+          await parts;
+        } catch {
+          failed = true;
+          if (mine === opening && !gone) snackbar(t('web_tool_load_failed', t(ctx.tool.title)));
+        }
+      }
     } catch (e) {
       if (mine === opening && !gone && !(e instanceof CancelledError)) snackbar(problemText(e, 'pdf_import_failed'));
     }
-    if (!opened || mine !== opening || gone) {
+    if (!opened || failed || mine !== opening || gone) {
       opened?.close();
-      if (mine === opening && !gone) setImporting(false);
+      if (mine === opening && !gone) {
+        setImporting(false);
+        // Nothing opened (the password dialog cancelled, say): the focus stays on Choose PDF.
+        focusIfLost(empty);
+      }
       return;
     }
     if (!(opened.pageCount >= 1)) {
@@ -515,7 +594,7 @@ export async function mount(ctx) {
     fileName = withSuffix(baseName(src.name), '_edited', 'Usugami');
     // Every page's size as shown, exactly, from the PDF itself: items are placed in points on it.
     try {
-      sizes = await shownPageSizes({ bytes: src.bytes, password: src.password });
+      sizes = await lib.engine.shownPageSizes({ bytes: src.bytes, password: src.password });
       if (sizes.length !== src.pageCount) sizes = null;
     } catch {
       sizes = null;
@@ -569,20 +648,27 @@ export async function mount(ctx) {
     const controller = new AbortController();
     run = controller;
     const progress = progressDialog({ title: t('pdf_working'), onCancel: () => controller.abort() });
+    runDialog = progress;
     let out = null;
+    let failure = null;
     try {
-      out = await editPages(
+      out = await lib.engine.editPages(
         { name: source.name, bytes: source.bytes, ...(source.password ? { password: source.password } : {}) },
         { items, name: fileName },
         { signal: controller.signal, onProgress: (done, total) => progress.update(total > 0 ? done / total : null) },
       );
     } catch (e) {
-      if (!(e instanceof CancelledError) && !controller.signal.aborted && !gone) snackbar(problemText(e, 'pdf_process_failed'));
+      if (!(e instanceof CancelledError) && !controller.signal.aborted) failure = e;
     } finally {
       await progress.close();
       processing = false;
-      if (run === controller) run = null;
+      if (run === controller) {
+        run = null;
+        runDialog = null;
+      }
     }
+    // Said once the progress dialog has gone: while it is open, a screen reader hears nothing outside it.
+    if (failure && !gone) snackbar(problemText(failure, 'pdf_process_failed'));
     if (gone || !out || src !== source) {
       refresh();
       return;
@@ -631,7 +717,10 @@ export async function mount(ctx) {
     if (document.documentElement.classList.contains('ui-modal-open') || document.querySelector('.ui-menu')) return;
     if (!screen.isConnected) return;
     const target = e.target instanceof Element ? e.target : null;
-    const typing = !!target?.closest('input, textarea, select, [contenteditable="true"]');
+    // Only fields text is typed in keep these keys: a slider has no Undo of its own, so Ctrl+Z,
+    // Delete and Escape work there too (a slider used with the mouse keeps the focus).
+    const typing = !!target?.closest(TEXT_ENTRY);
+    const onSlider = !!target?.closest('input[type="range"]');
     const ctrl = e.ctrlKey || e.metaKey;
     const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
     if (ctrl && !e.altKey && (key === 'z' || key === 'y')) {
@@ -658,14 +747,15 @@ export async function mount(ctx) {
       return;
     }
     if (e.key === 'PageDown' || e.key === 'PageUp') {
-      if (src.pageCount < 2) return;
+      // On a slider these are its own bigger steps.
+      if (src.pageCount < 2 || onSlider) return;
       e.preventDefault();
       showPage(pageIndex + (e.key === 'PageDown' ? 1 : -1));
       return;
     }
     const arrows = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
     if (item && arrows[e.key]) {
-      if (target?.closest('[role="radiogroup"], [role="toolbar"], [role="menu"], [role="slider"]')) return;
+      if (onSlider || target?.closest('[role="radiogroup"], [role="toolbar"], [role="menu"], [role="slider"]')) return;
       e.preventDefault();
       const size = shownSize();
       // A step of the move buttons, or with Shift one point, for a precise place.
@@ -682,6 +772,8 @@ export async function mount(ctx) {
   // A reload on the result step: the result is gone, so its history step goes too.
   if (ctx.step) ctx.popStep?.();
   if (ctx.files?.length) choose(ctx.files[0]);
+  // Loaded once the empty card shows, so the editor is ready by the time a PDF is chosen.
+  else setTimeout(() => { if (!gone) loadEditor().catch(() => {}); }, 0);
 
   return {
     unmount() {
@@ -689,6 +781,8 @@ export async function mount(ctx) {
       opening++;
       life.abort();
       run?.abort();
+      // Its progress dialog goes with the screen at once, not once the work notices.
+      runDialog?.close();
       document.removeEventListener('keydown', onKey);
       stopWide();
       empty?.detachDrop?.();
@@ -718,6 +812,7 @@ export async function mount(ctx) {
         size: { ...shownSize() },
         mode,
         zoom: editor?.stage.zoom ?? 1,
+        keptPages: editor?.stage.keptPages ?? 0,
         selected: history.selected,
         canUndo: history.canUndo,
         canRedo: history.canRedo,

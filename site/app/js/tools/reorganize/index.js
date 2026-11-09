@@ -11,21 +11,27 @@ import {
   alertDialog, menu, dropZone,
 } from '../../core/ui.js';
 import { pickFiles } from '../../core/files.js';
-import { openPdf } from '../../core/pdfdoc.js';
+import { openPdf, preloadPdfJs } from '../../core/pdfdoc.js';
 import { pageGrid } from '../../core/pagegrid.js';
-import { CancelledError } from '../../core/errors.js';
+import { CancelledError, UserError } from '../../core/errors.js';
+import { defaultName } from '../../engine/page-selection.js';
 import { PageList, pageKey, pagesOf, samePages, isBlank, turnedKey, enginePages } from '../merge/page-list.js';
-import { problemText, runWithProgress, resultScreen } from '../merge/tool-run.js';
+import { problemText, runWithProgress, resultScreen, engineLoader, setOff } from '../merge/tool-run.js';
 import { blankPicture } from '../merge/thumbs.js';
 
 /** Renders Reorganize PDF into ctx.root. */
 export async function mount(ctx) {
-  const [engine] = await Promise.all([
-    import('../../engine/organize.js'),
+  // pdf.js (about 460 kB) loads while a PDF is being chosen; pdfdoc.js imports it only on demand.
+  preloadPdfJs();
+  await Promise.all([
     loadStrings('reorganize'),
     ensureCss(new URL('../merge/merge.css', import.meta.url)),
     ensureCss(new URL('./reorganize.css', import.meta.url)),
   ]);
+  // The engine (pdf-lib) loads behind the screen, which shows at once; it is only needed to save
+  // (and, rarely, for a blank page's size).
+  const loadEngine = engineLoader(() => import('../../engine/organize.js'));
+  loadEngine().catch(() => {});
 
   /** The PDF reorganized: { id, name, size, pageCount, src, bytes, password }. */
   let main = null;
@@ -104,9 +110,9 @@ export async function mount(ctx) {
   const nameField = textField({ label: t('file_name'), value: '', suffix: '.pdf', onInput: (v) => { fileName = v; } });
   nameField.classList.add('reorganize-name');
   const content = h('div', { class: 'merge-content' }, cardSlot, options, nameField);
-  const page = h('div', { class: 'page merge-page reorganize-page', 'data-main': '' }, busy, empty, content);
+  const page = h('main', { class: 'page merge-page reorganize-page', 'data-main': '' }, busy, empty, content);
   const save = button({ label: t('pdf_reorganize_action'), onClick: () => saveReorganized() });
-  const view = h('div', { class: 'merge-view' }, bar, page, bottomBar(save));
+  const view = h('div', { class: 'merge-view reorganize-view' }, bar, page, bottomBar(save));
   ctx.root.append(view);
 
   const result = resultScreen(ctx, view, { onStartOver: () => startOver() });
@@ -272,7 +278,7 @@ export async function mount(ctx) {
       original = pagesOf([main]);
       pages.set(original);
       pages.clearUndo();
-      setName(engine.defaultName('reorganize', main));
+      setName(defaultName('reorganize', main));
       card = fileCard({
         name: main.name,
         detail: t('result_details', tp('page_count', main.pageCount), formatSize(main.size)),
@@ -355,7 +361,11 @@ export async function mount(ctx) {
       try {
         size = await source.src.pageSize(neighbour.page);
       } catch {
-        size = await engine.shownPageSize({ name: source.name, bytes: source.bytes, password: source.password || undefined }, neighbour.page);
+        // shownPageSize gives A4 for a page it can't read; so does an engine that couldn't load.
+        const engine = await loadEngine().catch(() => null);
+        size = engine
+          ? await engine.shownPageSize({ name: source.name, bytes: source.bytes, password: source.password || undefined }, neighbour.page)
+          : { width: 595.27563, height: 841.8898 };
       }
       // Put away meanwhile, the PDF takes its blank page with it.
       if (alive && inputOf(source.id)) pages.insertBlank(neighbour, size.width, size.height);
@@ -369,7 +379,6 @@ export async function mount(ctx) {
       if (!discard || !alive) return;
     }
     startOver();
-    empty.focus?.();
   }
 
   // -------------------------------------------------------------------------------------------
@@ -386,7 +395,13 @@ export async function mount(ctx) {
     const used = extras.filter((e) => list.some((p) => p.input === e.id));
     const input = { id: main.id, name: main.name, bytes: main.bytes, password: main.password || undefined };
     const others = used.map((e) => ({ id: e.id, name: e.name, bytes: e.bytes, password: e.password || undefined }));
-    const out = await runWithProgress((hooks) => engine.reorganizePdf(input, { pages: enginePages(list), fileName }, others, hooks));
+    // Leaving the tool stops the work, and takes its progress dialog away with it.
+    const out = await runWithProgress(async (hooks) => {
+      const engine = await loadEngine().catch(() => null);
+      // Offline before the tool was ever used whole.
+      if (!engine) throw new UserError('web_tool_load_failed', t('tool_reorganize'));
+      return engine.reorganizePdf(input, { pages: enginePages(list), fileName }, others, hooks);
+    }, { signal: leaving.signal });
     processing = false;
     if (!alive) return;
     render();
@@ -415,6 +430,7 @@ export async function mount(ctx) {
   function startOver() {
     clearAll();
     render();
+    empty.focus({ preventScroll: true });
   }
 
   function setName(name) {
@@ -464,12 +480,15 @@ export async function mount(ctx) {
     const has = !!main;
     busy.hidden = !importing;
     empty.hidden = has;
-    empty.disabled = importing;
+    // Marked off rather than disabled, which would throw the keyboard focus out of it (to the
+    // page itself, where a password dialog closing would leave it).
+    setOff(empty, importing);
     content.hidden = !has;
     const count = pages.length;
     const countText = tp('page_count', count, count);
     if (countEl.textContent !== countText) countEl.textContent = countText;
-    setDisabled(undoButton, !pages.canUndo);
+    // The last change taken back, the focus goes to the page count beside Undo.
+    setDisabled(undoButton, !pages.canUndo, countEl);
     const index = indexOfChosen();
     const ref = index >= 0 ? pages.pages[index] : null;
     actionBar.classList.toggle('is-chosen', !!ref);
@@ -487,9 +506,12 @@ export async function mount(ctx) {
       // A PDF keeps at least one page.
       setDisabled(removeButton, count <= 1, turnRight);
     }
-    addButton.disabled = importing || processing;
-    resetButton.disabled = !hasChanges();
-    save.disabled = !hasChanges() || importing || processing;
+    setOff(addButton, importing || processing);
+    // Reset, the focus goes to Add pages beside it.
+    setDisabled(resetButton, !hasChanges(), addButton);
+    // While busy only marked off, so the focus stays on it (and comes back to it after Cancel).
+    save.disabled = !hasChanges();
+    setOff(save, importing || processing);
   }
 
   /** Turns `b` off or on; the focus it had goes to `other`, as a button turned off can't keep it. */
@@ -500,8 +522,8 @@ export async function mount(ctx) {
   }
 
   /**
-   * Runs `work` with adding busy: Add pages is off meanwhile, and gets the focus back after if it
-   * had it (or the menu that it opened had it), as a button turned off loses it.
+   * Runs `work` with adding busy: Add pages is marked off meanwhile (keeping the focus), and gets
+   * the focus back after if it, or the menu that it opened, had it.
    */
   async function busyWith(work) {
     const refocus = document.activeElement === addButton || document.activeElement === document.body || !document.activeElement;

@@ -168,6 +168,13 @@ No change is needed in the screens: every result with a PDF gets the switch.
 - **`el.markCard`** — the card, or `null` when no file is a PDF.
 - `details(file)` and the default line under each file ("Compressed from…", "Already compact…") are
   worked out from the version showing, and again when it changes.
+- **Each row is the version showing**, from the start: a result shown again (Back to editing and
+  the result again, the browser's Forward) shows its PDFs with the mark at once (`useKnown`), and
+  each row's size, its line ("Already compact…" goes: a PDF saved anew isn't the original), its own
+  Open, Share and Save, and its "Saved" mark are of that version, as the app's rows act on the
+  `PdfFile` shown.
+- The page's listeners for the setting (and for closing the tab while unsaved) hold the screen
+  weakly: a result screen left without `destroy()` is freed, and stops following the setting.
 - After a change: not saved any more (each file's "Saved" mark goes, "Not saved yet…" shows,
   closing the tab asks again), and Save to folder copies all files again.
 
@@ -186,5 +193,6 @@ by another XObject, a mark as the Android app writes it, `loadPdf`, passwords, 6
 reading the marks back in Chromium, Firefox and WebKit (once per page, upright where it goes, light
 grey, gone once off); the result screen at 412 × 915 and 1280 × 800 in the three browsers (switch,
 arrow, sliders, preview, remembered after a reload, saved, shared and zipped bytes with the mark,
-the PDFs as made once off); cancelling, a failure, a result shown again, a change in another tab;
+the PDFs as made once off); cancelling, a failure, a result shown again (each row's size, line
+and own Save of the marked version), a change in another tab;
 Rotate PDF in the app with the mark on. Compress PDF's part is in `tests/batch-ui.test.mjs`.

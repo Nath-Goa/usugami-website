@@ -15,7 +15,7 @@ import { decodeHeif } from './heif-decode.js';
 import { makeCanvas, releaseCanvas, context2d, encodeCanvas } from './image-canvas.js';
 import { UserError, CancelledError, checkCancelled } from '../../core/errors.js';
 
-export { imageFileType, isLossyOpaqueWebp, IMAGE_HEADER_BYTES, WEBP_HEADER_BYTES, IMAGE_MIME } from './image-type.js';
+export { imageFileType, isLossyOpaqueWebp, IMAGE_HEADER_BYTES, WEBP_HEADER_BYTES, IMAGE_MIME, IMAGE_ACCEPT } from './image-type.js';
 
 /**
  * At most this many pixels are kept of an image stored again: a 24-megapixel photo whole, a
@@ -34,9 +34,6 @@ export const CONVERTED_JPEG_QUALITY = 0.95;
  * megapixels), and what a crafted file claims to make a browser run out of memory.
  */
 const MAX_DECODE_PIXELS = 220_000_000;
-
-/** The image types the file picker offers (ImageStore.pickableTypes), as an accept attribute. */
-export const IMAGE_ACCEPT = 'image/jpeg,image/png,image/webp,image/bmp,image/x-ms-bmp,image/gif,image/heic,image/heif,image/avif,.jpg,.jpeg,.png,.webp,.bmp,.gif,.heic,.heif,.avif';
 
 /**
  * @typedef {object} StoredImage

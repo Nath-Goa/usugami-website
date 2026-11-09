@@ -14,6 +14,7 @@ import * as names from '../site/app/js/core/names.js';
 import { kindOfShared, chosenKind, sortShared, SHARE_TARGETS } from '../site/app/js/core/share-inbox.js';
 import { TOOLS, SECTIONS } from '../site/app/js/core/tools.js';
 import common from '../site/app/locales/en/common.js';
+import kit from '../site/app/locales/en/kit.js';
 
 const quick = process.argv.includes('--quick');
 const browserArg = process.argv.indexOf('--browser');
@@ -101,6 +102,15 @@ async function makePdf(pages = 1) {
   for (let i = 0; i < pages; i++) doc.addPage([300, 400]).drawText('Page ' + (i + 1), { x: 40, y: 300, size: 20 });
   return new Uint8Array(await doc.save());
 }
+
+/** Hands files to share-inbox.js's receiveFiles in the page, as a share does ({ name, type, bytes }). */
+const receiveOn = (page, files) => page.evaluate(async (list) => {
+  const { receiveFiles } = await import('./js/core/share-inbox.js');
+  await receiveFiles(list.map((f) => new File([new Uint8Array(f.bytes)], f.name, { type: f.type })));
+}, files.map((f) => ({ ...f, bytes: Array.from(f.bytes) })));
+const DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const ZIP_HEAD = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0, 0]);
+const go = (page, path, options) => page.evaluate(async ([p, o]) => (await import('./js/core/router.js')).navigate(p, o ?? {}), [path, options ?? null]);
 
 // ---------------------------------------------------------------------------------------------
 // The algorithms, as the app's unit tests check them (ToolSearchTest, FileNamesTest, SharedFilesTest).
@@ -235,6 +245,24 @@ await test('file names: Kotlin\'s whitespace, unique, and the same as engine/org
   eq(names.withSuffixes(split, ['_1_1-9', '_10_91-100'], 'x'), [split + '_1_1-9', split + '_10_91-100'], 'Split\'s parts');
   eq(names.withSuffix(' ... ', '_split', 'x'), 'x_split', 'blank base');
   eq(Object.keys(names.fileNames).sort(), ['baseName', 'sanitize', 'unique', 'uniqueNames', 'withSuffix', 'withSuffixes'], 'fileNames');
+  // FileNames.listed (FileNamesTest): all when few, one more listed rather than counted, else the
+  // first three; listOfNames and namesArg as NameList.kt words them.
+  eq(names.listedNames([]), { listed: [], more: 0 }, 'listed: none');
+  eq(names.listedNames(['a', 'b', 'c', 'd']), { listed: ['a', 'b', 'c', 'd'], more: 0 }, 'listed: four');
+  const many = Array.from({ length: 250 }, (_, i) => `File ${i + 1}.txt`);
+  eq(names.listedNames(many), { listed: ['File 1.txt', 'File 2.txt', 'File 3.txt'], more: 247 }, 'listed: many');
+  eq(names.listOfNames(['a.pdf', 'b.pdf']), 'a.pdf, b.pdf', 'listOfNames: few');
+  eq(names.namesArg(['a.pdf', 'b.pdf', 'c.pdf', 'd.pdf']), 'a.pdf, b.pdf, c.pdf, d.pdf', 'namesArg: four');
+  eq(names.namesArg(many), { key: 'names_and_more', count: 247, args: ['File 1.txt, File 2.txt, File 3.txt', 247] }, 'namesArg: many');
+  {
+    const { loadStrings } = await import('../site/app/js/core/i18n.js');
+    const common = (await import('../site/app/locales/en/common.js')).default;
+    eq(common.names_and_more, { one: '{1} and {2} more', other: '{1} and {2} more' }, 'names_and_more (strings.xml)');
+    await loadStrings('common').catch(() => {});
+    const worded = names.listOfNames(many);
+    // Node can't load the strings files as the page does: then the key comes back.
+    if (worded !== 'names_and_more') eq(worded, 'File 1.txt, File 2.txt, File 3.txt and 247 more', 'listOfNames: many');
+  }
   // engine/organize.js has its own port (fileNames): both give the same names.
   const { fileNames } = await import('../site/app/js/engine/organize.js');
   const inputs = ['\u00a0Report\u00a0', '\u0001Report', '\u2028a', ' Report\u202f.pdf', '\u001cX\u001f', '  Holiday  ', 'Report.pdf . ',
@@ -249,12 +277,19 @@ await test('file names: Kotlin\'s whitespace, unique, and the same as engine/org
   }
 });
 
-await test('the service worker keeps at install every module the app starts with and its screens import', async () => {
-  const app = join(root, 'site', 'app');
-  const sw = await readFile(join(app, 'sw.js'), 'utf8');
+/** The paths in sw.js's SHELL, its strings of every language in LANGUAGES included. */
+async function shellPaths() {
+  const sw = await readFile(join(root, 'site', 'app', 'sw.js'), 'utf8');
   const shell = new Set([...sw.matchAll(/^ {2}'([^']+)',/gm)].map((m) => m[1]));
-  const { readdir } = await import('node:fs/promises');
-  const screens = (await readdir(join(app, 'js', 'screens'))).filter((f) => f.endsWith('.js')).map((f) => 'js/screens/' + f);
+  const codes = JSON.parse(sw.match(/^const LANGUAGES = (\[[^\]]*\]);/m)[1].replace(/'/g, '"'));
+  assert(/\.\.\.LANGUAGES\.flatMap\(\(code\) => \[`locales\/\$\{code\}\/common\.js`, `locales\/\$\{code\}\/kit\.js`, `locales\/\$\{code\}\/mark\.js`\]\)/.test(sw), 'SHELL keeps each language\'s common, kit and mark strings');
+  for (const code of codes) for (const ns of ['common', 'kit', 'mark']) shell.add(`locales/${code}/${ns}.js`);
+  return { shell, codes, sw };
+}
+
+/** Every module `entries` import statically, themselves included (paths relative to site/app/). */
+async function importGraph(entries) {
+  const app = join(root, 'site', 'app');
   const seen = new Set();
   const visit = async (rel) => {
     if (seen.has(rel)) return;
@@ -265,9 +300,51 @@ await test('the service worker keeps at install every module the app starts with
       await visit(next);
     }
   };
-  for (const entry of ['js/main.js', ...screens]) await visit(entry);
+  for (const entry of entries) await visit(entry);
+  return seen;
+}
+
+await test('the service worker keeps at install every module the app starts with and its screens import', async () => {
+  const app = join(root, 'site', 'app');
+  const { shell, codes } = await shellPaths();
+  const { readdir } = await import('node:fs/promises');
+  const screens = (await readdir(join(app, 'js', 'screens'))).filter((f) => f.endsWith('.js')).map((f) => 'js/screens/' + f);
+  const seen = await importGraph(['js/main.js', ...screens]);
   eq([...seen].filter((f) => !shell.has(f)), [], 'imported at start but not in sw.js SHELL');
-  for (const f of ['index.html', 'css/app.css', 'locales/en/common.js', 'locales/en/kit.js']) assert(shell.has(f), 'SHELL has ' + f);
+  // What the modules kept in SHELL import must be kept too (output.js's result-mark.js and
+  // mark-layout.js), or they fail offline; and the style sheets they load (mark.css).
+  const kept = [...shell].filter((f) => f.endsWith('.js') && f.startsWith('js/'));
+  const closure = await importGraph(kept);
+  eq([...closure].filter((f) => !shell.has(f)), [], 'imported by a module in SHELL but not in SHELL');
+  for (const rel of kept) {
+    const text = await readFile(join(app, rel), 'utf8');
+    // Not in comments (dom.js's own example).
+    for (const m of text.matchAll(/^(?!\s*(?:\*|\/\/)).*ensureCss\(new URL\('([^']+\.css)', import\.meta\.url\)\)/gm)) {
+      const css = new URL(m[1], 'http://x/' + rel).pathname.slice(1);
+      assert(shell.has(css), `SHELL has ${css} (loaded by ${rel})`);
+    }
+  }
+  for (const f of ['index.html', 'css/app.css', 'css/mark.css', 'locales/en/common.js', 'locales/en/kit.js', 'locales/en/mark.js', 'js/core/result-mark.js', 'js/engine/mark-layout.js']) assert(shell.has(f), 'SHELL has ' + f);
+  // Every language the app comes in opens offline in it.
+  const { LANGUAGES } = await import('../site/app/locales/languages.js');
+  eq(codes, LANGUAGES.map((l) => l.code), "sw.js's LANGUAGES are locales/languages.js's");
+  // Every path kept exists, so none is quietly missing offline.
+  const { existsSync } = await import('node:fs');
+  eq([...shell].filter((f) => f !== './' && !existsSync(join(app, f))), [], 'SHELL paths that are not on the site');
+});
+
+await test('index.html preloads every module Home starts with, and only those', async () => {
+  const app = join(root, 'site', 'app');
+  const html = await readFile(join(app, 'index.html'), 'utf8');
+  const preloads = [...html.matchAll(/<link rel="modulepreload" href="([^"]+)">/g)].map((m) => m[1]);
+  const graph = await importGraph(['js/main.js', 'js/screens/home.js', 'locales/en/common.js', 'locales/en/kit.js', 'locales/en/mark.js']);
+  eq([...graph].filter((f) => !preloads.includes(f)), [], 'Home\'s start modules without a modulepreload link in app/index.html');
+  eq(preloads.filter((f) => !graph.has(f)), [], 'modulepreload links for modules Home doesn\'t start with');
+  eq(preloads.length, new Set(preloads).size, 'each preloaded once');
+  // A strict Content-Security-Policy first in <head>, and no referrer sent to other sites.
+  const head = html.slice(html.indexOf('<head>'), html.indexOf('</head>'));
+  assert(/<meta charset="utf-8">\s*<meta http-equiv="Content-Security-Policy" content="default-src 'self';/.test(head), 'CSP meta right after the charset');
+  assert(head.includes('<meta name="referrer" content="no-referrer">'), 'referrer policy no-referrer');
 });
 
 await test('icons: the generated set names its source and license, and has every icon the code uses', async () => {
@@ -526,9 +603,13 @@ await test('Settings: Appearance changes the theme at once and is kept; Language
       assert(text.includes(part), `licenses name ${part}`);
     }
     assert(text.includes('6.4.299'), 'versions from vendor/VERSIONS.json');
-    // Each license text the site serves is there.
+    // Each license text the site serves is there, as text the browser shows (not a download).
     const local = await page.$$eval('.licenses-list a', (els) => els.map((a) => a.href).filter((h) => h.startsWith(location.origin)));
-    for (const href of local) eq((await page.request.get(href)).status(), 200, href);
+    for (const href of local) {
+      const res = await page.request.get(href);
+      eq(res.status(), 200, href);
+      assert((res.headers()['content-type'] ?? '').startsWith('text/'), `${href} is served as text, not ${res.headers()['content-type']}`);
+    }
   }, { browser: BROWSER });
 });
 
@@ -537,8 +618,13 @@ await test('Recent files: added, listed newest first (at most 50), removed and c
     await page.route('**/app/js/core/output.js', (route) => route.fulfill({
       status: 200,
       contentType: 'text/javascript',
-      body: 'export async function openFile(f) { window.__opened = [f.name, f.bytes.length]; } export async function share(files) { window.__shared = files.map((f) => f.name); }',
+      body: 'export async function openFile(f) { window.__opened = [f.name, f.bytes.length]; } export async function share(files) { if (window.__shareFails) throw Object.assign(new Error("web_share_failed"), { name: "UserError", key: "web_share_failed", args: [] }); window.__shared = files.map((f) => f.name); }',
     }));
+    // A browser that can share files (Share then shows in a row's menu).
+    await page.addInitScript(() => {
+      navigator.share = async () => {};
+      navigator.canShare = () => true;
+    });
     await openApp(page, url);
     const add = (name, size) => addRecent(page, name, size);
     assert(await page.isHidden('.home-recent') || !(await page.$('.home-recent .recent-row')), 'no recent files at first');
@@ -567,17 +653,38 @@ await test('Recent files: added, listed newest first (at most 50), removed and c
     await page.click('.ui-menu button:has-text("Share")');
     await page.waitForFunction(() => window.__shared);
     eq(await page.evaluate(() => window.__shared), ['One.pdf'], 'shared');
+    // A share that fails says so in the kit's own words, not the bare "an unexpected error occurred".
+    await page.evaluate(() => { window.__shareFails = true; });
+    await page.click('.recent-row:has-text("One.pdf") .recent-menu');
+    await page.click('.ui-menu button:has-text("Share")');
+    await page.waitForSelector('.ui-snackbar-text');
+    eq(await page.textContent('.ui-snackbar-text'), kit.web_share_failed, 'a failed share says why');
+    await page.evaluate(() => { window.__shareFails = false; document.querySelectorAll('.ui-snackbar').forEach((n) => n.dismiss?.()); });
+    // Each row is named by what it shows (its name, then when and how large), no other label.
+    const named = await page.$eval('.recent-row:has-text("Three.pdf") .recent-open', (b) => [b.getAttribute('aria-label'), b.querySelector('[aria-hidden="true"].recent-text') === null, b.textContent]);
+    eq([named[0], named[1]], [null, true], 'no aria-label over the visible text');
+    assert(named[2].startsWith('Three.pdf') && named[2].includes('0.96 MB'), 'its text names it: ' + named[2]);
     await page.click('.recent-row:has-text("One.pdf") .recent-menu');
     await page.click('.ui-menu button:has-text("Remove from list")');
     await page.waitForFunction(() => document.querySelectorAll('.recent-list .recent-row').length === 3);
     eq(await runInPage(page, url, 'app/js/core/recent.js', 'getRecentBytes', 'nope'), null, 'unknown id');
+    // Removed with the keyboard: the focus goes to the row now in its place.
+    const before = await page.$$eval('.recent-list .recent-name', (els) => els.map((e) => e.textContent));
+    await page.focus('.recent-row:nth-child(2) .recent-menu');
+    await page.keyboard.press('Enter');
+    await page.waitForSelector('.ui-menu');
+    await page.keyboard.press('End');
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => document.querySelectorAll('.recent-list .recent-row').length === 2);
+    await page.waitForFunction(() => document.activeElement?.closest('.recent-row'));
+    eq(await page.evaluate(() => [document.activeElement.className, document.activeElement.closest('.recent-row').querySelector('.recent-name').textContent]), ['recent-open', before[2]], 'the focus on the row now in its place');
     // Clear list, a text button as in the app, asks first.
     eq(await page.$$eval('.ui-topbar-actions button', (els) => els.map((b) => [b.textContent.trim(), !!b.querySelector('svg')])), [['Clear list', false]], 'Clear list is a text button');
     await page.click('.ui-topbar button:has-text("Clear list")');
     await page.waitForSelector('dialog[open] .ui-dialog-title');
     eq(await page.textContent('dialog[open] .ui-dialog-title'), 'Clear the list?', 'asks');
     await page.click('dialog[open] button:has-text("Cancel")');
-    eq(await page.$$eval('.recent-list .recent-row', (els) => els.length), 3, 'kept');
+    eq(await page.$$eval('.recent-list .recent-row', (els) => els.length), 2, 'kept');
     await page.click('.ui-topbar button:has-text("Clear list")');
     await page.click('dialog[open] button:has-text("Clear list")');
     await page.waitForSelector('.recent-empty:not([hidden])');
@@ -728,6 +835,8 @@ await test('the manifest is valid, with icons, share target and file handlers, a
       }
     }
     eq([m.share_target.method, m.share_target.enctype], ['POST', 'multipart/form-data'], 'share target');
+    // Only files, of the kinds Usugami opens, as the app's share filters: no text or links.
+    eq(Object.keys(m.share_target.params), ['files'], 'shares take files only');
     const accept = m.share_target.params.files[0].accept;
     for (const a of ['application/pdf', 'image/jpeg', '.docx', '.pptx', '.xlsx', '.epub']) assert(accept.includes(a), 'share accepts ' + a);
     const handled = Object.values(m.file_handlers[0].accept).flat();
@@ -804,7 +913,91 @@ await test('the service worker registers, serves the app offline, and receives s
     eq(await page.textContent('.ui-file-name'), 'Shared.pdf', 'shared PDF on Choose a tool');
     eq(await page.evaluate(() => location.search), '', 'address cleaned');
     eq(await page.evaluate(async () => (await (await caches.open('usugami-share')).keys()).length), 0, 'share cache emptied');
+    // Offline, only the app's own page is answered with the shell: at another address under
+    // app/ its relative files would load nothing (a blank screen).
+    await context.setOffline(true);
+    const other = await context.newPage();
+    const deep = await other.goto(url + 'app/a/b/c').then((r) => r?.status() ?? 0, () => 0);
+    assert(deep !== 200 || !(await other.$('#app')), 'no shell at app/a/b/c offline (' + deep + ')');
+    await other.close();
+    await page.goto(url + 'app/?x=1');
+    await page.waitForSelector('html[data-ready="true"]', { timeout: 20000 });
+    await context.setOffline(false);
   }, { serviceWorkers: 'allow', browser: BROWSER });
+});
+
+await test('the service worker after a deploy: one version\'s code only, the tools used before fetched again for it', async () => {
+  if (BROWSER !== 'chromium') return;
+  // Two versions of the site, served by a small server in front of the site's: sw.js's VERSION
+  // and a marker in some files differ. (Playwright's routing doesn't see a service worker's own
+  // requests, so it can't stand in for them.)
+  let version = 'a';
+  const marked = ['js/screens/settings.js', 'js/tools/split/index.js', 'js/core/output.js'];
+  const { startServer } = await import('../tools/serve.mjs');
+  const { createServer } = await import('node:http');
+  const site = await startServer({ prefix: 'usugami-website' });
+  const front = createServer(async (req, res) => {
+    try {
+      const upstream = await fetch(new URL(req.url, site.url).href);
+      let body = Buffer.from(await upstream.arrayBuffer());
+      const path = new URL(req.url, 'http://x').pathname;
+      if (path.endsWith('/app/sw.js')) body = Buffer.from(body.toString('utf8').replace("const VERSION = 'dev';", `const VERSION = '${version}';`));
+      else if (marked.some((m) => path.endsWith('/app/' + m))) body = Buffer.from(body.toString('utf8') + `\n// BUILD-${version}\n`);
+      const headers = { 'content-type': upstream.headers.get('content-type') ?? 'application/octet-stream', 'cache-control': 'no-cache' };
+      if (upstream.headers.get('location')) headers.location = upstream.headers.get('location');
+      res.writeHead(upstream.status, headers);
+      res.end(body);
+    } catch {
+      res.writeHead(502);
+      res.end();
+    }
+  });
+  await new Promise((r) => front.listen(0, '127.0.0.1', r));
+  const url = `http://127.0.0.1:${front.address().port}/usugami-website/`;
+  const pw = await import('playwright');
+  const browser = await pw.chromium.launch();
+  const problems = [];
+  try {
+    const context = await browser.newContext({ serviceWorkers: 'allow' });
+    const page = await context.newPage();
+    page.on('pageerror', (e) => problems.push('page error: ' + e.message));
+    await openApp(page, url);
+    await swControls(page);
+    await page.reload();
+    await page.waitForSelector('html[data-ready="true"]');
+    await go(page, '/settings');
+    await onScreen(page, 'settings');
+    await page.evaluate(() => fetch('js/tools/split/index.js').then((r) => r.text()));
+    await waitKept(page, ['js/tools/split/index.js']);
+    const before = await page.evaluate(async () => (await caches.keys()).sort());
+    assert(before.includes('usugami-shell-a') && before.includes('usugami-code-a'), 'version a kept: ' + before);
+    // Version b is published: the next visit installs it.
+    version = 'b';
+    await page.evaluate(async () => (await navigator.serviceWorker.getRegistration())?.update());
+    for (let i = 0; ; i++) {
+      const keys = await page.evaluate(() => caches.keys());
+      if (keys.includes('usugami-shell-b') && keys.includes('usugami-code-b') && !keys.includes('usugami-shell-a') && !keys.includes('usugami-code-a')) break;
+      if (i > 150) throw new Error('version b not installed: ' + keys);
+      await page.waitForTimeout(200);
+    }
+    const code = await page.evaluate(async () => (await (await caches.open('usugami-code-b')).keys()).map((r) => new URL(r.url).pathname));
+    assert(code.some((p) => p.endsWith('/js/tools/split/index.js')), 'the tool used before is fetched again for b: ' + code.join(', '));
+    const runtimeCode = await page.evaluate(async () => (await (await caches.open('usugami-runtime')).keys()).map((r) => r.url).filter((u) => /\/app\/(js|css|locales)\//.test(u)));
+    eq(runtimeCode, [], 'no code in the runtime cache');
+    // Offline, every file comes from version b.
+    await context.setOffline(true);
+    await page.reload();
+    await page.waitForSelector('html[data-ready="true"]', { timeout: 20000 });
+    const markers = await page.evaluate((list) => Promise.all(list.map((p) => fetch(p).then((r) => r.text()).then((t) => t.match(/BUILD-(\w)/)?.[1] ?? null))), marked);
+    eq(markers, ['b', 'b', 'b'], 'offline: all of version b');
+    await context.setOffline(false);
+  } finally {
+    await browser.close();
+    front.closeAllConnections?.();
+    await new Promise((r) => front.close(r));
+    await site.close();
+  }
+  eq(problems, [], 'no page errors');
 });
 
 await test('a screen words its own discard question, for Back and leaving; a new language keeps unsaved work', async () => {
@@ -1036,15 +1229,29 @@ await test('About and Open-source licenses: notices and source code linked; ever
     const text = await page.textContent('.licenses-list');
     assert(text.includes('Material Icons 0.14.15') || /Material Icons\s*\d/.test(text), 'icons with their version: ' + text.slice(-400));
     assert(text.includes('based in part on the work of the Independent JPEG Group'), 'the IJG notice');
+    // Every license text is served with the site as text the browser shows (not a download),
+    // and links to other sites don't tell them where the visitor came from.
+    const texts = await page.evaluate(async () => {
+      const { THIRD_PARTY } = await import('./js/screens/licenses.js');
+      return Promise.all(THIRD_PARTY.map(async (p) => {
+        const res = await fetch(new URL(p.text, document.baseURI));
+        return [p.name, res.status, res.headers.get('content-type') ?? ''];
+      }));
+    });
+    eq(texts.filter(([, status, type]) => status !== 200 || !/^text\//.test(type)), [], 'license texts served as text');
+    eq(await page.$$eval('#app a[target="_blank"]', (els) => els.filter((a) => !/\bnoreferrer\b/.test(a.rel)).map((a) => a.href)), [], 'new-tab links with noreferrer');
   }, { browser: BROWSER });
 });
 
-/** Waits until the runtime cache holds every one of `paths` (relative to app/). */
+/** Waits until the caches of what is kept on first use (code, and data) hold every one of `paths` (relative to app/). */
 async function waitKept(page, paths) {
   for (let i = 0; i < 100; i++) {
     const missing = await page.evaluate(async (list) => {
-      const cache = await caches.open('usugami-runtime');
-      const urls = new Set((await cache.keys()).map((r) => r.url));
+      const urls = new Set();
+      for (const name of await caches.keys()) {
+        if (name !== 'usugami-runtime' && !name.startsWith('usugami-code-')) continue;
+        for (const r of await (await caches.open(name)).keys()) urls.add(r.url);
+      }
       return list.filter((p) => !urls.has(new URL(p, document.baseURI).href));
     }, paths);
     if (!missing.length) return;
@@ -1160,6 +1367,343 @@ await test('the service worker keeps what is fetched on first use: text recognit
     server.server.close();
   }
   eq(problems, [], 'no page errors');
+});
+
+await test('Back closes an open dialog or menu first, and answers the discard question as Keep; titles and landmarks', async () => {
+  await withPage(async (page, url) => {
+    await fakeTools(page);
+    await openApp(page, url);
+    eq(await page.title(), 'Usugami', 'Home: the tab is titled Usugami');
+    // Settings: Back while Appearance is open closes it, and Settings stays.
+    await go(page, '/settings');
+    await onScreen(page, 'settings');
+    eq(await page.title(), 'Settings – Usugami', 'the tab names the screen');
+    await page.click('.settings-list :text("Appearance")');
+    await page.waitForSelector('dialog[open] .choice-list');
+    // The choices aren't read as the dialog's description.
+    eq(await page.$eval('dialog[open]', (d) => d.getAttribute('aria-describedby')), null, 'no aria-describedby over the choices');
+    await page.goBack();
+    await page.waitForSelector('dialog[open]', { state: 'detached' });
+    await onScreen(page, 'settings');
+    eq(await hashOf(page), '#/settings', 'Back closed the dialog only');
+    await page.goBack();
+    await onScreen(page, 'home');
+    // Recent files: Back while a row's menu is open closes it; the screen works on.
+    await addRecent(page, 'Menu.pdf', 100);
+    await go(page, '/recent');
+    await onScreen(page, 'recent');
+    // Every shell screen has one main landmark, where the skip link leads.
+    eq(await page.$$eval('#app main, #app [role="main"]', (els) => els.map((e) => e.id)), ['content'], 'one main landmark, id content');
+    await page.focus('.skip-link');
+    await page.keyboard.press('Enter');
+    assert(await page.evaluate(() => !!document.activeElement.closest('main, [role="main"]')), 'the skip link puts the focus in the main content');
+    await page.click('.recent-row .recent-menu');
+    await page.waitForSelector('.ui-menu');
+    await page.goBack();
+    await page.waitForSelector('.ui-menu', { state: 'detached' });
+    eq([await hashOf(page), await page.$('.ui-menu-scrim')], ['#/recent', null], 'Back closed the menu and its scrim');
+    await page.click('.ui-topbar button:has-text("Clear list")');
+    await page.waitForSelector('dialog[open] .ui-dialog-title');
+    await page.goBack();
+    await page.waitForSelector('dialog[open]', { state: 'detached' });
+    eq(await hashOf(page), '#/recent', 'Clear list still works; Back closed its question');
+    // A menu left open when the screen changes otherwise goes with it.
+    await page.click('.recent-row .recent-menu');
+    await page.waitForSelector('.ui-menu');
+    await go(page, '/');
+    await onScreen(page, 'home');
+    eq(await page.$$('.ui-menu, .ui-menu-scrim').then((l) => l.length), 0, 'no menu over the next screen');
+    // The discard question: Back again answers Keep, and the history stays in step.
+    await go(page, '/tool/split');
+    await onScreen(page, 'tool', 'split');
+    eq(await page.title(), 'Split PDF – Usugami', 'a tool names itself');
+    await page.evaluate(() => { window.__toolState.unsaved = true; });
+    const unmounts = await page.evaluate(() => window.__unmounts ?? 0);
+    await page.goBack();
+    await page.waitForSelector('dialog[open] .ui-dialog-title');
+    await page.goBack();
+    await page.waitForSelector('dialog[open]', { state: 'detached' });
+    await page.waitForTimeout(200);
+    eq([await hashOf(page), await page.evaluate(() => window.__unmounts ?? 0)], ['#/tool/split', unmounts], 'Back during the question: Keep, the tool stays');
+    await page.goBack();
+    await page.waitForSelector('dialog[open] .ui-dialog-title');
+    eq(await hashOf(page), '#/tool/split', 'asked again');
+    await page.click('dialog[open] button:has-text("Discard")');
+    await onScreen(page, 'home');
+    assert(['', '#/'].includes(await hashOf(page)), 'Discard goes Home, not out of the app');
+    // Back from a tool opened from Home puts the focus back on its card.
+    await page.focus('.home-sections [data-tool-card="compress"] .ui-card-main');
+    await page.keyboard.press('Enter');
+    await onScreen(page, 'tool', 'compress');
+    await page.goBack();
+    await onScreen(page, 'home');
+    eq(await page.evaluate(() => document.activeElement?.closest('[data-tool-card]')?.dataset.toolCard), 'compress', 'the focus is back on the card');
+    // "/" goes to the search only while no control has the focus.
+    await page.keyboard.press('/');
+    eq(await page.evaluate(() => document.activeElement?.closest('[data-tool-card]')?.dataset.toolCard), 'compress', '"/" on a card leaves the focus there');
+    await page.evaluate(() => document.activeElement.blur());
+    await page.keyboard.press('/');
+    eq(await page.evaluate(() => document.activeElement?.id), 'home-search', '"/" with nothing focused goes to the search');
+  }, { browser: BROWSER, viewport: DESKTOP });
+});
+
+await test('files shared open in place of the screen showing, worded as the app asks; more shares join those waiting', async () => {
+  const pdf1 = await makePdf(1);
+  await withPage(async (page, url) => {
+    await fakeTools(page);
+    await openApp(page, url);
+    // From an empty tool: Word to PDF opens in its place, and Back leads Home.
+    await go(page, '/tool/split');
+    await onScreen(page, 'tool', 'split');
+    await receiveOn(page, [{ name: 'Letter.docx', type: DOCX, bytes: ZIP_HEAD }]);
+    await onScreen(page, 'tool', 'word');
+    await page.click('.fake-back');
+    await onScreen(page, 'home');
+    // From Settings, PDFs: Choose a tool, then Back: Home.
+    await go(page, '/settings');
+    await onScreen(page, 'settings');
+    await receiveOn(page, [{ name: 'First.pdf', type: 'application/pdf', bytes: pdf1 }]);
+    await onScreen(page, 'choose');
+    await page.waitForSelector('.choose-tools:not([hidden]) section');
+    // More PDFs shared while Choose a tool shows join those listed.
+    await receiveOn(page, [{ name: 'Second.pdf', type: 'application/pdf', bytes: pdf1 }]);
+    await page.waitForFunction(() => document.querySelectorAll('.ui-file-name').length === 2);
+    await page.waitForSelector('.choose-tools:not([hidden]) .choose-hint');
+    eq(await page.$$eval('.ui-file-name', (els) => els.map((e) => e.textContent)), ['First.pdf', 'Second.pdf'], 'added to the list');
+    await page.click('.ui-topbar-nav');
+    await onScreen(page, 'home');
+    // From a tool's result, not saved: the app's "Discard this PDF?"; Keep, then a second share
+    // joins with no question; leaving opens both together.
+    await go(page, '/tool/compress');
+    await onScreen(page, 'tool', 'compress');
+    await page.click('.fake-step');
+    await page.evaluate(() => { window.__toolState.unsaved = true; });
+    const first = receiveOn(page, [{ name: 'Letter.docx', type: DOCX, bytes: ZIP_HEAD }]);
+    await page.waitForSelector('dialog[open] .ui-dialog-body');
+    eq([await page.textContent('dialog[open] .ui-dialog-title'), await page.textContent('dialog[open] .ui-dialog-body')], [common.pdf_discard_title, common.share_discard_body], 'asked about the PDF made');
+    await page.click('dialog[open] button:has-text("Keep")');
+    await first;
+    await page.waitForSelector('dialog[open]', { state: 'detached' });
+    await receiveOn(page, [{ name: 'Memo.docx', type: DOCX, bytes: ZIP_HEAD }]);
+    await page.waitForTimeout(300);
+    eq(await page.$('dialog[open]'), null, 'no second question');
+    await page.evaluate(() => { window.__toolState.unsaved = false; });
+    await page.click('.fake-back');
+    await onScreen(page, 'tool', 'word');
+    eq(await page.evaluate(() => window.__tool.files), ['Letter.docx', 'Memo.docx'], 'both open together');
+    // Images shared over a result: the app's own words for images.
+    await page.evaluate(() => { window.__toolState.unsaved = true; });
+    await page.click('.fake-step');
+    const images = receiveOn(page, [{ name: 'p.png', type: 'image/png', bytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0]) }]);
+    await page.waitForSelector('dialog[open] .ui-dialog-body');
+    eq(await page.textContent('dialog[open] .ui-dialog-body'), common.pdf_discard_shared_body, 'images over a PDF made');
+    await page.click('dialog[open] button:has-text("Discard")');
+    await images;
+    await onScreen(page, 'tool', 'images');
+    // Opened in place of Word to PDF and its result step: Back is Home.
+    await page.click('.fake-back');
+    await onScreen(page, 'home');
+  }, { browser: BROWSER });
+});
+
+await test('a second language: first launch asks, then goes on to the address and the files shared meanwhile; Web strings fall back to the app\'s translation', async () => {
+  const pdf1 = await makePdf(1);
+  await withPage(async (page, url) => {
+    await fakeTools(page);
+    await page.route('**/app/locales/languages.js', (route) => route.fulfill({
+      status: 200, contentType: 'text/javascript',
+      body: "export const LANGUAGES = [{ code: 'en', name: 'English', dir: 'ltr' }, { code: 'fr', name: 'Français', dir: 'ltr' }];",
+    }));
+    // The app's translations only (no web_ strings yet), as the importer writes them.
+    await page.route('**/app/locales/fr/*.js', (route) => route.fulfill({
+      status: 200, contentType: 'text/javascript',
+      body: route.request().url().endsWith('/common.js') ? "export default { home_subtitle: 'Vos fichiers restent sur ce téléphone.', tool_word_detail: 'Documents (.docx), convertis sur ce téléphone' };" : 'export default {};',
+    }));
+    await page.goto(url + 'app/#/tool/split');
+    await page.waitForSelector('html[data-ready="true"]');
+    await onScreen(page, 'language');
+    // A file shared during the choice waits for it.
+    await receiveOn(page, [{ name: 'Wait.pdf', type: 'application/pdf', bytes: pdf1 }]);
+    await page.waitForTimeout(200);
+    await onScreen(page, 'language');
+    await page.click('.language-page .ui-card-main:has-text("Français")');
+    await onScreen(page, 'choose');
+    eq(await page.textContent('.ui-file-name'), 'Wait.pdf', 'the file shared meanwhile opens after the choice');
+    await page.click('.ui-topbar-nav');
+    await onScreen(page, 'home');
+    // In French: the app's translation of the lines the web words for itself, as long as their
+    // web_ string isn't translated yet. English keeps the web's wording.
+    eq(await page.textContent('.home-subtitle'), 'Vos fichiers restent sur ce téléphone.', 'Home subtitle from the app\'s translation');
+    assert((await page.textContent('.home-sections')).includes('convertis sur ce téléphone'), 'Word to PDF\'s line from the app\'s translation');
+    await page.evaluate(async () => (await import('./js/core/i18n.js')).setLanguage('en'));
+    await onScreen(page, 'home');
+    eq(await page.textContent('.home-subtitle'), common.web_home_subtitle, 'English: the web wording');
+    // Opened at an address on a first launch, that screen shows once the language is chosen.
+    await page.evaluate(() => localStorage.removeItem('usugami.settings'));
+    await page.goto(url + 'app/index.html#/tool/merge');
+    await page.waitForSelector('html[data-ready="true"]');
+    await onScreen(page, 'language');
+    await page.click('.language-page .ui-card-main:has-text("English")');
+    await onScreen(page, 'tool', 'merge');
+  }, { browser: BROWSER });
+});
+
+await test('a screen\'s own question with plain buttons; Choose a tool left while a password is asked; installed: storage kept', async () => {
+  // A PDF with a password (test123), made by the kit's tests' fixture when there is one.
+  const { existsSync } = await import('node:fs');
+  const lockedPath = join(root, 'tests', 'fixtures', 'flatten-locked.pdf');
+  const locked = existsSync(lockedPath) ? Array.from(await readFile(lockedPath)) : null;
+  await withPage(async (page, url) => {
+    await fakeTools(page);
+    // Running installed (its own window): the app asks the browser to keep its storage.
+    await page.addInitScript(() => {
+      const real = window.matchMedia.bind(window);
+      window.matchMedia = (q) => (q === '(display-mode: standalone)' ? { matches: true, media: q, addEventListener() {}, removeEventListener() {} } : real(q));
+      window.__persist = 0;
+      if (navigator.storage) navigator.storage.persist = async () => { window.__persist++; return true; };
+    });
+    await openApp(page, url);
+    await page.waitForFunction(() => window.__persist > 0, null, { timeout: 5000 }).catch(() => {});
+    eq(await page.evaluate(() => (navigator.storage ? window.__persist > 0 : true)), true, 'storage.persist() asked for, installed');
+    // Images to PDF's question has plain buttons, as the app's; the generic one a red Discard.
+    await go(page, '/tool/images');
+    await onScreen(page, 'tool', 'images');
+    await page.evaluate(() => {
+      window.__toolState.unsaved = true;
+      window.__toolState.question = { title: 'Discard these images?', message: 'Not affected.', destructive: false };
+    });
+    await page.click('.fake-back');
+    await page.waitForSelector('dialog[open] .ui-dialog-title');
+    eq(await page.$$eval('dialog[open] .ui-btn--danger', (els) => els.length), 0, 'no destructive colour');
+    await page.click('dialog[open] button:has-text("Keep")');
+    await page.waitForSelector('dialog[open]', { state: 'detached' });
+    await page.evaluate(() => { window.__toolState.question = null; });
+    await page.click('.fake-back');
+    await page.waitForSelector('dialog[open] .ui-dialog-title');
+    eq(await page.$$eval('dialog[open] .ui-btn--danger', (els) => els.map((b) => b.textContent.trim())), [common.discard], 'the generic question\'s Discard in red');
+    await page.click('dialog[open] button:has-text("Discard")');
+    await onScreen(page, 'home');
+    if (!locked) return;
+    // Choose a tool asking for a shared PDF's password: leaving takes the question with it.
+    await receiveOn(page, [{ name: 'Locked.pdf', type: 'application/pdf', bytes: locked }]);
+    await onScreen(page, 'choose');
+    await page.waitForSelector('dialog[open] input[type="password"]');
+    await go(page, '/');
+    await onScreen(page, 'home');
+    await page.waitForSelector('dialog[open]', { state: 'detached', timeout: 5000 });
+    // Back while it is asked: the question closes (as Android's Back), Choose a tool goes too
+    // (with no PDF left to choose a tool for).
+    await receiveOn(page, [{ name: 'Locked.pdf', type: 'application/pdf', bytes: locked }]);
+    await onScreen(page, 'choose');
+    await page.waitForSelector('dialog[open] input[type="password"]');
+    await page.goBack();
+    await page.waitForSelector('dialog[open]', { state: 'detached', timeout: 5000 });
+    await onScreen(page, 'home');
+  }, { browser: BROWSER });
+});
+
+await test('long work: yieldToUI lets timers run and the page paint; announcements wait for a modal dialog to close', async () => {
+  await withPage(async (page, url) => {
+    await openApp(page, url);
+    const r = await page.evaluate(async () => {
+      const { yieldToUI } = await import('./js/core/dom.js');
+      let frames = 0;
+      let worstFrame = 0;
+      let lastF = performance.now();
+      let run = true;
+      const f = () => { frames++; const now = performance.now(); worstFrame = Math.max(worstFrame, now - lastF); lastF = now; if (run) requestAnimationFrame(f); };
+      requestAnimationFrame(f);
+      let ticks = 0;
+      const timer = setInterval(() => { ticks++; }, 10);
+      const t0 = performance.now();
+      // 2 s of work in 30 ms slices, yielding between them, as an engine does between pages.
+      while (performance.now() - t0 < 2000) {
+        const s = performance.now();
+        while (performance.now() - s < 30) Math.sqrt(Math.random());
+        await yieldToUI();
+      }
+      run = false;
+      clearInterval(timer);
+      // Many quick yields cost little (no 4 ms clamp). Not measured in Playwright's WebKit on
+      // Windows, whose run loop takes 15 ms for any task (yieldToUI races a timer there).
+      const t1 = performance.now();
+      for (let i = 0; i < 500; i++) await yieldToUI();
+      const fastLoop = typeof globalThis.scheduler !== 'undefined';
+      return { frames, worstFrame, ticks, quick: performance.now() - t1, fastLoop };
+    });
+    assert(r.frames >= 15 && r.ticks >= 10, 'frames and timers keep coming: ' + JSON.stringify(r));
+    assert(!r.fastLoop || r.quick < 1500, '500 quick yields: ' + JSON.stringify(r));
+    // A snackbar said while a progress dialog is open is announced once it has gone.
+    const said = await page.evaluate(async () => {
+      const ui = await import('./js/core/ui.js');
+      const region = () => document.getElementById('announcer');
+      const dialog = ui.progressDialog({ title: 'Working', delay: 0 });
+      const log = [];
+      const watch = new MutationObserver(() => {
+        if (region()?.textContent) log.push({ text: region().textContent, modal: !!document.querySelector('dialog[open]') });
+      });
+      ui.snackbar('Something went wrong');
+      await new Promise((r) => setTimeout(r, 0));
+      if (region()) watch.observe(region(), { childList: true, characterData: true, subtree: true });
+      await dialog.close();
+      await new Promise((r) => setTimeout(r, 600));
+      watch.disconnect();
+      return log;
+    });
+    assert(said.length && said.every((s) => !s.modal) && said.at(-1).text === 'Something went wrong', 'announced after the dialog: ' + JSON.stringify(said));
+  }, { browser: BROWSER });
+});
+
+await test('Contrast themes and the keyboard: shell parts keep their outlines; Tab doesn\'t hide controls under the bars', async () => {
+  await withPage(async (page, url) => {
+    await openApp(page, url);
+    await page.emulateMedia({ forcedColors: 'active' });
+    const borders = await page.evaluate(() => ['.scan-card', '.home-search'].map((s) => getComputedStyle(document.querySelector(s)).borderTopWidth));
+    eq(borders.every((w) => parseFloat(w) >= 1), true, 'scan card and search bar outlined: ' + borders);
+    await page.emulateMedia({ forcedColors: 'none' });
+    const padding = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).scrollPaddingTop));
+    assert(padding >= 64, 'scrolled clear of the top bar: ' + padding);
+  }, { browser: BROWSER });
+});
+
+await test('pdf.js: one worker for every PDF, and nothing kept by a PDF that failed to open', async () => {
+  const pdf1 = Array.from(await makePdf(1));
+  await withPage(async (page, url) => {
+    await openApp(page, url);
+    const pdfWorkers = () => page.workers().filter((w) => w.url().includes('pdf.worker')).length;
+    const pages = await page.evaluate(async (bytes) => {
+      const { openPdfJs } = await import('./js/lib/pdfjs.js');
+      window.__docs = [];
+      for (let i = 0; i < 10; i++) window.__docs.push(await openPdfJs(new Uint8Array(bytes)));
+      return window.__docs.map((d) => d.numPages);
+    }, pdf1);
+    eq(pdfWorkers(), 1, 'ten PDFs open, one pdf.js worker');
+    const result = await page.evaluate(async (bytes) => {
+      const { openPdfJs } = await import('./js/lib/pdfjs.js');
+      const pdf = new Uint8Array(bytes);
+      for (const d of window.__docs) await d.loadingTask.destroy();
+      const failed = [];
+      for (let i = 0; i < 3; i++) {
+        try {
+          await openPdfJs(new TextEncoder().encode('not a PDF at all ' + i));
+          failed.push('opened');
+        } catch (e) {
+          failed.push(e.name);
+        }
+      }
+      // Still works after failures.
+      const again = await openPdfJs(pdf);
+      const n = again.numPages;
+      await again.loadingTask.destroy();
+      return { failed, n };
+    }, pdf1);
+    eq(pages, Array(10).fill(1), 'ten PDFs opened');
+    eq(result.failed.every((n) => n === 'InvalidPDFException'), true, 'failures: ' + result.failed);
+    eq(result.n, 1, 'opens again after failures');
+    await page.waitForTimeout(300);
+    const workers = page.workers().filter((w) => w.url().includes('pdf.worker'));
+    assert(workers.length <= 1, `one pdf.js worker for all of them, none left by the failures (${workers.length})`);
+  }, { browser: BROWSER });
 });
 
 await test('no horizontal scrolling at 320 px on any shell screen, light and dark', async () => {

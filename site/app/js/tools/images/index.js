@@ -12,15 +12,15 @@ import { loadStrings, t } from '../../core/i18n.js';
 import { snackbar, alertDialog } from '../../core/ui.js';
 import { pickFiles } from '../../core/files.js';
 import { showResult } from '../../core/output.js';
-import { IMAGE_ACCEPT } from '../../engine/images/decode.js';
+import { IMAGE_ACCEPT } from '../../engine/images/image-type.js';
 import { ImagesModel } from './model.js';
 import { createEditor } from './editor.js';
 import { createCropScreen, createScanWaiting } from './crop-screen.js';
-import { openConvertSheet, convert } from './convert.js';
+import { openConvertSheet, convert, preloadConvert } from './convert.js';
 import { forgetPreviews, clearPreviews } from './preview.js';
 
-/** How deep each inner screen is in the browser's history above the tool. */
-const STEP_DEPTH = { crop: 1, waiting: 1, result: 1, filters: 2 };
+/** How deep each inner screen is in the browser's history above the tool (sheet: Create PDF's). */
+const STEP_DEPTH = { crop: 1, waiting: 1, result: 1, sheet: 1, filters: 2 };
 const depthOf = (step) => (step == null ? 0 : STEP_DEPTH[step] ?? 1);
 
 /** Whether Home's Take photo opened the tool (its photo then goes through the crop screen as a photo). */
@@ -107,7 +107,7 @@ export async function mount(ctx) {
     // Not while a PDF is being made, nor while a photo's crop screen is opening.
     if (model.converting || model.openingCrop || !model.items.length || model.pending > 0) return;
     if (sheet?.open) return;
-    sheet = openConvertSheet(model, async (choice) => {
+    const opened = openConvertSheet(model, async (choice) => {
       sheet = null;
       const made = await convert(model, choice, { say: (text) => snackbar(text), signal: life.signal });
       if (made && !destroyed) {
@@ -115,6 +115,15 @@ export async function mount(ctx) {
         render();
       }
     });
+    sheet = opened;
+    // The sheet is a history step, so the browser's (a phone's) Back closes it, as the app's Back
+    // closes its bottom sheet, rather than asking to discard the images. However it closes, the
+    // step goes.
+    opened.closed.then(() => {
+      if (sheet === opened) sheet = null;
+      if (!destroyed && !unwinding) syncHistory();
+    });
+    syncHistory();
   }
 
   function putAwayResult() {
@@ -175,6 +184,8 @@ export async function mount(ctx) {
       zipName: result.name,
       onBack: () => putAwayResult(),
       onStartOver: () => { result = null; model.clearAll(); render(); },
+      // Saving says what the app's editor says (MainViewModel), not the PDF tools' wording.
+      wording: 'images',
     });
     return {
       ...w,
@@ -185,11 +196,14 @@ export async function mount(ctx) {
     };
   }
 
-  const depth = (s) => (!s ? 0 : s.kind === 'crop' ? (s.crop.step === 'filters' ? 2 : 1) : s.kind === 'editor' ? 0 : 1);
+  const depth = (s) => (!s ? 0 : s.kind === 'crop' ? (s.crop.step === 'filters' ? 2 : 1) : s.kind === 'editor' ? (sheet?.open ? 1 : 0) : 1);
+  /** The history step name for the screen showing at depth `k`. */
+  const stepName = (k) => (k === 2 ? 'filters' : screen.kind === 'editor' ? 'sheet' : screen.kind);
 
   function show(w) {
     const prev = screen;
-    if (prev?.kind === 'editor') editorScroll = window.scrollY;
+    // Left empty, the editor comes back at its top (its pages, if any came meanwhile, start there).
+    if (prev?.kind === 'editor') editorScroll = editor.el.classList.contains('is-empty') ? 0 : window.scrollY;
     prev?.destroy();
     const next = make(w);
     const forward = depth(next) >= depth(prev);
@@ -265,7 +279,7 @@ export async function mount(ctx) {
         if (destroyed || leaving) return;
         const d = depth(screen);
         if (d > actual) {
-          for (let k = actual + 1; k <= d; k++) ctx.pushStep(k === 2 ? 'filters' : screen.kind === 'crop' ? 'crop' : screen.kind);
+          for (let k = actual + 1; k <= d; k++) ctx.pushStep(stepName(k));
           actual = d;
         } else if (d < actual) {
           expect = actual - 1;
@@ -297,7 +311,12 @@ export async function mount(ctx) {
         const s = screen;
         if (s.kind === 'result') result = null;
         else if (s.kind === 'crop' && s.crop.step === 'filters') s.crop.setStep('crop');
-        else model.closeCrop();
+        else if (s.kind === 'editor') {
+          // The Create PDF sheet closes.
+          const open = sheet;
+          sheet = null;
+          open?.close();
+        } else model.closeCrop();
         render();
       }
     } finally {
@@ -320,10 +339,15 @@ export async function mount(ctx) {
     model.addImages(ctx.files);
   }
   render();
+  // What making the PDF needs comes while the images are chosen (not before the tool shows).
+  preloadConvert();
 
   return {
     unmount() {
       destroyed = true;
+      // Images left behind (the router's Discard, on Back or a link) go, and the next document starts
+      // afresh, as after the app's confirmDiscard (clearAll): its first photo starts on Enhanced.
+      if (!discarded && (model.items.length > 0 || model.pending > 0)) model.newScan();
       life.abort();
       model.dispose();
       sheet?.close();

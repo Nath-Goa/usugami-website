@@ -8,8 +8,11 @@ in the browser. The engine, the language data and the text layer's font come fro
 (`app/vendor/tesseract/`, `app/fonts/UsugamiOcr-Regular.ttf`). Nothing is uploaded.
 
 Helpers live in `engine/ocr/`: `loader.js` (downloads, worker), `picture.js` (the picture that
-gets read), `lines.js` (Tesseract's results to lines and words), `text-layer.js` (the PDF text)
-and `scale.js` (OcrScale). Screens only need `engine/ocr.js`.
+gets read), `lines.js` (Tesseract's results to lines and words), `text-layer.js` (the PDF text),
+`scale.js` (OcrScale) and `languages.js` (the languages, below). Screens only need `engine/ocr.js`;
+one that offers the languages before any OCR runs (Create PDF's sheet) can import `languages.js`
+and `scale.js`, which import nothing, and load `engine/ocr.js` (with pdf-lib and fontkit) once it
+is needed.
 
 ## The flow, as in the app (MainViewModel.convert → PdfOcr.apply)
 
@@ -90,7 +93,9 @@ recognizer.language; // 'hi'
 - `signal` cancels this reading at once (the worker is ended; the next call starts a new one,
   from the cache): `CancelledError`.
 - Throws `UserError('ocr_failed')` when the image can't be decoded (a damaged file) or the
-  engine fails while reading. The recognizer stays usable.
+  engine fails while reading. The recognizer stays usable. A job the worker fails only rejects its
+  own promise: `loader.js`'s `startWorker` gives tesseract.js an `errorHandler`, without which it
+  would also throw the error in the worker's message handler, where nothing can catch it.
 - The work happens in a Web Worker. Preparing the picture yields to the browser, so the screen
   keeps answering. About 0.5–3 s a page on a desktop, a few times that on a phone. A page of
   pure noise takes about 10 s on a desktop.
@@ -183,6 +188,8 @@ const bytes = await savePdf(doc);
 - `OCR_LANGUAGE_NAMES` = `{ en: 'ocr_english', fr: 'ocr_french', es: 'ocr_spanish', hi: 'ocr_hindi' }`.
 - `defaultOcrLanguage(appLanguage)` → the app's language if it is one of the four, else `'en'`
   (README: "Text recognition starts on the same language"). `defaultOcrLanguage('es-MX') === 'es'`.
+- These three are defined in `engine/ocr/languages.js` (no imports), and `engine/ocr.js`
+  re-exports them.
 
 ## UserError keys thrown (put them in the calling screen's namespace)
 
@@ -217,8 +224,9 @@ use each language and needs an internet connection.", `ocr_reading` "Reading tex
   setting; dandas still read as `।`. With the Hindi data, Tesseract also boxes a word's leading
   "1" a digit late, though it reads it as part of the word. Such a word's text then starts up to
   one digit's width late.
-- Tesseract's Hindi data names two settings the LSTM-only engine lacks. When a Hindi worker
-  starts, it prints `Warning: Parameter not found: classify_misfit_junk_penalty` and
-  `… merge_fragments_in_matrix` to the console as errors. They are harmless. Tests that start
-  Hindi OCR must allow those two messages (see tests/ocr.test.mjs) until the vendored data is
-  fixed. Tesseract's other notes go to `/dev/null`.
+- Tesseract's Hindi data named two settings the LSTM-only engine lacks
+  (`classify_misfit_junk_penalty`, `merge_fragments_in_matrix`), which a Hindi worker printed to
+  the console as errors. `npm run vendor` takes them out of the vendored data, so a Hindi worker
+  starts without any console message (tests/ocr.test.mjs checks it in Chromium, Firefox and
+  WebKit), and tests that start Hindi OCR need no allowance. Tesseract's other notes go to
+  `/dev/null`.

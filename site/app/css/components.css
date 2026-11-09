@@ -320,9 +320,12 @@
 }
 
 @media (min-width: 840px) {
+  /* The main button ends where the screen's content column ends: a screen sets --ui-column to the
+     width of its content (on the bar or an ancestor), centred in the window; without it, 32 px from
+     the window's edge. */
   .ui-bottombar {
     justify-content: flex-end;
-    padding-inline: var(--space-6);
+    padding-inline: max(var(--space-6), calc((100% - var(--ui-column, 100%)) / 2));
   }
 
   .ui-bottombar > .ui-btn,
@@ -427,6 +430,13 @@
   transition: background-color var(--ui-short) linear;
 }
 
+/* 48 px to tap, as the app's segmented buttons (minimumInteractiveComponentSize), though 40 px tall. */
+.ui-segment::after {
+  content: "";
+  position: absolute;
+  inset: -4px 0;
+}
+
 .ui-segment + .ui-segment {
   box-shadow: inset 1px 0 0 var(--outline);
 }
@@ -472,7 +482,9 @@
 .ui-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2);
+  /* Wrapped rows 48 px apart, as the app's FlowRow of chips 48 dp to tap: each chip's 48 px tap
+     area meets the next row's without covering it. */
+  gap: var(--space-4) var(--space-2);
 }
 
 .ui-chip {
@@ -1164,7 +1176,8 @@
   height: 78px;
   overflow: hidden;
   border-radius: var(--radius-xs);
-  background: var(--surface-lowest);
+  /* White in both themes, as the app's PdfThumbnail: a page never shows on a dark box. */
+  background: var(--paper, #ffffff);
   box-shadow: inset 0 0 0 1px var(--outline-variant);
   color: var(--primary);
 }
@@ -1278,6 +1291,14 @@
   }
 }
 
+/* One width on desktops, whatever the column a tool puts it in. */
+@media (min-width: 840px) {
+  .ui-empty {
+    max-width: 640px;
+    margin-inline: auto;
+  }
+}
+
 .is-dragover,
 .ui-empty.is-dragover {
   background: var(--primary-container);
@@ -1328,6 +1349,25 @@ html.ui-modal-open {
 @keyframes ui-fade-out {
   from { opacity: 1; }
   to { opacity: 0; }
+}
+
+/* Very short windows (a phone held sideways, a page zoomed to 400 %): the whole dialog scrolls
+   rather than squeezing its message and field into a sliver. */
+@media (max-height: 420px) {
+  .ui-dialog:not(.ui-dialog--sheet) {
+    align-items: flex-start;
+    align-items: safe center;
+    padding-block: var(--space-2);
+  }
+
+  .ui-dialog .ui-alert {
+    flex: none;
+    max-height: none;
+  }
+
+  .ui-alert .ui-dialog-body {
+    overflow: visible;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1438,10 +1478,16 @@ html.ui-modal-open {
   margin: 0;
 }
 
+/* The dialog's text colour, as the app's "PDF 2 of 5" Text takes AlertDialog's onSurfaceVariant. */
 .ui-progress-label {
-  color: var(--on-surface);
   font-size: 0.875rem;
   line-height: 1.25rem;
+}
+
+/* The page, slide or chapter being made (a third line, not read out as it changes). */
+.ui-progress-step {
+  font-size: 0.75rem;
+  line-height: 1rem;
 }
 
 .ui-progress-detail {
@@ -1488,12 +1534,27 @@ html.ui-modal-open {
   -webkit-user-select: none;
 }
 
+/* The drag handle: a 32 x 4 pill in a box 48 px wide (a button closing the sheet for screen readers). */
 .ui-sheet-handle {
-  width: 32px;
-  height: 4px;
-  margin: 22px auto 18px;
+  position: relative;
+  display: block;
+  width: 48px;
+  height: 44px;
+  margin: 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: none;
+  color: var(--on-surface-variant);
+  cursor: inherit;
+}
+
+.ui-sheet-handle::before {
+  content: "";
+  position: absolute;
+  inset: 22px 8px 18px;
   border-radius: 2px;
-  background: var(--on-surface-variant);
+  background: currentColor;
   opacity: 0.4;
 }
 
@@ -1683,7 +1744,10 @@ html.ui-modal-open {
 
 .ui-snackbar-text {
   flex: 1 1 200px;
+  /* A long file name without spaces wraps inside the bar instead of pushing out of it. */
+  min-width: 0;
   padding: 8px 0;
+  overflow-wrap: anywhere;
 }
 
 .ui-snackbar-action {
@@ -1717,7 +1781,30 @@ html.ui-modal-open {
   position: relative;
   min-width: 0;
   border-radius: var(--radius-m);
-  transition: transform var(--ui-medium) var(--ease), box-shadow var(--ui-medium);
+  transition: transform var(--ui-medium) var(--ease), box-shadow var(--ui-medium), scale var(--ui-short) var(--ease);
+}
+
+/* Thousands of pages: tiles off screen skip layout and painting, sized as a tile on screen
+   (pagegrid.js measures one into --ui-tile-h). Always on: switched on and off (for the focus, say),
+   a tile would be laid out at that size for a moment and move under the pointer. What a tile draws
+   beyond itself is drawn by the tile (its focus ring, its lift while dragged), as what is inside it
+   is clipped to it. */
+.ui-page-tile {
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto var(--ui-tile-h, 160px);
+}
+
+.ui-page-tile:has(.ui-page:focus-visible) {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.ui-page-tile .ui-page:focus-visible {
+  outline: none;
+}
+
+.ui-page-move:focus-visible {
+  outline-offset: -2px;
 }
 
 .ui-page {
@@ -1765,7 +1852,8 @@ html.ui-modal-open {
   width: 100%;
   aspect-ratio: 3 / 4;
   overflow: hidden;
-  background: var(--surface-lowest);
+  /* White in both themes, as the app's PdfThumbnail: a landscape page gets white above and below. */
+  background: var(--paper, #ffffff);
   transition: opacity var(--ui-short) linear;
 }
 
@@ -1864,21 +1952,14 @@ html.ui-modal-open {
   transform: none;
 }
 
-.ui-page:focus-visible {
-  outline-offset: 2px;
-}
-
-/* Lifted while it is dragged: above the others, under the finger, with a shadow. */
+/* Lifted while it is dragged: above the others, under the finger, with a shadow (on the tile, which
+   moves with `transform`: its content is clipped to it). */
 .ui-page-tile.is-dragging {
   z-index: 20;
-  transition: none;
-  pointer-events: none;
-}
-
-.ui-page-tile.is-dragging .ui-page {
+  scale: 1.05;
   box-shadow: var(--shadow-high);
-  transform: scale(1.05);
-  transition: transform var(--ui-short) var(--ease), box-shadow var(--ui-short);
+  transition: scale var(--ui-short) var(--ease), box-shadow var(--ui-short);
+  pointer-events: none;
 }
 
 .ui-page-tile.is-dragging .ui-page::after {
@@ -2047,6 +2128,13 @@ html.ui-modal-open {
   box-shadow: inset 0 0 0 1px var(--outline-variant);
 }
 
+/* Hundreds of PDFs (Split, every page): rows off screen skip layout and painting. Always on (see
+   .ui-page-tile); the focus rings of a row's buttons stay within its padding. */
+.ui-result-file {
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto 120px;
+}
+
 .ui-result-row-top {
   display: flex;
   align-items: center;
@@ -2178,4 +2266,96 @@ html.ui-modal-open {
 
 .ui-result-startover {
   margin-top: var(--space-4);
+}
+
+/* ---- Focus never under the sticky bars ----
+   A control reached with Tab is scrolled clear of the top bar and the bottom bar (WCAG 2.2 Focus
+   Not Obscured), as the page scrolls under both. */
+
+html:has(.ui-topbar) {
+  scroll-padding-block-start: 72px;
+}
+
+html:has(.ui-bottombar:not([hidden])) {
+  scroll-padding-block-end: calc(76px + env(safe-area-inset-bottom, 0px));
+}
+
+/* ---- Windows contrast themes (forced colours) ----
+   They drop shadows and fills, which draw the kit's outlines and its choices: real borders and
+   outlines in the system's colours stand in for them. */
+
+@media (forced-colors: active) {
+  .ui-btn,
+  .ui-fab,
+  .ui-icon-btn--tonal,
+  .ui-icon-btn--filled,
+  .ui-chip,
+  .ui-segmented {
+    border: 1px solid ButtonText;
+  }
+
+  .ui-btn--text {
+    border-color: transparent;
+  }
+
+  .ui-empty,
+  .ui-card,
+  .ui-file-card,
+  .ui-file-thumb,
+  .ui-result-file,
+  .ui-page {
+    border: 1px solid CanvasText;
+  }
+
+  .ui-segment + .ui-segment {
+    border-inline-start: 1px solid ButtonText;
+  }
+
+  .ui-segment.is-selected,
+  .ui-chip--filter.is-selected,
+  .ui-icon-btn.is-selected {
+    forced-color-adjust: none;
+    background: Highlight;
+    color: HighlightText;
+  }
+
+  .ui-page-tile.is-selected .ui-page,
+  .ui-page-tile.is-dragging .ui-page {
+    outline: 3px solid Highlight;
+    outline-offset: -3px;
+  }
+
+  .ui-empty.is-dragover,
+  .is-dragover {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+
+  .ui-switch-thumb {
+    forced-color-adjust: none;
+    background: ButtonText;
+  }
+
+  .ui-switch[aria-checked="true"] {
+    forced-color-adjust: none;
+    border-color: Highlight;
+    background: Highlight;
+  }
+
+  .ui-switch[aria-checked="true"] .ui-switch-thumb {
+    background: HighlightText;
+  }
+
+  .ui-progress {
+    border: 1px solid CanvasText;
+  }
+
+  .ui-progress-bar {
+    forced-color-adjust: none;
+    background: Highlight;
+  }
+
+  .ui-sheet-handle::before {
+    background: CanvasText;
+  }
 }

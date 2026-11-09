@@ -894,6 +894,33 @@ await withPage(async (page, url) => {
   });
 }, { allowConsole: [/^Failed to load resource: (net::ERR_INTERNET_DISCONNECTED|net::ERR_FAILED|the server responded with a status of 404)/] });
 
+// A job the worker fails (bytes that aren't an image) rejects only its own promise: without the
+// errorHandler startWorker passes, tesseract.js would also throw it in the worker's message
+// handler, an uncaught error that fails this page. Leptonica's notes about the bytes are allowed.
+await withPage(async (page, url) => {
+  await page.goto(url + 'app/fonts/OFL.txt');
+  await installHelpers(page, url);
+  await test('a job the worker fails rejects its own promise only, and the worker reads on', async () => {
+    const r = await page.evaluate(async () => {
+      const worker = await T.loader.startWorker('en');
+      let rejected = null;
+      try {
+        await worker.recognize(new Uint8Array([1, 2, 3, 4, 5]));
+      } catch (e) {
+        rejected = String(e?.message ?? e);
+      }
+      // An uncaught error would arrive just after the rejection.
+      await new Promise((done) => setTimeout(done, 300));
+      const { canvas } = T.picture({ width: 700, height: 140, lines: [{ text: 'Still reading', x: 30, y: 90, size: 56 }] });
+      const text = (await worker.recognize(canvas)).data.text;
+      await worker.terminate();
+      return { rejected, text };
+    });
+    assert(r.rejected, 'the failed job rejects');
+    assert(/Still reading/.test(r.text), `the worker reads on: ${JSON.stringify(r.text)}`);
+  });
+}, { allowConsole: [/findFileFormatStream|pixReadStream|pixRead|Image file \/input cannot be read/] });
+
 // Hindi. Tesseract's Hindi data named two settings this engine build doesn't have
 // (classify_misfit_junk_penalty, merge_fragments_in_matrix), which its worker printed as console
 // errors; npm run vendor takes them out of the data, so a Hindi worker starts without any.

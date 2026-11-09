@@ -768,6 +768,102 @@ async function robustness(page) {
   check('the odd text still extracts', r.text.includes('abc'), r.text);
 }
 
+/**
+ * Review fixes: Android's save count, one link over a contents line with its tab, condensed widths,
+ * damaged page trees, right-to-left text copied in reading order, and the save giving the browser
+ * its turns.
+ */
+async function reviewFixes(page) {
+  const r = await page.evaluate(async () => {
+    const { text, common, lib } = window.T;
+    const out = {};
+    // saveCount / restoreToCount, as Android's Canvas.
+    {
+      const doc = await common.createPdf();
+      const c = new text.PdfCanvas(doc.addPage([200, 200]));
+      const counts = [c.saveCount];
+      const before = c.save();
+      c.translate(10, 10);
+      c.save();
+      c.save();
+      counts.push(c.saveCount);
+      c.restoreToCount(before);
+      counts.push(c.saveCount);
+      c.restoreToCount(0);
+      counts.push(c.saveCount);
+      out.counts = counts;
+      out.before = before;
+      out.transformBack = c.getTransform ? [...[c.getTransform().e, c.getTransform().f]] : null;
+    }
+    // A contents line linked as a whole: its title, the leader and the page number are one link.
+    {
+      const link = { page: 0, y: 0 };
+      const rich = new text.RichText().append('Chapter one', { size: 10, link }).append('\t', { size: 10, link }).append('5', { size: 10, link });
+      const l = await text.layoutParagraph({ text: rich, width: 300, tabs: [{ pos: 300, align: 'right', leader: 'dot' }] });
+      out.contents = l.items(0, 0).filter((i) => i.kind === 'link').map((i) => [Math.round(i.x), Math.round(i.w)]);
+      // A tab at the end of a link isn't part of it.
+      const trailing = new text.RichText().append('Linked', { size: 10, link }).append('\t', { size: 10, link }).append('not', { size: 10 });
+      const t = await text.layoutParagraph({ text: trailing, width: 300, tabs: [{ pos: 200 }] });
+      out.trailing = t.items(0, 0).filter((i) => i.kind === 'link').map((i) => Math.round(i.w));
+      out.linkedWidth = Math.round(t.items(0, 0).filter((i) => i.kind === 'glyphs')[0].width);
+    }
+    // A condensed Office font's digits as wide as the Office font's, as the app measures them.
+    {
+      const style = { font: 'Arial Narrow' };
+      const s = text.widthScale(0.456, style);
+      out.condensed = text.digitWidth({ ...style, scaleX: s });
+      out.plain = text.digitWidth({ font: 'Arial', scaleX: text.widthScale(0.556, { font: 'Arial' }) });
+    }
+    // A page tree that loops: a PDF that can't be opened, not a stack overflow.
+    {
+      const doc = await common.createPdf();
+      doc.addPage([200, 200]);
+      const pagesRef = doc.catalog.get(lib.PDFName.of('Pages'));
+      doc.context.lookup(pagesRef).get(lib.PDFName.of('Kids')).push(pagesRef);
+      try {
+        text.addOutline(doc, [{ title: 'One', page: 0, top: 100 }]);
+        out.looping = 'no error';
+      } catch (e) {
+        out.looping = e.key ?? e.name;
+      }
+    }
+    // Arabic and Hebrew, drawn by the browser, copy back in reading order.
+    {
+      const doc = await common.createPdf();
+      const c = new text.PdfCanvas(doc.addPage([400, 200]));
+      (await text.layoutText('مرحبا', { size: 20 })).draw(c, 20, 40);
+      (await text.layoutText('שלום', { size: 20 })).draw(c, 20, 120);
+      const bytes = await common.savePdf(doc);
+      out.rtl = (await window.T.items(bytes)).map((i) => i.str).filter((s) => s.trim());
+    }
+    // A long document's save gives the browser its turns while the pages are written.
+    {
+      const doc = await common.createPdf();
+      for (let i = 0; i < 150; i++) {
+        const c = new text.PdfCanvas(doc.addPage([300, 300]));
+        for (let k = 0; k < 400; k++) c.fillRect((k * 7) % 290, (k * 13) % 290, 5, 5);
+      }
+      let turns = 0;
+      let going = true;
+      const tick = () => { if (going) { turns++; setTimeout(tick, 0); } };
+      setTimeout(tick, 0);
+      const t0 = performance.now();
+      await text.finishText(doc);
+      going = false;
+      out.finishMs = performance.now() - t0;
+      out.turns = turns;
+    }
+    return out;
+  });
+  check('saveCount starts at 1 and counts saves; save() returns the count before it', JSON.stringify(r.counts) === JSON.stringify([1, 4, 1, 1]) && r.before === 1, [r.counts, r.before]);
+  check('a contents line linked as a whole is one link, its leader included', r.contents.length === 1 && r.contents[0][0] === 0 && r.contents[0][1] >= 299, r.contents);
+  check('a tab at the end of a link is left out of it', r.trailing.length === 1 && Math.abs(r.trailing[0] - r.linkedWidth) <= 1, [r.trailing, r.linkedWidth]);
+  check('a condensed Office font\'s digits come out as wide as its own', Math.abs(r.condensed - 0.456) < 0.002 && Math.abs(r.plain - 0.556) < 0.002, [r.condensed, r.plain]);
+  check('a looping page tree is a PDF that can\'t be opened', r.looping === 'pdf_import_failed', r.looping);
+  check('Arabic and Hebrew drawn by the browser copy back in reading order', r.rtl.includes('مرحبا') && r.rtl.includes('שלום'), r.rtl);
+  check('writing a long document gives the browser turns', r.finishMs < 40 || r.turns > 0, [r.finishMs, r.turns]);
+}
+
 // ---------------------------------------------------------------------------------------------
 
 await withPage(async (page, url) => {
@@ -787,6 +883,7 @@ await withPage(async (page, url) => {
   await canvasText(page);
   await robustness(page);
   await deferredText(page, url);
+  await reviewFixes(page);
 }, { viewport: { width: 1200, height: 900 } });
 
 // The core on the other engines the site supports.
@@ -798,6 +895,7 @@ for (const browser of ['firefox', 'webkit']) {
     await missingBoxes(page, browser);
     await shapesAndImages(page);
     await canvasText(page);
+    await reviewFixes(page);
   }, { browser, viewport: { width: 1200, height: 900 } });
   console.log(`${browser}: ok`);
 }

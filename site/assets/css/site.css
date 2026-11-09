@@ -69,6 +69,8 @@ main { flex: 1 0 auto; }
 
 img, svg { display: block; max-width: 100%; }
 img { height: auto; }
+/* A <picture> (WebP with a PNG fallback) lays out as the image it holds. */
+picture { display: block; }
 
 h1, h2, h3, h4 {
   margin: 0;
@@ -127,8 +129,17 @@ pre {
 
 pre code { padding: 0; background: none; overflow-wrap: normal; }
 
+/* A command block that scrolls sideways has tabindex="0" (Safari doesn't let the keyboard reach a
+   scroller by itself); keep its own corners when focused. */
+pre:focus-visible { border-radius: var(--radius-m); }
+
 /* A long fingerprint or address: one tap selects all of it, ready to copy. */
 .select-all { user-select: all; -webkit-user-select: all; }
+
+/* Lines to paste (AppVerifier's package name and fingerprint) wrap instead of scrolling, so all of
+   them can be seen and reached; the copied text keeps its own line breaks only. */
+pre.select-all { white-space: pre-wrap; }
+pre.select-all code { overflow-wrap: anywhere; }
 
 ul, ol { margin: 0 0 1em; padding-inline-start: 1.25em; }
 li + li { margin-block-start: 0.35em; }
@@ -666,24 +677,46 @@ li + li { margin-block-start: 0.35em; }
 
 .feature ul strong { color: var(--on-surface); font-weight: 600; }
 
-/* The Everywhere group: smaller cards, three to a row on wide screens (nine cards, no gaps). */
+/* The Everywhere group: smaller cards (nine, so three full rows on wide screens). */
 .feature-grid.compact .feature-top { align-items: flex-start; }
 .feature-grid.compact .feature-top p { margin-block-start: var(--space-1); }
 .feature-grid.compact .icon-badge { width: 40px; height: 40px; }
 .feature-grid.compact .icon-badge .icon { width: 22px; height: 22px; }
 
-@media (min-width: 720px) and (max-width: 1079.98px) {
-  /* Two to a row: a last card on its own takes the whole row. */
-  .feature-grid.compact > li:last-child:nth-child(odd) { grid-column: 1 / -1; }
-}
-
+/* Every row of cards is full, whatever a group's number of cards (7, 5, 4, 3 and 9 today). */
 @media (min-width: 720px) {
   .feature-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); }
   .feature { padding: var(--space-5); }
 }
 
+@media (min-width: 720px) and (max-width: 1079.98px) {
+  /* Two to a row: a last card on its own takes the whole row, its list beside its name. */
+  .feature-grid > li:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .feature-grid:not(.compact) > li:last-child:nth-child(odd) > .feature {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+    gap: var(--space-5);
+    align-items: start;
+  }
+  .feature-grid:not(.compact) > li:last-child:nth-child(odd) > .feature > ul {
+    margin: 0;
+    padding-block-start: 0;
+    padding-inline-start: var(--space-5);
+    border-block-start: 0;
+    border-inline-start: 1px solid var(--outline-variant);
+  }
+}
+
 @media (min-width: 1080px) {
-  .feature-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  /* Three to a row (two of six columns each). A last row of one or two cards would leave a gap,
+     so the cards after the last full row of three come two to a row, each half as wide again:
+     3n + 2 cards end with one row of two, 3n + 1 cards with two rows of two. */
+  .feature-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .feature-grid > li { grid-column: span 2; }
+  .feature-grid > li:nth-child(3n + 1):nth-last-child(2),
+  .feature-grid > li:nth-child(3n + 1):nth-last-child(2) ~ li,
+  .feature-grid > li:nth-child(3n + 1):nth-last-child(4),
+  .feature-grid > li:nth-child(3n + 1):nth-last-child(4) ~ li { grid-column: span 3; }
 }
 
 /* ---------- Home: privacy highlights ---------- */
@@ -1039,6 +1072,13 @@ li + li { margin-block-start: 0.35em; }
 .link-list li + li { margin-block-start: var(--space-2); }
 .link-list a { display: inline-flex; align-items: center; gap: var(--space-2); min-height: var(--touch); font-weight: 600; }
 .link-list .icon { width: 20px; height: 20px; }
+
+/* A note in a link, after its text, such as "(the main edition)": not underlined, and kept whole,
+   so on a narrow screen it moves under the link's text instead of breaking off after it. */
+.link-note { display: inline-block; color: var(--on-surface-variant); font-weight: 400; }
+
+/* A button in a card's text, such as F-Droid's "Add to F-Droid". */
+.source-action { margin-block: var(--space-4); }
 
 .kv { display: grid; gap: var(--space-3); margin: 0 0 var(--space-4); }
 .kv.card { gap: var(--space-4); }

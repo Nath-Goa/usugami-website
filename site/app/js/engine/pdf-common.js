@@ -2,7 +2,6 @@
 import {
   PDFDocument, PDFName, PDFRef, PDFDict, PDFArray, PDFStream, EncryptedPDFError,
 } from '../lib/pdf-lib.js';
-import fontkit from '../lib/fontkit.js';
 import { PasswordError, UserError } from '../core/errors.js';
 import { unmark as takeMarkOff } from './page-mark.js';
 
@@ -13,7 +12,10 @@ const encryptedDocs = new WeakSet();
 /**
  * Opens a PDF for changing. Password-protected PDFs are decrypted with `password`; the PDFs made
  * from them have no password (as in the app). Throws PasswordError when the password is missing or
- * wrong, and UserError('pdf_import_failed') when the file can't be read as a PDF.
+ * wrong, and UserError('pdf_import_failed') when the file can't be read as a PDF, also one pdf-lib
+ * opens but that has no catalog to read ('%PDF-1.4' and nothing more, a /Root that is a number).
+ * No fontkit is registered: an engine that embeds a font with pdf-lib registers it itself, so the
+ * other tools don't load it.
  *
  * Usugami's own mark (engine/page-mark.js), which a PDF it made before may carry, is taken off in
  * memory (PdfToolsEngine.loadUnmarked): what a tool makes then starts without it, also where a
@@ -45,7 +47,8 @@ export async function loadPdf(bytes, { password, unmark = true, parseSpeed } = {
     if (/password/i.test(e?.message ?? '')) throw new PasswordError(password != null && password !== '');
     throw new UserError('pdf_import_failed');
   }
-  doc.registerFontkit(fontkit);
+  // pdf-lib looks for a catalog when the trailer names none; without one there is nothing to read.
+  if (!(doc.catalog instanceof PDFDict)) throw new UserError('pdf_import_failed');
   if (password != null && password !== '') encryptedDocs.add(doc);
   if (unmark) {
     let found = false;
@@ -88,11 +91,12 @@ export async function needsPassword(bytes) {
   }
 }
 
-/** A new, empty PDF with fontkit registered. */
+/**
+ * A new, empty PDF. No fontkit is registered (see loadPdf): `doc.registerFontkit(fontkit)` before
+ * `doc.embedFont(bytes)`, as engine/ocr/text-layer.js does.
+ */
 export async function createPdf() {
-  const doc = await PDFDocument.create({ updateMetadata: false });
-  doc.registerFontkit(fontkit);
-  return doc;
+  return PDFDocument.create({ updateMetadata: false });
 }
 
 /**

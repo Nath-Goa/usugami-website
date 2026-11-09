@@ -83,9 +83,11 @@ export function createEditor({ model, actions }) {
 
   // ---- Before the first image ----
   const emptyTitle = h('h2', { class: 'images-empty-title' });
-  const photosButton = button({ label: t('add_from_photos'), icon: 'photo_library', variant: 'filled', onClick: () => actions.addPhotos() });
-  const filesButton = button({ label: t('add_from_files'), icon: 'folder_open', variant: 'tonal', onClick: () => actions.addFiles() });
-  const cameraButton = button({ label: t('add_from_camera'), icon: 'photo_camera', variant: 'tonal', onClick: () => actions.takePhoto() });
+  // Off while images are being added (aria-disabled, so the focus stays on the button pressed).
+  const ready = (fn) => (e) => { if (e.currentTarget.getAttribute('aria-disabled') !== 'true') fn(); };
+  const photosButton = button({ label: t('add_from_photos'), icon: 'photo_library', variant: 'filled', onClick: ready(() => actions.addPhotos()) });
+  const filesButton = button({ label: t('add_from_files'), icon: 'folder_open', variant: 'tonal', onClick: ready(() => actions.addFiles()) });
+  const cameraButton = button({ label: t('add_from_camera'), icon: 'photo_camera', variant: 'tonal', onClick: ready(() => actions.takePhoto()) });
   const empty = h('div', { class: 'images-empty' },
     h('div', { class: 'images-empty-icon', 'aria-hidden': 'true' }, icon('add_photo_alternate', { size: 56 })),
     emptyTitle,
@@ -153,7 +155,10 @@ export function createEditor({ model, actions }) {
     bottom.hidden = isEmpty;
     el.classList.toggle('is-empty', isEmpty);
     emptyTitle.textContent = t(importing ? 'adding_images' : 'empty_title');
-    for (const b of [photosButton, filesButton, cameraButton]) b.disabled = importing;
+    for (const b of [photosButton, filesButton, cameraButton]) {
+      if (importing) b.setAttribute('aria-disabled', 'true');
+      else b.removeAttribute('aria-disabled');
+    }
     convertButton.disabled = importing;
     hint.hidden = items.length < 2;
     hint.textContent = finePointer() ? t('web_reorder_hint_mouse') : t('reorder_hint');
@@ -163,9 +168,13 @@ export function createEditor({ model, actions }) {
     orientationChip.setDisabled(fit, fit ? t('orientation_fit_note') : null);
     marginChip.setValue(model.layout.margin);
     pages.update(items, { layout: model.layout, cropping: model.cropping });
-    if (wasEmpty === true && !isEmpty && document.activeElement && el.contains(document.activeElement) && document.activeElement.closest('.images-empty')) {
+    if (wasEmpty === true && !isEmpty && el.isConnected) {
+      // The pages start at their top, under the chips, as the app's new grid does (the empty
+      // screen may have been scrolled to reach its buttons).
+      window.scrollTo(0, 0);
       // The button pressed has gone with the empty screen: the focus goes to the first page.
-      pages.focusPage(items[0].id, 'handle');
+      const focused = document.activeElement;
+      if (focused && el.contains(focused) && focused.closest('.images-empty')) pages.focusPage(items[0].id, 'handle');
     }
     wasEmpty = isEmpty;
   }

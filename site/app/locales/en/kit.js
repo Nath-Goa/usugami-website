@@ -34,4 +34,6 @@ export default {
   web_zip_download: 'Save ZIP to Downloads',
   // A ZIP file took a while to make, so the browser needs another tap to share it.
   web_zip_ready: 'The ZIP file is ready.',
+  // A bottom sheet's handle, for screen readers on touch screens: it closes the sheet.
+  web_sheet_close: 'Close',
 };

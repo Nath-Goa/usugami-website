@@ -23,6 +23,15 @@ const EDGE = 56;
 
 const reducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
+// Icons parsed once and copied after: a grid of thousands of pages makes one or two per page.
+const iconCopies = new Map();
+function iconCopy(name, size) {
+  const key = name + '/' + size;
+  let svg = iconCopies.get(key);
+  if (!svg) iconCopies.set(key, (svg = icon(name, { size })));
+  return svg.cloneNode(true);
+}
+
 /**
  * @param {object} o
  * @param {number} o.count                     how many pages
@@ -68,8 +77,9 @@ export function pageGrid(o) {
   });
   if (opts.ariaLabel) grid.setAttribute('aria-label', opts.ariaLabel);
   const hint = h('span', { id: hintId, class: 'ui-visually-hidden' }, t('web_reorder_hint'));
-  // Still read as the pages' description while hidden; a listbox may hold only its options.
-  if (mode === 'single') hint.hidden = true;
+  // Read only as the pages' description (aria-describedby reads it while hidden), so a grid whose
+  // pages can't be moved doesn't say how to move them, and a list holds only its items.
+  hint.hidden = true;
   /** @type {Tile[]} in the order shown */
   let tiles = [];
   let active = 0;
@@ -94,7 +104,7 @@ export function pageGrid(o) {
       else if (mode === 'single') this.button.setAttribute('role', 'option');
       if (opts.reorderable) this.button.setAttribute('aria-describedby', hintId);
       this.turn = h('div', { class: 'ui-page-turn' });
-      this.placeholder = h('span', { class: 'ui-page-placeholder', 'aria-hidden': 'true' }, icon('picture_as_pdf', { size: 24 }));
+      this.placeholder = h('span', { class: 'ui-page-placeholder', 'aria-hidden': 'true' }, iconCopy('picture_as_pdf', 24));
       this.picture = h('div', { class: 'ui-page-picture' }, this.placeholder, this.turn);
       this.badgeEl = h('div', { class: 'ui-page-badge' });
       this.badgeEl.hidden = true;
@@ -136,7 +146,7 @@ export function pageGrid(o) {
       }
       let ov = opts.overlay?.(i) ?? null;
       // Delete pages' sign, made once per tile: CSS shows it on the pages marked.
-      if (!ov && opts.selectedStyle === 'delete') ov = this.deleteSign ??= h('span', { class: 'ui-page-delete-sign' }, icon('delete', { size: 24 }));
+      if (!ov && opts.selectedStyle === 'delete') ov = this.deleteSign ??= h('span', { class: 'ui-page-delete-sign' }, iconCopy('delete', 24));
       if (ov !== s.overlay) {
         s.overlay = ov;
         this.overlayEl.replaceChildren(...(ov ? [ov] : []));
@@ -239,8 +249,24 @@ export function pageGrid(o) {
     return null;
   };
 
+  // Tiles off screen aren't laid out (content-visibility, components.css): they are given the
+  // height a tile on screen has, so the grid's height and the scrolling stay right.
+  let sizeObserver = null;
+  let sizeFrame = 0;
+  const measureTile = () => {
+    sizeFrame = 0;
+    const tile = tiles[active] ?? tiles[0];
+    const height = tile?.wrap.isConnected ? tile.wrap.getBoundingClientRect().height : 0;
+    if (height > 0) grid.style.setProperty('--ui-tile-h', Math.round(height) + 'px');
+  };
+
   const observe = () => {
     if (observer) return;
+    measureTile();
+    if (typeof ResizeObserver === 'function') {
+      sizeObserver = new ResizeObserver(() => { if (!sizeFrame) sizeFrame = requestAnimationFrame(measureTile); });
+      sizeObserver.observe(grid);
+    }
     observerRoot = findScroller(grid);
     observer = new IntersectionObserver((entries) => {
       for (const e of entries) {
@@ -629,6 +655,8 @@ export function pageGrid(o) {
   grid.destroy = () => {
     destroyed = true;
     observer?.disconnect();
+    sizeObserver?.disconnect();
+    cancelAnimationFrame(sizeFrame);
     for (const tile of tiles) tile.unload();
     removeWindowListeners();
   };

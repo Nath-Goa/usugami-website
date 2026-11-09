@@ -40,7 +40,32 @@ function skipLink() {
   return link;
 }
 
+/** Whether the app runs installed (its own window, as from the home screen). */
+function installed() {
+  try {
+    return matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Asks the browser to keep this site's storage (the service worker and its caches) when space
+ * runs low. Files shared to the installed app reach it through the service worker, which keeps
+ * them on the device; were it cleared away, the system would still offer the app for sharing and
+ * send the files to the site instead. Installed apps get this without a question in Chromium.
+ */
+function keepStorage() {
+  try {
+    navigator.storage?.persist?.()?.catch?.(() => {});
+  } catch {
+    // Not offered here: nothing more to do.
+  }
+}
+
 function registerServiceWorker() {
+  if (installed()) keepStorage();
+  window.addEventListener('appinstalled', keepStorage);
   if (!('serviceWorker' in navigator)) return;
   const register = () => {
     navigator.serviceWorker.register(new URL('../sw.js', import.meta.url), { scope: new URL('../', import.meta.url).href })
@@ -60,9 +85,14 @@ async function start() {
   await loadStrings('kit', 'mark').catch(() => {});
   document.body.prepend(skipLink());
   const app = document.getElementById('app');
-  // With more than one language, the first launch asks for one, as the Android app does.
+  // With more than one language, the first launch asks for one, as the Android app does; the
+  // screen the address named shows once it is chosen.
   const firstLaunch = LANGUAGES.length > 1 && getSetting('language') == null;
-  if (firstLaunch && !location.hash.startsWith('#/language')) history.replaceState(null, '', location.pathname + location.search + '#/language');
+  if (firstLaunch && !location.hash.startsWith('#/language')) {
+    const wanted = decodeURIComponent(location.hash.replace(/^#/, ''));
+    const next = wanted && wanted !== '/' ? '?next=' + encodeURIComponent(wanted) : '';
+    history.replaceState(null, '', location.pathname + location.search + '#/language' + next);
+  }
   await startRouter(app);
   await initShareInbox();
   registerServiceWorker();

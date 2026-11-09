@@ -161,7 +161,26 @@ export function createStage(hooks) {
 
   // ---- Drawing the page ----
 
-  const pdfPage = async () => (await src.pdfjs()).getPage(index + 1);
+  /** The pdf.js pages drawn, so what pdf.js keeps of them (decoded images, operator lists) can be let go. */
+  const drawnPages = new Set();
+  const pdfPage = async () => {
+    const page = await (await src.pdfjs()).getPage(index + 1);
+    drawnPages.add(page);
+    return page;
+  };
+
+  /**
+   * Lets pdf.js free what it keeps of the pages drawn but `keep` (the page showing, drawn again
+   * sharp as it is zoomed): a scanned page's decoded image alone can be 30 MB. A page still being
+   * drawn is freed by pdf.js once that ends.
+   */
+  const releasePages = (keep = null) => {
+    for (const page of drawnPages) {
+      if (page === keep) continue;
+      try { page.cleanup(); } catch { /* the document is closed already */ }
+      drawnPages.delete(page);
+    }
+  };
 
   /** A pdf.js viewport showing exactly the crop box the PDF's edits are placed on. */
   const viewportFor = (page, pxPerPoint, offsetX = 0, offsetY = 0) => {
@@ -180,6 +199,8 @@ export function createStage(hooks) {
     try {
       const page = await pdfPage();
       if (token !== renderToken || destroyed) return;
+      // Another page showing now: what pdf.js kept of those shown before goes.
+      releasePages(page);
       let pxPerPoint = (Math.max(cssWidth, 160) / size.width) * density();
       pxPerPoint = Math.min(pxPerPoint, MAX_SIDE / size.width, MAX_SIDE / size.height, Math.sqrt(MAX_AREA / (size.width * size.height)));
       const vp = viewportFor(page, pxPerPoint);
@@ -330,7 +351,13 @@ export function createStage(hooks) {
       let node = nodeById.get(it.id);
       if (!node) {
         node = h('button', { type: 'button', class: 'edit-node', tabindex: '0', dataset: { id: it.id } });
-        node.addEventListener('click', () => hooks.onSelect(Number(node.dataset.id)));
+        // Chosen with the keyboard or a screen reader (presses on the page are taken by the
+        // sheet): the item is scrolled to when zoomed in. A press never scrolls.
+        node.addEventListener('click', () => {
+          const id = Number(node.dataset.id);
+          hooks.onSelect(id);
+          stage.reveal(id);
+        });
         node.addEventListener('focus', () => { focused = Number(node.dataset.id); redraw(); });
         node.addEventListener('blur', () => { if (focused === Number(node.dataset.id)) focused = null; redraw(); });
         nodeById.set(it.id, node);
@@ -666,6 +693,8 @@ export function createStage(hooks) {
     get known() { return known; },
     get size() { return size; },
     get drawing() { return gesture?.kind === 'draw'; },
+    /** How many pdf.js pages the stage keeps what pdf.js decoded of (for tests: the page showing only). */
+    get keptPages() { return drawnPages.size; },
     /** The button standing for item `id`, for the focus. */
     nodeOf: (id) => nodeById.get(id) ?? null,
     redraw,
@@ -690,6 +719,7 @@ export function createStage(hooks) {
       detailTask?.cancel?.();
       resize.disconnect();
       window.removeEventListener('resize', onWindowResize);
+      releasePages();
       base = null;
       detail = null;
     },

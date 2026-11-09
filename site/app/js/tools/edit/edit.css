@@ -3,6 +3,9 @@
    on the right. */
 
 .edit-screen {
+  /* The column the main button ends at on wide screens (the kit reads it): the 1320 px layout
+     less its padding. */
+  --ui-column: calc(1320px - 2 * var(--space-6));
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -349,6 +352,32 @@
   gap: var(--space-1);
 }
 
+/* Against an edge of the page: looks off, as disabled, but keeps the keyboard focus it has. */
+.edit-nudge[aria-disabled="true"] {
+  cursor: default;
+  color: color-mix(in srgb, var(--on-surface) 38%, transparent);
+}
+
+.edit-nudge[aria-disabled="true"]::before {
+  display: none;
+}
+
+/* While a PDF opens, Choose PDF is off but keeps the focus (a password dialog gives it back there). */
+.edit-body > .ui-empty[aria-disabled="true"] {
+  cursor: default;
+  color: color-mix(in srgb, var(--on-surface) 38%, transparent);
+}
+
+.edit-body > .ui-empty[aria-disabled="true"] .ui-empty-icon,
+.edit-body > .ui-empty[aria-disabled="true"] .ui-empty-detail,
+.edit-body > .ui-empty[aria-disabled="true"] .ui-empty-drop {
+  color: inherit;
+}
+
+.edit-body > .ui-empty[aria-disabled="true"]::before {
+  display: none;
+}
+
 .edit-fill {
   padding-block: 4px;
 }
@@ -467,7 +496,8 @@
   width: 100%;
   height: 92px;
   overflow: hidden;
-  background: var(--surface-container);
+  /* White in both themes around a page of another shape, as the app's PdfThumbnail. */
+  background: var(--paper, #ffffff);
 }
 
 .edit-strip-thumb canvas {
@@ -584,10 +614,6 @@
     width: 100%;
     max-width: 560px;
     margin-inline: auto;
-  }
-
-  .edit-screen > .ui-bottombar {
-    padding-inline: max(var(--space-6), calc((100% - 1320px) / 2 + var(--space-6)));
   }
 }
 

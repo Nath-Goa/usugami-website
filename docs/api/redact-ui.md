@@ -23,7 +23,10 @@ tests.
   `item.password` when Choose a tool already asked for it; otherwise the kit asks for the password.
   The PDF is opened with the screen's AbortSignal (`openPdf(item, { password, signal })`), so a
   password dialog still open closes when the user leaves. A file that can't be opened says why in a
-  snackbar (`pdf_import_failed`, `pdf_certificate_unsupported`).
+  snackbar (`pdf_import_failed`, `pdf_certificate_unsupported`). While a PDF opens, Choose PDF is off
+  with `aria-disabled` (not `disabled`), so the keyboard focus stays on it and comes back to it when
+  the password dialog is cancelled; once the PDF has opened, the PDF's card takes the focus. The
+  screen's content is its `<main>` landmark (with `data-main`), where Skip to content goes.
 - Then, in the app's order: the PDF's card (X removes it: "Discard your changes?" first while it has
   boxes), the note `redact_note`, **Find text** (search button and Enter; while searching a bar takes
   the hint's place, Redact PDF is off, and a Cancel button takes the search button's place), **Page** (the pages, with a dot under those with boxes;
@@ -67,7 +70,9 @@ tests.
   shows unless the page showing has some; the query is kept (as typed) for the redaction, until
   Remove all or the PDF goes. On a touch screen the keyboard is put away first.
 - **Redact PDF** runs `redactPdf` with the boxes on the PDF's pages, what was searched, and the name
-  typed, in the kit's progress dialog (with Cancel). The result is a step of the screen
+  typed, in the kit's progress dialog (with Cancel). The dialog has gone before anything else shows
+  (while it is up the rest of the screen is inert): a failure's snackbar is then heard by screen
+  readers, and the result's heading takes the focus. The result is a step of the screen
   (`ctx.pushStep('result')`): the kit's result screen, with "The new PDF has no password." when the
   PDF had one. Back to editing (or the browser's Back) returns to the boxes, putting the result away
   as the app does; Start over (asking while unsaved) goes back to Choose PDF. A reload on the result

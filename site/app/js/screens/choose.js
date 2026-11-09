@@ -59,6 +59,16 @@ export async function mount(ctx) {
   }
   const { openPdf, reportFileProblems } = await import('../core/pdfdoc.js');
   let alive = true;
+  // Leaving takes a password question still open away with the screen.
+  const leaving = new AbortController();
+  // PDFs opened for a list since replaced (a tool chosen here, then other PDFs shared) are let go.
+  const listed = new Set(getSharedPdfs());
+  for (const [item, source] of opened) {
+    if (!listed.has(item)) {
+      closeSource(source);
+      opened.delete(item);
+    }
+  }
   const filesEl = h('div', { class: 'choose-files' });
   const busy = h('div', { class: 'choose-busy' }, linearProgress({ value: null, label: t('web_share_receiving') }));
   const tools = h('div', { class: 'choose-tools' });
@@ -126,7 +136,12 @@ export async function mount(ctx) {
     for (const item of waiting) {
       if (!alive) return;
       try {
-        const source = await openPdf(item, item.password != null ? { password: item.password } : {});
+        const source = await openPdf(item, { ...(item.password != null ? { password: item.password } : {}), signal: leaving.signal });
+        if (!alive) {
+          // The screen went while it opened.
+          closeSource(source);
+          return;
+        }
         if (!source) dropped.add(item);
         else {
           opened.set(item, source);
@@ -134,6 +149,7 @@ export async function mount(ctx) {
           if (source.password) item.password = source.password;
         }
       } catch (error) {
+        if (!alive || error?.name === 'CancelledError') return;
         dropped.add(item);
         problems.push({ name: item.name, error });
       }
@@ -162,6 +178,7 @@ export async function mount(ctx) {
   return {
     unmount() {
       alive = false;
+      leaving.abort();
     },
     hasUnsavedWork: () => false,
   };

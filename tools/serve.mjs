@@ -43,7 +43,8 @@ const TYPES = {
 
 /**
  * Serves `root` (default: site/) under `prefix` (default: none, so the site is at /).
- * Resolves to { server, url, close() }; port 0 picks a free port.
+ * Resolves to { server, url, port, close() }; port 0 picks a free port. Rejects when the server
+ * can't listen (for example EADDRINUSE: the port is taken).
  */
 export function startServer({ root, port = 0, host = '127.0.0.1', prefix = '' } = {}) {
   const base = resolve(root ?? join(dirname(fileURLToPath(import.meta.url)), '..', 'site'));
@@ -80,8 +81,10 @@ export function startServer({ root, port = 0, host = '127.0.0.1', prefix = '' } 
       res.end(String(e));
     }
   });
-  return new Promise((ok) => {
+  return new Promise((ok, fail) => {
+    server.once('error', fail);
     server.listen(port, host, () => {
+      server.off('error', fail);
       const { port: p } = server.address();
       const url = `http://${host === '0.0.0.0' ? 'localhost' : host}:${p}${pre}/`;
       ok({ server, url, port: p, close: () => new Promise((done) => server.close(done)) });
@@ -105,11 +108,16 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     return i >= 0 ? args[i + 1] : fallback;
   };
   const host = opt('host', '127.0.0.1');
-  const { url, port } = await startServer({
+  const wanted = Number(opt('port', 8080));
+  const { url } = await startServer({
     root: opt('root', undefined),
-    port: Number(opt('port', 8080)),
+    port: wanted,
     host,
     prefix: opt('prefix', ''),
+  }).catch((e) => {
+    if (e.code !== 'EADDRINUSE') throw e;
+    console.error(`Port ${wanted} is in use (another preview server?). Stop it, or pick another port: node tools/serve.mjs --port ${wanted + 1}`);
+    process.exit(1);
   });
   console.log(`Usugami website: ${url}`);
   if (host === '0.0.0.0') {

@@ -2,6 +2,7 @@
 // EpubPaths, EpubProtection, XmlPrefix, HtmlText, and the small CSS engine: CssSelector, CssNode,
 // CssSheet, SimpleCss, CssValues), with the bits of Kotlin's number and character rules it relies on.
 import { ListNumbering } from './office-formats.js';
+import { pause } from './pause.js';
 
 const Format = ListNumbering.Format;
 
@@ -69,14 +70,15 @@ export function codePointBefore(text, index) {
 
 /**
  * A breather for long work: `await breathe()` lets the page paint and handle input when `ms`
- * milliseconds have passed since it last did, and costs nothing otherwise.
+ * milliseconds have passed since it last did, and costs nothing otherwise. It goes on in a new task,
+ * not after a timer, which a tab in the background runs once a second at most (see pause.js).
  */
 export function breather(ms = 25) {
   let last = performance.now();
   return async () => {
     const now = performance.now();
     if (now - last < ms) return;
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await pause();
     last = performance.now();
   };
 }

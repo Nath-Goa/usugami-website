@@ -7,10 +7,11 @@ import {
 } from '../../lib/pdf-lib.js';
 import { zlibSync } from '../../lib/fflate.js';
 import { encodeJpeg, filterRow } from '../images/encode.js';
-import { newImageData } from '../images/canvas.js';
+import { newImageData, isImageData } from '../images/canvas.js';
 import { filtersOf, decodeAll, paramInt, READABLE, StreamError } from './filters.js';
 import { readSamples } from './samples.js';
-import { jpegFacts, canDecode, decodeJpeg } from './jpeg-source.js';
+import { jpegFacts, canDecode, decodeJpeg, decodeJpegImage } from './jpeg-source.js';
+import { WorkBudget } from './budget.js';
 
 /** Images whose stored data is smaller than this are left alone: there is little to gain (the app's rule). */
 export const MIN_IMAGE_BYTES = 2048;
@@ -156,10 +157,13 @@ export function examine(ctx, stream) {
 
 /**
  * The image's pixels at `outWidth` x `outHeight`: 8-bit components of its colour space (for an
- * Indexed one, of its base), or null when they can't be read as a viewer would read them.
- * @returns {Promise<{ pixels: Uint8Array, components: number } | null>}
+ * Indexed one, of its base), or null when they can't be read as a viewer would read them. With
+ * `rgba`, a three-component JPEG comes back as the browser decoded it, `{ rgba: ImageData,
+ * components: 3 }` (opaque RGBA, `pixels` null), which encodeImage takes as it is: copying it into
+ * RGB and back would only cost time.
+ * @returns {Promise<{ pixels: Uint8Array|null, components: number, rgba?: ImageData } | null>}
  */
-export async function readImage(ctx, facts, outWidth, outHeight, { signal } = {}) {
+export async function readImage(ctx, facts, outWidth, outHeight, { signal, rgba = false } = {}) {
   const { data, width, height, bpc, before, dct, colourSpace } = facts;
   if (dct) {
     let bytes = data;
@@ -170,7 +174,11 @@ export async function readImage(ctx, facts, outWidth, outHeight, { signal } = {}
     }
     const jpeg = jpegFacts(bytes);
     if (!canDecode(jpeg, colourSpace.components, width, height, facts.colorTransform)) return null;
-    const pixels = await decodeJpeg(bytes, { width, height, components: jpeg.components }, outWidth, outHeight);
+    if (rgba && jpeg.components === 3) {
+      const image = await decodeJpegImage(bytes, { width, height }, outWidth, outHeight);
+      return image ? { pixels: null, rgba: image, components: 3 } : null;
+    }
+    const pixels = await decodeJpeg(bytes, { width, height, components: jpeg.components }, outWidth, outHeight, { signal });
     return pixels ? { pixels, components: jpeg.components } : null;
   }
   let palette;
@@ -194,9 +202,12 @@ export async function readImage(ctx, facts, outWidth, outHeight, { signal } = {}
   return { pixels: r.pixels, components: palette ? palette.components : colourSpace.components };
 }
 
-/** Whether every pixel of RGB `pixels` is grey, give or take what a JPEG's colour rounding leaves. */
-export function isGreyRgb(pixels, tolerance = 3) {
-  for (let i = 0; i < pixels.length; i += 3) {
+/**
+ * Whether every pixel of RGB `pixels` is grey, give or take what a JPEG's colour rounding leaves.
+ * `stride` 4 reads RGBA.
+ */
+export function isGreyRgb(pixels, tolerance = 3, stride = 3) {
+  for (let i = 0; i + 2 < pixels.length; i += stride) {
     const r = pixels[i];
     const g = pixels[i + 1];
     const b = pixels[i + 2];
@@ -209,25 +220,41 @@ export function isGreyRgb(pixels, tolerance = 3) {
  * The new image's data and how it is stored: `{ bytes, filter, params?, components, grey }`.
  * One component: a one-component JPEG. Three: a colour JPEG, or a grey one when the colour space
  * is DeviceRGB, there is no /Decode and every pixel is grey. Others: Flate with PNG predictors.
+ * For three components `pixels` may also be opaque RGBA ImageData (readImage's `rgba`). The pixels
+ * are gone through a slice at a time, letting the page paint meanwhile.
  */
 export async function encodeImage(pixels, width, height, components, { quality, deviceRgb, decode, signal }) {
+  const budget = new WorkBudget(signal);
   if (components === 1) {
     return { bytes: await encodeJpeg({ width, height, pixels }, { quality, gray: true, signal }), filter: 'DCTDecode', components, grey: false };
   }
   if (components === 3) {
-    if (deviceRgb && !decode && isGreyRgb(pixels)) {
-      const grey = new Uint8Array(width * height);
-      for (let p = 0, i = 0; p < grey.length; p++, i += 3) grey[p] = (pixels[i] * 77 + pixels[i + 1] * 150 + pixels[i + 2] * 29) >> 8;
+    const rgba = isImageData(pixels);
+    const src = rgba ? pixels.data : pixels;
+    const stride = rgba ? 4 : 3;
+    const count = width * height;
+    if (deviceRgb && !decode && await budget.each(count, (from, to) => isGreyRgb(src.subarray(from * stride, to * stride), 3, stride))) {
+      const grey = new Uint8Array(count);
+      await budget.each(count, (from, to) => {
+        for (let p = from, i = from * stride; p < to; p++, i += stride) grey[p] = (src[i] * 77 + src[i + 1] * 150 + src[i + 2] * 29) >> 8;
+      });
+      await budget.check();
       return { bytes: await encodeJpeg({ width, height, pixels: grey }, { quality, gray: true, signal }), filter: 'DCTDecode', components: 1, grey: true };
     }
-    const imageData = newImageData(width, height);
-    const d = imageData.data;
-    for (let p = 0, i = 0; i < d.length; p += 3, i += 4) {
-      d[i] = pixels[p];
-      d[i + 1] = pixels[p + 1];
-      d[i + 2] = pixels[p + 2];
-      d[i + 3] = 255;
+    let imageData = pixels;
+    if (!rgba) {
+      imageData = newImageData(width, height);
+      const d = imageData.data;
+      await budget.each(count, (from, to) => {
+        for (let p = from * 3, i = from * 4, end = to * 4; i < end; p += 3, i += 4) {
+          d[i] = pixels[p];
+          d[i + 1] = pixels[p + 1];
+          d[i + 2] = pixels[p + 2];
+          d[i + 3] = 255;
+        }
+      });
     }
+    await budget.check();
     return { bytes: await encodeJpeg(imageData, { quality, signal }), filter: 'DCTDecode', components, grey: false };
   }
   return { bytes: flateComponents(pixels, width, height, components), filter: 'FlateDecode', components, grey: false };

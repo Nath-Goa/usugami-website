@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-t7wi8cKFzXdpP4A2mQuceBofwwxKSRwZLcnUsHIXc+U=' 'sha256-jMe6rNJgQiAWDTIKU+Ry6cW9fksKi/2lF8vxcgEekyQ='; style-src 'self'; img-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-Rl57h3Mp9UofGVbWdq8jylsIFl4W14cXR0L9/j8aURc=' 'sha256-jMe6rNJgQiAWDTIKU+Ry6cW9fksKi/2lF8vxcgEekyQ='; style-src 'self'; img-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
   <title>Page not found: Usugami</title>
   <meta name="description" content="There is no page at this address on Usugami’s website.">
   <meta name="color-scheme" content="light dark">
@@ -13,13 +14,15 @@
     // GitHub Pages serves this page for every unknown address, at any depth (say
     // .../usugami-website/a/b/c), so links relative to the address would point to the wrong place.
     // The site is either at the root of its domain or, on github.io and in local previews, in the
-    // repository's sub-folder: work out which from the address, and make every relative link on
+    // repository's sub-folder (on usugami.com it is always at the root, even for an address that
+    // starts with that folder): work out which from the address, and make every relative link on
     // this page start from there with a <base> element. The styles and icons are written here too,
     // after it: browsers fetch the addresses in the markup early, before scripts run, so in the
     // markup they would first be asked for at the wrong place.
     (function () {
       var first = location.pathname.split('/')[1] || '';
-      var inFolder = first && (/\.github\.io$/i.test(location.hostname) || first === 'usugami-website');
+      var inFolder = first && (/\.github\.io$/i.test(location.hostname) ||
+        (first === 'usugami-website' && !/(^|\.)usugami\.com$/i.test(location.hostname)));
       document.write('<base href="' + (inFolder ? '/' + first + '/' : '/') + '">' +
         '<link rel="icon" href="assets/img/icon.svg" type="image/svg+xml">' +
         '<link rel="icon" href="assets/img/icon-32.png" sizes="32x32" type="image/png">' +
@@ -98,7 +101,7 @@
         <a class="btn btn-outlined" href="download/">Download for Android</a>
       </div>
       <noscript>
-        <p>If these links don’t work, go to <a href="https://nath-goa.github.io/usugami-website/">Usugami’s home page</a>.</p>
+        <p>If these links don’t work, go to <a href="https://usugami.com/">Usugami’s home page</a>.</p>
       </noscript>
     </div>
   </main>

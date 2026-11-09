@@ -32,7 +32,7 @@ import { drawText } from './pptx-text.js';
 import { drawTable, defaultTableStyle } from './pptx-table.js';
 import { PdfPath } from '../text/index.js';
 import { checkCancelled } from '../../core/errors.js';
-import { yieldToUI } from '../../core/dom.js';
+import { pause } from './pause.js';
 
 const WHITE = 0xffffffff;
 
@@ -102,7 +102,7 @@ class PptxConverter {
   async breathe() {
     checkCancelled(this.signal);
     if (now() - this.lastBreath > SLICE) {
-      await yieldToUI();
+      await pause();
       this.lastBreath = now();
       checkCancelled(this.signal);
     }
@@ -372,8 +372,8 @@ class PptxConverter {
    */
   async guarded(canvas, shape, draw) {
     await this.breathe();
-    const depth = canvas.stack?.length ?? 0;
-    canvas.save();
+    // As the app's restoreToCount(save()): a shape that fails partway leaves nothing it saved.
+    const saved = canvas.save();
     try {
       await draw();
     } catch (e) {
@@ -381,7 +381,7 @@ class PptxConverter {
       // Left out.
       this.hooks.onLeftOut?.(e, shape?.name ?? '');
     } finally {
-      if (canvas.stack) while (canvas.stack.length > depth) canvas.restore();
+      if (typeof canvas.restoreToCount === 'function') canvas.restoreToCount(saved);
       else canvas.restore();
     }
   }

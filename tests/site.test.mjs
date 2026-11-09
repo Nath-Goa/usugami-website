@@ -5,15 +5,20 @@
 // Each page is opened in the sub-folder (as on GitHub Pages) at 320, 412, 768 and 1280 px wide in
 // Chromium, and at phone size in Firefox and WebKit: no errors or outside requests, no horizontal
 // scrolling, every image loads, every internal link and #anchor resolves, headings in order, touch
-// targets, the menu, the theme from the web app's settings, and screenshots (light and dark) in
-// tests/output/. Before that, the checker is run on the website pages and on a site with mistakes,
-// and the pages' content is checked: the links every footer must have (the website's source code
-// and third-party notices), what Home and Download must say, and a Privacy page that describes
-// every kind of browser storage the web app's code uses.
+// targets, the menu, the theme from the web app's settings, no Referer sent to other sites, Home's
+// feature rows full and its screenshots as WebP (and how many bytes of images a phone loads),
+// Download's code blocks, and screenshots (light and dark) in tests/output/. The 404 page is also
+// opened through a proxy at usugami.com and github.io addresses. Before that, the checker is run
+// on the website pages and on a site with mistakes, and the pages' content is checked: the links
+// every footer must have (the website's source code and third-party notices), the canonical and
+// Open Graph tags, what Home and Download must say, and a Privacy page that describes every kind
+// of browser storage the web app's code uses and exactly the tool choices it saves.
+import { chromium } from 'playwright';
 import { withPage, root, outputDir } from './harness.mjs';
 import { checkSite, stripJsComments } from '../tools/check-site.mjs';
+import { startServer } from '../tools/serve.mjs';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -75,12 +80,27 @@ for (const run of RUNS) {
       await checkMenu(page, url, label);
       await checkTheme(page, url, label);
     }
-    if (run.browser === 'chromium' && run.viewport.width === 1280) await checkWideNav(page, url, label);
+    if (run.browser !== 'chromium' || run.viewport.width === 320) await checkReferrer(page, url, context, label);
+    if (run.browser === 'chromium' && run.viewport.width === 412) await checkHomeBytes(page, url, label);
+    if (run.browser === 'chromium' && run.viewport.width === 1280) {
+      await checkWideNav(page, url, label);
+      // The widths between the runs' where the feature cards change from two to three a row.
+      for (const width of [720, 900, 1079, 1080, 1440]) {
+        await page.setViewportSize({ width, height: 800 });
+        await page.goto(url, { waitUntil: 'load' });
+        await checkFeatureRows(page, `chromium ${width}x800 home`);
+      }
+      await page.setViewportSize(run.viewport);
+    }
     if (run.browser === 'chromium' && [320, 412, 1280].includes(run.viewport.width)) await checkDarkScreenshots(page, url);
     for (const p of PAGES) await screenshot(context, url, p, run);
   }, { browser: run.browser, viewport: run.viewport });
   console.log(`${label}: checked ${PAGES.length} pages in ${((performance.now() - started) / 1000).toFixed(1)} s`);
 }
+
+// ---------- The 404 page on the real addresses ----------
+
+await check404Hosts();
 
 if (failures.length) {
   throw new Error(`${failures.length} problem${failures.length === 1 ? '' : 's'}:\n- ` + failures.join('\n- '));
@@ -94,6 +114,171 @@ async function checkPage(page, url, p, run, label) {
   const res = await page.goto(url + p.path, { waitUntil: 'load' });
   check(res.status() === 200, `${where}: status ${res.status()}`);
   await checkLoaded(page, url, where, run);
+  if (p.name === 'home') {
+    // checkLoaded loaded every image: the screenshots come as WebP (PNG only as a fallback).
+    const shots = await page.evaluate(() => [...document.querySelectorAll('picture img')].map((i) => i.currentSrc));
+    check(shots.length === 7 && shots.every((s) => s.endsWith('.webp')), `${where}: screenshots not shown as WebP: ${shots.join(', ')}`);
+    await checkFeatureRows(page, where);
+  }
+  if (p.name === 'download') await checkDownloadBlocks(page, where);
+}
+
+/**
+ * Home's feature groups (7, 5, 4, 3 and 9 cards) leave no row part filled: each row of cards
+ * reaches both edges of its grid, at one, two or three cards to a row.
+ */
+async function checkFeatureRows(page, where) {
+  const groups = await page.evaluate(() => [...document.querySelectorAll('.feature-grid')].map((grid) => {
+    const g = grid.getBoundingClientRect();
+    const rows = new Map();
+    for (const li of grid.children) {
+      const r = li.getBoundingClientRect();
+      const top = Math.round(r.top);
+      rows.set(top, [...(rows.get(top) ?? []), r]);
+    }
+    return {
+      name: grid.closest('[aria-labelledby]')?.getAttribute('aria-labelledby'),
+      rows: [...rows.values()].map((rs) => ({
+        cards: rs.length,
+        start: Math.min(...rs.map((r) => r.left)) - g.left,
+        end: g.right - Math.max(...rs.map((r) => r.right)),
+      })),
+    };
+  }));
+  check(groups.length === 5, `${where}: ${groups.length} feature groups, expected 5`);
+  for (const g of groups) {
+    const gaps = g.rows.filter((r) => r.start > 1 || r.end > 1);
+    check(!gaps.length, `${where}: ${g.name} has rows that don't fill the width (cards per row ${g.rows.map((r) => r.cards).join('+')}; gaps ${gaps.map((r) => `${r.start.toFixed(0)}/${r.end.toFixed(0)}px`).join(', ')})`);
+  }
+}
+
+/**
+ * Download: a code block that scrolls sideways can be focused (WebKit doesn't focus scrollers by
+ * itself), the lines to paste wrap instead, and the Obtainium link's "(the main edition)" stays
+ * whole, under the link's text when it doesn't fit beside it.
+ */
+async function checkDownloadBlocks(page, where) {
+  const pres = await page.evaluate(() => [...document.querySelectorAll('pre')].map((pre) => {
+    pre.focus();
+    return {
+      label: pre.getAttribute('aria-label') ?? pre.textContent.slice(0, 30),
+      scrolls: pre.scrollWidth > pre.clientWidth + 1,
+      paste: pre.classList.contains('select-all'),
+      focusable: document.activeElement === pre && pre.tabIndex === 0,
+      named: pre.getAttribute('role') === 'region' && !!pre.getAttribute('aria-label'),
+    };
+  }));
+  for (const p of pres) {
+    if (p.paste) check(!p.scrolls, `${where}: the lines to paste (${p.label}) scroll sideways instead of wrapping`);
+    else if (p.scrolls) check(p.focusable && p.named, `${where}: code block "${p.label}" scrolls sideways but can't be focused or has no name`);
+  }
+  const note = await page.evaluate(() => {
+    const n = document.querySelector('#obtainium .link-note');
+    if (!n) return null;
+    const r = n.getBoundingClientRect();
+    return { height: r.height, line: parseFloat(getComputedStyle(n).lineHeight), left: r.left, textLeft: n.parentElement.getBoundingClientRect().left };
+  });
+  check(note, `${where}: no "(the main edition)" note in the Obtainium links`);
+  if (note) {
+    check(note.height < note.line * 1.5, `${where}: "(the main edition)" breaks over lines (${note.height.toFixed(0)}px tall)`);
+    check(note.left >= note.textLeft - 0.5, `${where}: "(the main edition)" starts left of the link's text`);
+  }
+}
+
+/** Links to other sites send no Referer (meta referrer no-referrer): try the footer's source link. */
+async function checkReferrer(page, url, context, label) {
+  const seen = [];
+  const handler = async (route) => {
+    seen.push({ url: route.request().url(), referer: (await route.request().allHeaders()).referer ?? '' });
+    await route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>stub</title><p>stub</p>' });
+  };
+  await context.route('https://github.com/**', handler);
+  try {
+    for (const p of PAGES) {
+      if (p.status) continue;
+      await page.goto(url + p.path, { waitUntil: 'load' });
+      await Promise.all([page.waitForURL(SOURCE), page.locator(`footer a[href="${SOURCE}"]`).click()]);
+    }
+  } finally {
+    await context.unroute('https://github.com/**', handler);
+  }
+  const sent = seen.filter((s) => s.referer);
+  check(seen.length >= 3 && !sent.length, `${label} referrer: ${seen.length} requests to github.com, with Referer: ${sent.map((s) => `${s.url} <- ${s.referer}`).join('; ')}`);
+}
+
+/**
+ * Home on a phone, as a visitor scrolls through it: the images it downloads stay small (the
+ * screenshots are WebP; as PNGs they were 227 KiB). The hidden hero pictures aren't downloaded.
+ */
+async function checkHomeBytes(page, url, label) {
+  await page.goto(url, { waitUntil: 'load' });
+  const images = await page.evaluate(async () => {
+    for (let y = 0; y <= document.documentElement.scrollHeight; y += 400) {
+      scrollTo(0, y);
+      await new Promise((r) => setTimeout(r, 30));
+    }
+    await Promise.all([...document.querySelectorAll('.shots img')].map((i) => i.decode().catch(() => {})));
+    const sizes = new Map();
+    for (const e of performance.getEntriesByType('resource')) {
+      if (/\.(png|webp|jpe?g|svg|gif|avif)$/.test(new URL(e.name).pathname)) sizes.set(e.name, e.encodedBodySize);
+    }
+    return [...sizes];
+  });
+  const total = images.reduce((sum, [, size]) => sum + size, 0);
+  check(images.some(([name]) => name.endsWith('.webp')) && !images.some(([name]) => /screenshots\/\w+\.png$/.test(name)), `${label} home: screenshots not loaded as WebP: ${images.map(([n]) => n.slice(url.length)).join(', ')}`);
+  check(total > 50_000 && total < 170_000, `${label} home: ${(total / 1024).toFixed(0)} KiB of images on a phone, expected under 166 KiB (${images.map(([n, s]) => `${n.slice(url.length)} ${s}`).join(', ')})`);
+  console.log(`${label} home: ${(total / 1024).toFixed(0)} KiB of images (${images.length} files)`);
+}
+
+/**
+ * The 404 page at the site's real addresses, through a proxy: on usugami.com (and www) the site is
+ * at the root, even for an address starting with the old sub-folder; on github.io it is in the
+ * sub-folder. Its base, both stylesheets and its three buttons must work.
+ */
+async function check404Hosts() {
+  const atRoot = await startServer({});
+  const inFolder = await startServer({ prefix: 'usugami-website' });
+  const cases = [
+    [atRoot, 'http://usugami.com/usugami-website/app/x', 'http://usugami.com/'],
+    [atRoot, 'http://usugami.com/usugami-website/download/', 'http://usugami.com/'],
+    [atRoot, 'http://www.usugami.com/usugami-website/', 'http://www.usugami.com/'],
+    [atRoot, 'http://usugami.com/nope/deeper', 'http://usugami.com/'],
+    [inFolder, 'http://nath-goa.github.io/usugami-website/a/b/c', 'http://nath-goa.github.io/usugami-website/'],
+  ];
+  try {
+    for (const server of [atRoot, inFolder]) {
+      const origin = new URL(server.url).origin;
+      const browser = await chromium.launch({ proxy: { server: origin } });
+      try {
+        const page = await browser.newPage();
+        for (const [, address, base] of cases.filter(([s]) => s === server)) {
+          const where = `404 at ${address}`;
+          const res = await page.goto(address, { waitUntil: 'load' });
+          check(res.status() === 404, `${where}: status ${res.status()}`);
+          const info = await page.evaluate(() => ({
+            base: document.baseURI,
+            sheets: [...document.styleSheets].map((s) => { try { return s.cssRules.length; } catch { return 0; } }),
+            background: getComputedStyle(document.body).backgroundColor,
+            links: [...document.querySelectorAll('.btn-row a, .brand')].map((a) => a.href),
+          }));
+          check(info.base === base, `${where}: base is ${info.base}, expected ${base}`);
+          check(info.sheets.length === 2 && info.sheets.every((n) => n > 0), `${where}: stylesheets didn't load (${info.sheets.join(', ')} rules)`);
+          check(info.background !== 'rgba(0, 0, 0, 0)', `${where}: the page isn't styled`);
+          check(info.links.length === 4 && info.links.every((l) => l.startsWith(base)), `${where}: links ${info.links.join(', ')}`);
+          for (const link of info.links) {
+            const status = (await fetch(origin + new URL(link).pathname, { redirect: 'manual' })).status;
+            check(status === 200, `${where}: ${link} answers ${status}`);
+          }
+        }
+      } finally {
+        await browser.close();
+      }
+    }
+    console.log(`404 page: right root at ${cases.length} addresses on usugami.com and github.io`);
+  } finally {
+    await atRoot.close();
+    await inFolder.close();
+  }
 }
 
 /**
@@ -287,6 +472,9 @@ async function checkTheme(page, url, label) {
   check((await bg())[1] === 'rgb(255, 248, 247)', `${where}: light background is ${(await bg())[1]}`);
   await page.emulateMedia({ colorScheme: 'dark' });
   check((await bg())[1] === 'rgb(23, 23, 23)', `${where}: dark background is ${(await bg())[1]}`);
+  // tokens.css's --paper (behind page pictures, as the app's white PdfThumbnail box) stays white.
+  const paper = () => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--paper').trim().toLowerCase());
+  check(await paper() === '#ffffff', `${where}: --paper is ${await paper()} in dark mode, expected #ffffff`);
 
   await page.evaluate(() => localStorage.setItem('usugami.settings', JSON.stringify({ appearance: 'light', language: 'en' })));
   await page.reload({ waitUntil: 'load' });
@@ -298,6 +486,7 @@ async function checkTheme(page, url, label) {
   await page.goto(url + 'privacy/', { waitUntil: 'load' });
   [theme, color, meta] = await bg();
   check(theme === 'dark' && color === 'rgb(23, 23, 23)' && meta === '#171717', `${where}: Dark in the app's settings gave ${theme} ${color} ${meta}`);
+  check(await paper() === '#ffffff', `${where}: --paper is ${await paper()} with Dark chosen, expected #ffffff`);
   await page.screenshot({ path: await outPath(`site-privacy-chromium-${page.viewportSize().width}-dark-setting.png`), caret: 'initial' });
 
   for (const bad of ['not json', 'null', '{"appearance":"blue"}', '{"appearance":"system"}']) {
@@ -352,7 +541,26 @@ function checkContent() {
   for (const [name, html] of Object.entries(pages)) {
     const links = hrefs(part(html, /<footer[\s\S]*?<\/footer>/));
     for (const l of [SOURCE, NOTICES, 'https://github.com/Nath-Goa/usugami']) check(links.includes(l), `${name}: the footer doesn't link to ${l}`);
+    // Links to other sites don't tell them that the visitor came from Usugami.
+    check(/<meta name="referrer" content="no-referrer">/.test(part(html, /<head>[\s\S]*?<\/head>/)), `${name}: no <meta name="referrer" content="no-referrer"> in the head`);
   }
+
+  // The domain is linked: each page names its address on https://usugami.com/ (canonical) and
+  // gives link previews (Open Graph) the social preview image. The 404 page has none.
+  for (const [name, path] of [['home', ''], ['download', 'download/'], ['privacy', 'privacy/']]) {
+    const head = part(pages[name], /<head>[\s\S]*?<\/head>/).replace(/<!--[\s\S]*?-->/g, ' ');
+    const canonical = [...head.matchAll(/<link rel="canonical" href="([^"]*)">/g)].map((m) => m[1]);
+    const address = `https://usugami.com/${path}`;
+    check(canonical.length === 1 && canonical[0] === address, `${name}: needs one <link rel="canonical" href="${address}">, has ${canonical.join(', ') || 'none'}`);
+    const og = (p) => head.match(new RegExp(`<meta property="og:${p}" content="([^"]*)">`))?.[1];
+    check(og('url') === address, `${name}: og:url is ${og('url')}, expected ${address}`);
+    check(og('title') === head.match(/<title>([^<]*)<\/title>/)?.[1], `${name}: og:title differs from the title`);
+    check(og('image') === 'https://usugami.com/assets/img/social-preview.png', `${name}: og:image is ${og('image')}`);
+  }
+  check(existsSync(join(root, 'site', 'assets', 'img', 'social-preview.png')), 'og:image: site/assets/img/social-preview.png is missing');
+  check(!/rel="canonical"/.test(pages[404].replace(/<!--[\s\S]*?-->/g, ' ')), '404: should have no canonical address');
+  // Without JavaScript, the 404 page's note leads to the home page on the domain, over HTTPS.
+  check(hrefs(part(pages[404], /<noscript>\s*<p>[\s\S]*?<\/noscript>/)).includes('https://usugami.com/'), '404: the noscript note should link to https://usugami.com/');
 
   // Home: the web app first, then the Android app; the features as in the app's README; Download,
   // Privacy, and the website's source.
@@ -370,6 +578,18 @@ function checkContent() {
       'Usugami watermark', 'Off unless you turn it on']) {
       check(text.includes(words), `home: doesn't say "${words}"`);
     }
+    // The service worker keeps the app's shell when installed and each tool's files as it is used
+    // (site/app/sw.js), so the web app's card promises offline use only for tools used before.
+    const webCard = pageText(part(main, /<article class="card way" aria-labelledby="way-web">[\s\S]*?<\/article>/));
+    const offline = webCard.split(/(?<=\.)\s+/).filter((s) => /offline/i.test(s));
+    check(offline.length && offline.every((s) => /\bused\b/.test(s)), `home: the web app's card should promise offline use only for the tools used once: "${offline.join(' ')}"`);
+    // Four languages: the web app's own languages (site/app/locales/languages.js) as they are.
+    const languages = stripJsComments(readFileSync(join(root, 'site', 'app', 'locales', 'languages.js'), 'utf8'));
+    const codes = [...part(languages, /LANGUAGES\s*=\s*\[[\s\S]*?\]/).matchAll(/code:\s*'([^']+)'/g)].map((m) => m[1]);
+    check(codes.includes('en'), `home: couldn't read the web app's languages (${codes.join(', ')})`);
+    const englishOnly = codes.length === 1;
+    check(text.includes('The web app is in English for now') === englishOnly,
+      `home: the Four languages card should ${englishOnly ? '' : 'no longer '}say the web app is in English for now (the web app has ${codes.join(', ')})`);
   }
 
   // Download: GitHub releases, Obtainium and Usugami's F-Droid repository, as in the app's README.
@@ -386,8 +606,19 @@ function checkContent() {
     const text = pageText(main);
     for (const words of ['https://nathank.me/usugami/fdroid/repo', '8D92FFB46DB5C052B334438D8E012974D3969A27EACFF4AEEE687B99A4760DA8',
       'It serves Usugami (with the open-source text recognition of Usugami OCR) and Usugami Lite',
-      '6F:4F:23:AD:E0:3E:63:6A:7C:C3:68:16:89:44:D0:CC:FC:81:32:EF:34:C5:0B:C5:A4:6B:0C:A4:CB:BD:F4:ED']) {
+      '6F:4F:23:AD:E0:3E:63:6A:7C:C3:68:16:89:44:D0:CC:FC:81:32:EF:34:C5:0B:C5:A4:6B:0C:A4:CB:BD:F4:ED',
+      // How to add the F-Droid repository, as on its own page (pdfer/fdroid/site/index.html).
+      'Settings → Repositories → +', 'Then search for Usugami and install the app you want']) {
       check(text.includes(words), `download: doesn't say "${words}"`);
+    }
+    // One tap adds the repository in F-Droid, Droid-ify or Neo Store, with its fingerprint.
+    check(links.includes('fdroidrepos://nathank.me/usugami/fdroid/repo?fingerprint=8D92FFB46DB5C052B334438D8E012974D3969A27EACFF4AEEE687B99A4760DA8'),
+      'download: no "Add to F-Droid" link (fdroidrepos:// with the repository fingerprint)');
+    // Code blocks: lines to paste wrap (select-all), and the others, which can scroll sideways on
+    // phones, can be reached by keyboard and are named (Safari doesn't focus scrollers itself).
+    for (const [, attrs] of main.matchAll(/<pre([^>]*)>/g)) {
+      check(/class="select-all"/.test(attrs) || (/tabindex="0"/.test(attrs) && /role="region"/.test(attrs) && /aria-label="[^"]+"/.test(attrs)),
+        `download: <pre${attrs}> should wrap (select-all) or have tabindex="0", role="region" and an aria-label`);
     }
   }
 
@@ -395,9 +626,18 @@ function checkContent() {
   {
     const text = pageText(part(pages.privacy, /<section[^>]*aria-labelledby="on-the-web"[\s\S]*?<\/section>/));
     for (const words of ['about 5 to 8 MB', 'from this same website', 'never leave your device', 'Fonts work the same way', 'local storage',
-      'Usugami watermark switch with its size and opacity', 'IndexedDB', 'Recent files', 'service worker', 'Shared files', 'clear this site’s data']) {
+      'Usugami watermark switch with its size and opacity', 'IndexedDB', 'Recent files', 'service worker', 'Shared files', 'clear this site’s data',
+      // Files opened with the installed app (manifest file_handlers, launchQueue) reach it too.
+      'share to it or open with it',
+      // Open shows a file in a browser tab (core/output.js openFile); only Share hands it to an app.
+      'When you open a file, your browser shows it in a new tab',
+      // Only tools used once work offline (sw.js).
+      'each tool you have used',
+      // A share reaches the app only through its service worker (manifest share_target, sw.js).
+      'Without its service worker, your browser would send the shared files to this website']) {
       check(text.includes(words), `privacy: the web app's part doesn't say "${words}"`);
     }
+    check(!text.includes('When you share or open a file, it goes to the app you pick'), 'privacy: Open shows the file in a browser tab, not in an app the visitor picks');
     // Every kind of browser storage the web app's own code uses (vendor/ aside) is described there.
     const kinds = [
       { re: /\blocalStorage\b/, words: 'local storage' },
@@ -407,6 +647,7 @@ function checkContent() {
       { re: /\bstorage\s*\.\s*getDirectory\b/, words: 'origin private file system' },
     ];
     const used = new Map();
+    const settingKeys = new Set();
     const walk = (dir) => {
       for (const e of readdirSync(dir, { withFileTypes: true })) {
         const path = join(dir, e.name);
@@ -415,6 +656,7 @@ function checkContent() {
         } else if (/\.m?js$/.test(e.name)) {
           const code = stripJsComments(readFileSync(path, 'utf8'));
           for (const k of kinds) if (k.re.test(code)) used.set(k.words, [...(used.get(k.words) ?? []), path.slice(root.length + 1)]);
+          for (const m of code.matchAll(/\bsetSetting\(\s*'([^']+)'/g)) settingKeys.add(m[1]);
         }
       }
     };
@@ -422,6 +664,15 @@ function checkContent() {
     check(used.has('local storage') && used.has('IndexedDB'), 'privacy: the storage scan found no localStorage or IndexedDB in site/app (is the scan broken?)');
     for (const [words, files] of used) {
       check(text.includes(words), `privacy: the web app uses ${words} (${files.join(', ')}), but the Privacy page doesn't describe it`);
+    }
+    // The Settings item names exactly the tools' choices the web app saves (setSetting keys):
+    // nothing it doesn't keep (the OCR text language lives in memory only), nothing left out.
+    const settingsItem = pageText(part(part(pages.privacy, /<section[^>]*aria-labelledby="on-the-web"[\s\S]*?<\/section>/), /<li>Settings:[\s\S]*?<\/li>/));
+    check(settingKeys.has('images.pageSize'), `privacy: the setSetting scan found no images.pageSize (is the scan broken?): ${[...settingKeys].join(', ')}`);
+    for (const [words, re] of [['page size', /pageSize/], ['orientation', /orientation/], ['margins', /margin/], ['one PDF or one per image', /\.merge$/],
+      ['compression level', /compression/], ['text language', /ocr|textLanguage/i]]) {
+      const saved = [...settingKeys].some((k) => re.test(k));
+      check(settingsItem.includes(words) === saved, `privacy: the Settings item ${saved ? 'should' : 'shouldn’t'} name "${words}" (the web app saves ${[...settingKeys].join(', ')})`);
     }
   }
   console.log('content: footers, Home, Download and Privacy say what they must');
@@ -501,6 +752,13 @@ body { background: url(/bg.png); }
 `);
     await put('app/manifest.webmanifest', JSON.stringify({ start_url: '/', scope: './', icons: [{ src: 'https://example.com/i.png' }, { src: '../ok.png' }], share_target: { action: './share' } }, null, 2));
     await put('CNAME', 'usugami.com\n');
+    // Content-Security-Policy <meta>s that don't protect the page: after a <link>, without
+    // default-src, letting other hosts in, sending reports away, or in <body>.
+    await put('csp-bad.html', `<!doctype html><html><head><link rel="stylesheet" href="style.css">
+<meta http-equiv="Content-Security-Policy" content="script-src 'self' https://cdn.example.com *; img-src data: http:; report-uri https://r.example.com/x">
+</head><body></body></html>`);
+    await put('csp-body.html', `<!doctype html><html><head></head><body>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'"></body></html>`);
 
     const { problems } = checkSite({ siteDir: site });
     const text = problems.map((p) => `${p.file.split('/').slice(-2).join('/')}:${p.line} ${p.message}`);
@@ -535,11 +793,23 @@ body { background: url(/bg.png); }
       [/style\.css:5 .*"missing\.png" not found/],
       [/manifest\.webmanifest:\d+ .*start_url: root-relative/],
       [/manifest\.webmanifest:\d+ .*outside resource "https:\/\/example\.com\/i\.png"/],
+      [/csp-bad\.html:1 .*<link> comes before the page's Content-Security-Policy/],
+      [/csp-bad\.html:2 .*has no default-src/],
+      [/csp-bad\.html:2 .*script-src allows "https:\/\/cdn\.example\.com"/],
+      [/csp-bad\.html:2 .*script-src allows "\*"/],
+      [/csp-bad\.html:2 .*img-src allows "http:"/],
+      [/csp-bad\.html:2 .*report-uri sends reports/],
+      [/csp-body\.html:2 .*is in <body>/],
     ];
     for (const [re] of expect) check(text.some((t) => re.test(t)), `check-site missed ${re} in:\n    ${text.join('\n    ')}`);
     const wrong = [/share-target/, /commented/, /default\.example\.com/, /alternate/, /usugami\.com\/fr/, /github\.com\/Nath-Goa/, /#here" not found/, /#\/tool/, /ok\.js/, /\.\/share/, /svg-mask/, /data:image/, /"\.\/" /, /index\.html:7 /];
     for (const re of wrong) check(!text.some((t) => re.test(t)), `check-site wrongly reported ${re}:\n    ${text.filter((t) => re.test(t)).join('\n    ')}`);
     check(text.length === expect.length, `check-site reported ${text.length} problems, expected ${expect.length}:\n    ${text.join('\n    ')}`);
+    // As CI runs it (--require-csp): a page without a Content-Security-Policy <meta> is reported too.
+    const noCsp = (r) => r.problems.filter((p) => /no Content-Security-Policy <meta>/.test(p.message)).map((p) => p.file.split('/').slice(-2).join('/'));
+    check(noCsp(checkSite({ siteDir: site })).length === 0, 'without requireCsp, a page without a Content-Security-Policy is not reported');
+    const required = noCsp(checkSite({ siteDir: site, requireCsp: true }));
+    check(required.some((f) => /(^|\/)page\.html$/.test(f)) && required.includes('app/index.html'), `requireCsp reports page.html and app/index.html: ${required.join(', ')}`);
 
     // The command line prints a report and exits with 1 on problems, 0 on a clean site.
     const cli = spawnSync(process.execPath, [join(root, 'tools', 'check-site.mjs'), join(root, 'site', 'index.html')], { encoding: 'utf8', cwd: root });

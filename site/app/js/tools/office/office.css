@@ -93,10 +93,11 @@
   padding-block: var(--space-2);
 }
 
-/* The page, slide or chapter in the progress dialog: a line of its own under the file's name. */
+/* The page, slide or chapter in the progress dialog: a line of its own under the file's name, in
+   the dialog's text colour (the app's Text takes AlertDialog's onSurfaceVariant). */
 .office-progress-step {
   margin: 0;
-  color: var(--on-surface);
+  color: inherit;
   font-size: 0.875rem;
   line-height: 1.25rem;
 }

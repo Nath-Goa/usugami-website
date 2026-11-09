@@ -138,10 +138,12 @@ PptxConverter, XlsxText do this). Excel: `lineScale(style, officeLineHeight(name
 
 ```js
 digitWidth(style): number                 // width of "0" as a share of the size (0.572 for Noto Sans)
-widthScale(officeDigitEm, style): number  // XlsxText.widthScale: officeDigitEm / digitWidth, within 0.75..1.25; 1 if officeDigitEm is null
+widthScale(officeDigitEm, style): number  // XlsxText.widthScale: officeDigitEm / digitWidth (as the family draws it), within 0.75..1.25; 1 if officeDigitEm is null
 ```
 Excel draws cell text at the width of the workbook's font: `{ ...style, scaleX: widthScale(SheetUnits.digitEm(name), style) }`
-(`digitEm` is the spreadsheet engine's port of SheetUnits).
+(`digitEm` is the spreadsheet engine's port of SheetUnits). The digit compared is the one the
+family draws, so a condensed family's 90 % counts: 'Arial Narrow' comes out with Arial Narrow's
+digit width, not 10 % narrower (the scale goes on top of the family's own).
 
 ### Loading and characters
 
@@ -341,7 +343,7 @@ The `CanvasRenderingContext2D` subset it implements, with the same names and mea
 
 | Group | Members |
 |---|---|
-| State | `save()`, `restore()`, `reset()` |
+| State | `save()`, `restore()`, `reset()`; as Android's Canvas also `saveCount` and `restoreToCount(n)` (below) |
 | Transform | `translate`, `rotate` (radians), `scale`, `transform`, `setTransform(a,b,c,d,e,f | matrix)`, `resetTransform`, `getTransform` |
 | Paths | `beginPath`, `moveTo`, `lineTo`, `bezierCurveTo`, `quadraticCurveTo`, `arc`, `arcTo`, `ellipse`, `rect`, `roundRect`, `closePath` |
 | Painting | `fill(rule?)`, `fill(path, rule?)` (`'nonzero'` / `'evenodd'`), `stroke(path?)`, `clip(rule?)`, `clip(path, rule?)`, `fillRect`, `strokeRect`, `clearRect` (paints white: a PDF page can't be made see-through) |
@@ -354,6 +356,15 @@ The `CanvasRenderingContext2D` subset it implements, with the same names and mea
 Semantics follow the canvas: points are transformed when added to the path; line widths and
 dashes are in the transform current when stroking; invalid values (NaN, unknown colours, negative
 widths) are ignored; `clip()` keeps the path; `restore()` with nothing saved does nothing.
+
+Save depth, as Android's `Canvas`: `canvas.saveCount` is 1 with nothing saved and one more for
+each `save()` not restored; `save()` returns the count before it; `canvas.restoreToCount(n)`
+restores until `n` is left (below 1 counts as 1). Use it to undo everything a drawing saved when it
+fails partway:
+```js
+const depth = canvas.saveCount;      // or: const depth = canvas.save();
+try { drawShape(canvas); } finally { canvas.restoreToCount(depth); }
+```
 
 `PdfPath` is a Path2D-like object (same path methods, `addPath(path, matrix?)`) for
 `fill(path)`, `stroke(path)` and `clip(path)`; browser `Path2D` objects can't be read, so use
@@ -413,7 +424,10 @@ How the text is stored: Type 0 (CID) fonts, subsets of the glyphs used, each cod
 text it stands for (ToUnicode), so text reads back in its own order even where Hindi reorders or
 joins letters (pdf.js extracts "दुनिया", not "दु िनया"); words whose glyphs don't follow their
 letters are also wrapped in `/ActualText` marked content for viewers that use it. Letter spacing is
-counted in each letter's width, so spaced-out words still read as words.
+counted in each letter's width, so spaced-out words still read as words. Characters the browser
+draws (Arabic, Hebrew, Chinese, emoji…) carry invisible text over their picture; for a right-to-left
+run it is written in drawing order (whole characters reversed), as viewers expect of visual-order
+PDFs, so pdf.js and others turn it back and "مرحبا" copies and is found as typed.
 
 ---
 
@@ -458,7 +472,9 @@ addNamedDestination(doc, name, page, left, top)   // the same in page coordinate
 addOutline(doc, items)                // bookmarks; replaces the PDF's outline
 ```
 A style's `link` makes a laid-out run a link (rectangles from line top to bottom, joined across a
-line). Outline items (EpubConverter's `OutlineItem`):
+line). A tab between runs of the same link is part of it, as in Word, so a contents line linked as a
+whole (title, dot leader, page number) is one link area; a tab at either end of a link isn't.
+Outline items (EpubConverter's `OutlineItem`):
 ```js
 addOutline(doc, [
   { title: 'Chapter 1', page: 0, top: 780, children: [        // top: PDF points from the page's bottom, as the app
@@ -468,7 +484,9 @@ addOutline(doc, [
 ]);
 ```
 Titles are cut at 500 characters (the app's MAX_TITLE). Top-level items show; their children are
-folded unless the item has `open: true`. The book's title, author and language are set with
+folded unless the item has `open: true`. A page tree that loops or is damaged (pdf-lib would
+overflow its stack or throw a TypeError) makes `addOutline` and a link to `{ page }` throw
+`UserError('pdf_import_failed')`. The book's title, author and language are set with
 pdf-lib (`doc.setTitle`, `setAuthor`, `setLanguage`).
 
 ---
@@ -476,7 +494,9 @@ pdf-lib (`doc.setTitle`, `setAuthor`, `setLanguage`).
 ## Saving and copying pages
 
 pdf-lib's `doc.save()` (so `savePdf`) first runs `finishText(doc)`, which waits for pending
-pictures and text, writes every canvas's content, the font subsets and named destinations.
+pictures and text, writes every canvas's content, the font subsets and named destinations. Each
+page's content is compressed as it is written, so it gives the browser its turn (`yieldToUI`)
+every 16 ms: a long document doesn't freeze the screen, its progress or Cancel while it is saved.
 
 ```js
 await finishText(doc)   // canvas.js (and index.js)

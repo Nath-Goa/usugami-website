@@ -2,7 +2,7 @@
 // #/settings/about, #/settings/about/licenses, #/choose (Choose a tool) and #/language (the first
 // launch's language choice). Each screen is a module whose mount(ctx) renders into ctx.root, loaded
 // when first shown. The browser's Back goes back as the app's back arrow does, and asks first when
-// the screen has unsaved work.
+// the screen has unsaved work; with a dialog or menu open it closes that instead, as Android's Back.
 import { TOOLS } from './tools.js';
 import { h } from './dom.js';
 import { t, onLanguageChange } from './i18n.js';
@@ -41,6 +41,14 @@ let homeScroll = null;
 let skipGuardOnce = false;
 /** A history change is being answered (the discard question): others wait their turn. */
 let asking = false;
+/** The history entry (state and address) of the screen and step showing, put back when a Back only closes something. */
+let shownState = null;
+let shownUrl = '';
+/** Set while the router moves through history itself, so that move isn't taken for the user's Back. */
+let ownMove = false;
+let ownMoveTimer = 0;
+/** A screen to show once the history has gone back over the steps of the one it replaces. */
+let pendingReplace = null;
 const routeListeners = new Set();
 
 /**
@@ -115,8 +123,81 @@ async function askDiscard() {
     ...(own?.message ? { message: own.message } : {}),
     confirm: own?.confirm ?? t('discard'),
     dismiss: own?.dismiss ?? t('keep'),
-    destructive: true,
+    // A screen's own question may ask with plain buttons (Images to PDF's "Discard these images?").
+    destructive: own?.destructive ?? true,
   }));
+}
+
+/** Notes the history entry showing now, to put it back after a Back that only closes something. */
+function noteEntry() {
+  shownState = history.state;
+  shownUrl = location.href;
+}
+
+/** Whether the address and history entry are still the ones showing (an echo of our own change). */
+function atShownEntry() {
+  return location.href === shownUrl && (history.state?.idx ?? 0) === (shownState?.idx ?? 0)
+    && (history.state?.step ?? null) === (shownState?.step ?? null);
+}
+
+/** Marks the next history move as the router's own (Back over steps, after Discard...). */
+function moveOwn(fn) {
+  ownMove = true;
+  clearTimeout(ownMoveTimer);
+  // In case the move doesn't happen (nothing to go back to), the mark doesn't stay.
+  ownMoveTimer = setTimeout(() => { ownMove = false; }, 2000);
+  fn();
+}
+
+/**
+ * Puts the entry showing back after the browser's Back or Forward moved away from it while it
+ * must stay (a dialog or menu was closed instead, or a question is being asked).
+ */
+function restoreEntry(state) {
+  const from = state?.idx ?? 0;
+  const to = shownState?.idx ?? 0;
+  if (shownState && from > to) {
+    // Forward: back again to it.
+    moveOwn(() => history.go(to - from));
+  } else {
+    history.pushState(shownState ?? { usugami: 1, idx: current?.idx ?? 0 }, '', shownUrl || location.href);
+  }
+}
+
+/** Closes the kit's popup menu showing, if any (it goes with the screen it was opened on). */
+function closeMenu() {
+  const scrim = document.querySelector('.ui-menu-scrim');
+  if (!scrim) return false;
+  // The kit's menu closes on a press on its scrim.
+  try {
+    scrim.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+  } catch {
+    scrim.dispatchEvent(new Event('pointerdown', { bubbles: true, cancelable: true }));
+  }
+  // One that didn't close goes anyway.
+  if (scrim.isConnected) {
+    scrim.remove();
+    for (const m of document.querySelectorAll('.ui-menu')) m.remove();
+  }
+  return true;
+}
+
+const closing = (d) => d.classList.contains('is-closing') || !d.open || !d.isConnected;
+
+/**
+ * Closes the popup menu or the topmost dialog showing, as Android's Back does before it leaves a
+ * screen: a dialog is dismissed as its Cancel or Keep would. Returns true when one closed; a
+ * dialog that can't be dismissed (the progress of work under way) stays, and Back goes on as
+ * without it.
+ */
+function closeTopOverlay() {
+  if (closeMenu()) return true;
+  const open = Array.from(document.querySelectorAll('dialog[open]')).filter((d) => !closing(d));
+  const top = open[open.length - 1];
+  if (!top) return false;
+  // Kit dialogs (and the signature pad) answer 'cancel' as Escape does.
+  top.dispatchEvent(new Event('cancel', { cancelable: true }));
+  return closing(top);
 }
 
 function emitRouteChange() {
@@ -171,13 +252,37 @@ function showProblem(root, route, kind) {
     h('header', { class: 'shell-bar' },
       h('button', { type: 'button', class: 'shell-icon-button', 'aria-label': t('back'), onClick: () => back() }, icon('arrow_back')),
       h('h1', { class: 'shell-bar-title' }, name)),
-    h('div', { class: 'shell-problem', role: 'alert' },
-      icon(kind === 'network' ? 'cloud_off' : 'error_outline', { size: 48 }),
-      h('p', null, t(key, name)),
-      h('div', { class: 'shell-problem-actions' },
-        kind === 'missing' ? null : h('button', { type: 'button', class: 'shell-button shell-button-filled', onClick: () => navigate(route.path + queryString(route.query), { force: true }) }, t('web_try_again')),
-        h('button', { type: 'button', class: 'shell-button shell-button-outlined', onClick: () => navigate('/', { replace: true }) }, t('web_go_home')))),
+    h('main', { 'data-main': '' },
+      h('div', { class: 'shell-problem', role: 'alert' },
+        icon(kind === 'network' ? 'cloud_off' : 'error_outline', { size: 48 }),
+        h('p', null, t(key, name)),
+        h('div', { class: 'shell-problem-actions' },
+          kind === 'missing' ? null : h('button', { type: 'button', class: 'shell-button shell-button-filled', onClick: () => navigate(route.path + queryString(route.query), { force: true }) }, t('web_try_again')),
+          h('button', { type: 'button', class: 'shell-button shell-button-outlined', onClick: () => navigate('/', { replace: true }) }, t('web_go_home'))))),
   );
+  markMain(root);
+  setTitle(route, root);
+}
+
+/**
+ * Makes the screen's content its main landmark: the element marked data-main gets role=main when
+ * the screen has no <main>, and id="content" (where the skip link leads) when it has no id.
+ */
+function markMain(root) {
+  let main = root.querySelector('main, [role="main"]');
+  if (!main) {
+    main = root.querySelector('[data-main]');
+    main?.setAttribute('role', 'main');
+  }
+  if (main && !main.id && !document.getElementById('content')) main.id = 'content';
+}
+
+/** The tab's title: the screen's name and Usugami ("Merge PDF – Usugami"); just Usugami on Home. */
+function setTitle(route, root) {
+  let name = null;
+  if (route.name === 'tool') name = t(TOOLS[route.id].title);
+  else if (route.name !== 'home') name = root?.querySelector('h1')?.textContent?.trim() || null;
+  document.title = name ? t('web_page_title', name) : t('app_name');
 }
 
 function queryString(query) {
@@ -209,6 +314,9 @@ async function show(path, state, { files = null, params = null, initial = false 
   const from = state?.from ?? null;
   const depth = depthOf(route, from);
   const prev = current;
+  // A menu opened on the screen being left goes with it.
+  closeMenu();
+  noteEntry();
   if (prev) {
     if (prev.route.name === 'home') homeScroll = window.scrollY;
     try {
@@ -286,9 +394,20 @@ async function show(path, state, { files = null, params = null, initial = false 
   progress.remove();
   root.removeAttribute('aria-busy');
   current.handle = handle;
+  markMain(root);
+  setTitle(route, root);
   if (route.name === 'home' && homeScroll != null) window.scrollTo(0, homeScroll);
   else if (!initial) window.scrollTo(0, 0);
-  focusHeading(root);
+  // Coming back, a screen may put the focus where it was (Home: the card of the tool left).
+  let focused = false;
+  if (!forward && typeof handle.restoreFocus === 'function') {
+    try {
+      focused = !!handle.restoreFocus();
+    } catch {
+      focused = false;
+    }
+  }
+  if (!focused) focusHeading(root);
 }
 
 /**
@@ -297,18 +416,38 @@ async function show(path, state, { files = null, params = null, initial = false 
  * the current history entry instead of adding one; `from` is where the back arrow leads when
  * there is no page to go back to (a tool opened from Choose a tool passes '/choose'); `force`
  * shows the screen again even when it is showing already. It doesn't ask about unsaved work:
- * callers that leave a tool on their own decide that.
+ * callers that leave a tool on their own decide that. `replaceScreen` opens it in place of the
+ * screen showing (unless that is Home), as the app opens files shared to it: that screen's steps
+ * and its own history entry go, so Back then leads where Back from that screen would have (Home,
+ * in the usual flow).
  * @example navigate('/tool/scan', { files })
  * @param {string} path
- * @param {{ files?: object[], params?: object, replace?: boolean, from?: string, force?: boolean }} [options]
+ * @param {{ files?: object[], params?: object, replace?: boolean, from?: string, force?: boolean, replaceScreen?: boolean }} [options]
  * @returns {Promise<void>} resolves once the screen has mounted
  */
-export function navigate(path, { files, params, replace = false, from, force = false } = {}) {
+export function navigate(path, { files, params, replace = false, from, force = false, replaceScreen = false } = {}) {
   const route = parsePath(path);
   const target = route ? route.path + queryString(route.query) : '/';
   if (!container) {
     location.hash = '#' + target;
     return Promise.resolve();
+  }
+  if (replaceScreen && current && current.route.name !== 'home') {
+    const steps = history.state?.stepDepth ?? 0;
+    const go = () => navigate(path, { files, params, replace: true, from, force: true });
+    if (steps <= 0) return go();
+    // Back over the screen's steps first; the screen's own entry is replaced once there.
+    return new Promise((resolve) => {
+      const run = () => go().then(resolve);
+      pendingReplace = run;
+      moveOwn(() => history.go(-steps));
+      // Should the history not move (nothing there to go back to), the screen is replaced anyway.
+      setTimeout(() => {
+        if (pendingReplace !== run) return;
+        pendingReplace = null;
+        run();
+      }, 1000);
+    });
   }
   const same = current && route && route.path === current.path;
   if (same && !files && !params && !force && !from) return Promise.resolve();
@@ -328,7 +467,7 @@ function goBack() {
   const steps = state.stepDepth ?? 0;
   const parent = current ? parentOf(current.route, current.from) : '/';
   if ((state.idx ?? 0) - steps > 0) {
-    history.go(-(steps + 1));
+    moveOwn(() => history.go(-(steps + 1)));
   } else if (parent) {
     skipGuardOnce = false;
     navigate(parent, { replace: true });
@@ -369,16 +508,29 @@ export function pushStep(step) {
   history.pushState(next, '', location.href);
   current.step = step;
   current.idx = next.idx;
+  noteEntry();
 }
 
 /** Goes back one step of the screen showing (as Back would), if it is on a step. */
 export function popStep() {
-  if (current?.step != null && (history.state?.stepDepth ?? 0) > 0) history.back();
+  if (current?.step != null && (history.state?.stepDepth ?? 0) > 0) moveOwn(() => history.back());
 }
 
 /** Answers the browser's Back and Forward, and addresses typed or followed by a link. */
 async function onLocationChange() {
   if (!container) return;
+  // The router's own move. (The hashchange that may follow its popstate finds the new screen's
+  // entry noted already, and does nothing.)
+  const own = ownMove;
+  ownMove = false;
+  clearTimeout(ownMoveTimer);
+  if (pendingReplace) {
+    // Back over a replaced screen's steps is done: the new screen takes its entry.
+    const run = pendingReplace;
+    pendingReplace = null;
+    run();
+    return;
+  }
   const path = hashPath();
   let state = history.state;
   if (!state?.usugami) {
@@ -386,11 +538,18 @@ async function onLocationChange() {
     state = { usugami: 1, idx: (current?.idx ?? 0) + 1 };
     history.replaceState(state, '', location.href);
   }
+  if (current && !own && !atShownEntry() && (closeTopOverlay() || asking)) {
+    // As Android's Back: a menu or dialog showing closes first, and the screen stays; while the
+    // question about unsaved work is being asked, Back answers Keep.
+    restoreEntry(state);
+    return;
+  }
   const route = parsePath(path);
   if (current && route && route.path === current.path && (state.from ?? null) === (current.from ?? null)) {
     // The same screen, on another of its steps.
     const step = state.step ?? null;
     current.idx = state.idx ?? current.idx;
+    noteEntry();
     if (step !== current.step) {
       current.step = step;
       try {
@@ -404,8 +563,8 @@ async function onLocationChange() {
   if (asking) return;
   if (!skipGuardOnce && hasUnsavedWork()) {
     // Back to the screen being left, then ask: discarding goes back again.
-    const keep = { usugami: 1, idx: current.idx, step: current.step, ...(current.from ? { from: current.from } : {}) };
-    history.pushState(keep, '', location.pathname + location.search + '#' + current.path + queryString(current.route.query));
+    const forward = (state.idx ?? 0) > (shownState?.idx ?? 0);
+    restoreEntry(state);
     asking = true;
     let ok = false;
     try {
@@ -415,7 +574,7 @@ async function onLocationChange() {
     }
     if (ok) {
       skipGuardOnce = true;
-      history.back();
+      moveOwn(() => history.go(forward ? (state.idx ?? 0) - (shownState?.idx ?? 0) : -1));
     }
     return;
   }

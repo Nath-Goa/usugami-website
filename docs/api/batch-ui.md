@@ -14,7 +14,7 @@ work is done by `engine/compress.js` (docs/api/compress.md) and `engine/flatten.
 | `js/tools/compress/compress.css` | its styles (classes `compress-*`), loaded by batch-screen.js |
 | `js/tools/flatten/index.js` | Flatten PDF: `mount(ctx)` and `defaultFlattenName` |
 | `locales/en/compress.js`, `locales/en/flatten.js` | their strings |
-| `tests/batch-ui.test.mjs` | the tests (`node tests/batch-ui.test.mjs`, `--quick`: Chromium only, no screenshots) |
+| `tests/batch-ui.test.mjs` | the tests (`node tests/batch-ui.test.mjs`, `--quick`: Chromium only, no screenshots; `--edges`: only the shared screen's edges) |
 
 ## What the screens do
 
@@ -27,9 +27,13 @@ work is done by `engine/compress.js` (docs/api/compress.md) and `engine/flatten.
   leaves it out quietly). Those that can't be opened are left out and named once all are tried
   ("junk.pdf: Couldn't open that PDF. It may be damaged or unsupported.", several with the same
   reason together, worded for several); a PDF picked alone is told about without its name, as
-  the app does. Picking and the main button are off meanwhile.
+  the app does. Picking and the main button are off meanwhile. **Start over** (Remove on the one
+  PDF's card) while more are still opening abandons them, as the app's `startOver` abandons its
+  import: none joins the list once open, no password is asked for them, nothing is said, and
+  picking is on again at once.
 - **One PDF**: its card (thumbnail, name, "1 page · 2.2 MB", Remove = start over), Add PDFs, the
-  tool's choices, and **File name** with ".pdf".
+  tool's choices, and **File name** with ".pdf" (made afresh when the list goes back to one PDF,
+  so it shows the name given in the list meanwhile, as the app composes `OutputNameField` anew).
   - Compress PDF: "Compression" with Less / Recommended / Extreme (a change gives every PDF that
     level, as the app's `setBatchChoiceForAll`) and "Text and drawings stay sharp. Images are reduced
     where it saves space."
@@ -51,7 +55,10 @@ work is done by `engine/compress.js` (docs/api/compress.md) and `engine/flatten.
   Open, Share and Save; Save to Downloads, Save to folder…, Share or save as ZIP
   (`Compressed_PDFs.zip` / `Flattened_PDFs.zip`); "The new PDF(s) have no password." when one had a
   password. Back returns to the PDFs with their levels and names; the browser's Back and Forward
-  move between the two (`pushStep('result')`). Start over asks first while unsaved. At its top,
+  move between the two (`pushStep('result')`). Start over asks first while unsaved. A reload on the
+  result's step loses the result (as every screen's state, see Differences): the step is taken off
+  the history (`popStep`), and Forward to a result that is gone (put away by Start over, or lost
+  with a reload) stays on the PDFs. At its top,
   the Usugami watermark's switch (docs/api/mark.md): with it on, the PDFs get the watermark as they
   show, and those lines are worked out from the PDFs with it.
 - **Messages**, after the result shows, in the app's order and words (the engines' `compressNotes`
@@ -74,14 +81,18 @@ work is done by `engine/compress.js` (docs/api/compress.md) and `engine/flatten.
   - With none made there is no result: only the messages.
 - **Leaving**: `hasUnsavedWork()` is true while PDFs are being made and while a result isn't
   saved, so the router asks "Discard your changes?" first. Leaving (or unmounting) stops a run under
-  way. Cancel in the progress dialog stops it with nothing made and nothing said.
+  way, and the PDFs still opening with a password question still open (Back closes the question
+  first, as Android's Back closes a dialog). Cancel in the progress dialog stops it with nothing
+  made and nothing said.
 - Keyboard and screen readers: the level groups are radio groups named by their headings, each
   Remove names its PDF, controls that are off for a moment (while opening or making) use
   `aria-disabled` so the focus stays on them, a PDF's card removed passes the focus to the next
   Remove, and after a run with nothing made the focus is back on the main button.
 - Layout: one column, as the app's, at every width. From 840 px one PDF (and the empty card) stays
   in a 640 px column in the middle; several are the kit's grid of cards (2–3 across) under the
-  choice for all (640 px wide). The main button is the kit's `bottomBar`. Snackbars sit above it.
+  choice for all (640 px wide). The main button is the kit's `bottomBar`. Snackbars sit above it
+  (the kit lifts them above any `.ui-bottombar`). Everything between the top bar and the main
+  button is the screen's one `<main data-main>` landmark, where "Skip to content" goes.
 
 ## Exports
 
@@ -109,7 +120,8 @@ name), which is what `compressNotes` and `flattenNotes` take. The engine failing
 `web_tool_load_failed` ("Couldn't load Compress PDF. Check your internet connection and try again.").
 
 The handle: `unmount()`, `hasUnsavedWork()`, `onStep(step)` (the router's; `'result'` or null), and
-`state` (a getter, for tests): `[{ id, name, outputName, choice }]` for the PDFs listed.
+for tests two getters: `state`, `[{ id, name, outputName, choice }]` for the PDFs listed, and
+`settled`, a promise resolved once the PDFs being opened are in or left out (abandoned ones too).
 
 ```js
 import { mountPdfBatchTool } from '../compress/batch-screen.js';

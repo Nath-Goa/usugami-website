@@ -5,10 +5,11 @@ import { h, ensureCss } from '../../core/dom.js';
 import { t, loadStrings } from '../../core/i18n.js';
 import { segmented, textField, snackbar, uid } from '../../core/ui.js';
 import { UserError } from '../../core/errors.js';
+// Only the layout and the choices: the engine (pdf-lib, the text engine) loads once a PDF is added.
 import {
-  addPageNumbers, numberedPages, numberedEach, PAGE_NUMBER_POSITIONS, DEFAULT_POSITION, DEFAULT_SIZE,
-} from '../../engine/stamps.js';
-import { mountStampTool, optionHeading } from './stamp-screen.js';
+  numberedPages, numberedEach, PAGE_NUMBER_POSITIONS, DEFAULT_POSITION, DEFAULT_SIZE,
+} from '../../engine/stamps-layout.js';
+import { mountStampTool, optionHeading, loadStampsEngine } from './stamp-screen.js';
 
 const POSITIONS = Object.keys(PAGE_NUMBER_POSITIONS);
 const POSITION_LABELS = {
@@ -49,6 +50,7 @@ export async function mount(ctx) {
       }
       const longest = Math.max(...counts);
       const { position, size, skip } = state;
+      const { addPageNumbers } = await loadStampsEngine();
       // Each PDF reads the pages to skip as checked here; one with every page skipped is left out,
       // and the batch names it (batch_nothing_to_number).
       return (src, index, name, hooks) => addPageNumbers(

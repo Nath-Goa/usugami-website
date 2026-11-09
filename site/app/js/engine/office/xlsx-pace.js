@@ -1,7 +1,7 @@
 // Long loops over a workbook's rows and cells check for cancelling and now and then let the page
 // paint and handle input, without paying for an await on every row.
 import { checkCancelled } from '../../core/errors.js';
-import { yieldToUI } from '../../core/dom.js';
+import { pause } from './pause.js';
 
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
@@ -19,9 +19,9 @@ export class Pace {
     return now() - this.last >= this.budget;
   }
 
-  /** Lets the page breathe, then checks for cancelling again. */
+  /** Lets the page breathe (in a new task, not after a timer: see pause.js), then checks for cancelling again. */
   async breathe() {
-    await yieldToUI();
+    await pause();
     this.last = now();
     checkCancelled(this.signal);
   }

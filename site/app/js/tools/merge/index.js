@@ -9,21 +9,26 @@ import {
   topBar, button, iconButton, bottomBar, textField, emptyState, dropZone, linearProgress, snackbar, uid,
 } from '../../core/ui.js';
 import { pickFiles } from '../../core/files.js';
-import { openPdf, reportFileProblems } from '../../core/pdfdoc.js';
-import { CancelledError } from '../../core/errors.js';
+import { openPdf, reportFileProblems, preloadPdfJs } from '../../core/pdfdoc.js';
+import { CancelledError, UserError } from '../../core/errors.js';
 import { PageList, pageKey, pagesOf, samePages, turnedKey, enginePages } from './page-list.js';
 import { reorderList } from './reorder-list.js';
-import { problemText, runWithProgress, resultScreen } from './tool-run.js';
+import { problemText, runWithProgress, resultScreen, engineLoader, setOff } from './tool-run.js';
 import { turnedThumb } from './thumbs.js';
+import { defaultName as nameFor } from '../../engine/page-selection.js';
 
 /** Renders Merge PDF into ctx.root. */
 export async function mount(ctx) {
-  const [engine] = await Promise.all([
-    import('../../engine/organize.js'),
+  // pdf.js (about 460 kB) loads while a PDF is being chosen; pdfdoc.js imports it only on demand.
+  preloadPdfJs();
+  await Promise.all([
     loadStrings('merge'),
     ensureCss(new URL('./merge.css', import.meta.url)),
   ]);
-  const defaultName = engine.defaultName('merge');
+  // The engine (pdf-lib) loads behind the screen, which shows at once; Merge waits for it if need be.
+  const loadEngine = engineLoader(() => import('../../engine/organize.js'));
+  loadEngine().catch(() => {});
+  const defaultName = nameFor('merge');
 
   /** The PDFs, in the order they are merged: { id, name, size, pageCount, src, bytes, password }. */
   let inputs = [];
@@ -122,12 +127,23 @@ export async function mount(ctx) {
     h('div', { class: 'merge-mode-text' }, hint, needTwo, filesSection),
     h('div', { class: 'merge-add' }, addButton, pagesSection),
     nameField);
-  const page = h('div', { class: 'page page--narrow merge-page', 'data-main': '' }, busy, empty, content);
+  const page = h('main', { class: 'page page--narrow merge-page', 'data-main': '' }, busy, empty, content);
   const run = button({ label: t('pdf_merge_action'), onClick: () => merge() });
   const view = h('div', { class: 'merge-view' }, bar, page, bottomBar(run));
   ctx.root.append(view);
-  // Files dropped or pasted once PDFs are listed are added too.
-  const detachDrop = dropZone(page, { accept: 'pdf', multiple: true, onFiles: (items) => add(items) });
+  // Files dropped or pasted once PDFs are listed are added too. Without any, the "Add PDFs" card
+  // takes them: one drop zone at a time, as one around the other would stay marked after a drop
+  // on the inner one (which keeps the drop to itself).
+  let detachDrop = null;
+  const pageDrop = (on) => {
+    if (on && !detachDrop) {
+      detachDrop = dropZone(page, { accept: 'pdf', multiple: true, onFiles: (items) => add(items) });
+    } else if (!on && detachDrop) {
+      detachDrop();
+      detachDrop = null;
+      page.classList.remove('is-dragover');
+    }
+  };
 
   const result = resultScreen(ctx, view, { onStartOver: () => startOver() });
 
@@ -238,7 +254,8 @@ export async function mount(ctx) {
     // The focus goes to the next file's Remove button, as the row with it has gone.
     const next = inputs[Math.min(index, inputs.length - 1)];
     if (next) fileList.rowOf(next.id)?.el.querySelector('.merge-file-remove')?.focus();
-    else addButton.focus();
+    // The last one gone, the list and Add PDFs are hidden: the "Add PDFs" card takes the focus.
+    else empty.focus({ preventScroll: true });
   }
 
   function removePage(key) {
@@ -264,7 +281,7 @@ export async function mount(ctx) {
   // Adding PDFs
 
   async function pick() {
-    if (importing || processing) return;
+    if (importing || processing || !alive) return;
     const items = await pickFiles({ accept: 'pdf', multiple: true });
     if (items.length) await add(items);
   }
@@ -272,8 +289,6 @@ export async function mount(ctx) {
   /** Opens `items` one after another, asking for passwords in turn, and adds them at the end. */
   async function add(items) {
     if (!items?.length || importing || processing || !alive) return;
-    // Add PDFs is off while they are added, and gets the focus back after if it had it.
-    const refocus = document.activeElement === addButton;
     importing = true;
     render();
     const refused = [];
@@ -309,9 +324,11 @@ export async function mount(ctx) {
         if (items.length === 1) refused.forEach((r) => snackbar(problemText(r.error, 'pdf_import_failed')));
         else if (refused.length) reportFileProblems(refused);
         render();
+        // Add PDFs keeps the focus (it is only marked off meanwhile); the card picked from has
+        // gone once PDFs are listed, so the focus goes to the switch above them.
         const a = document.activeElement;
-        const lost = !a || a === document.body || empty.contains(a);
-        if (inputs.length && (lost || refocus)) (refocus ? addButton : modeRow).focus({ preventScroll: true });
+        const lost = !a || a === document.body || !a.isConnected || empty.contains(a);
+        if (inputs.length && lost) modeRow.focus({ preventScroll: true });
       }
     }
   }
@@ -328,7 +345,9 @@ export async function mount(ctx) {
   // -------------------------------------------------------------------------------------------
   // Merging
 
-  const ready = () => inputs.length >= 2 && (!pageMode || pages.length > 0) && !importing && !processing;
+  // Enough to merge; and not busy opening PDFs or making one.
+  const enough = () => inputs.length >= 2 && (!pageMode || pages.length > 0);
+  const ready = () => enough() && !importing && !processing;
 
   async function merge() {
     if (!ready()) return;
@@ -336,7 +355,13 @@ export async function mount(ctx) {
     render();
     const sources = inputs.map((i) => ({ id: i.id, name: i.name, bytes: i.bytes, password: i.password || undefined }));
     const selected = pageMode ? enginePages(pages.pages) : null;
-    const out = await runWithProgress((hooks) => engine.mergePdfs(sources, { pages: selected, fileName }, hooks));
+    // Leaving the tool stops the work, and takes its progress dialog away with it.
+    const out = await runWithProgress(async (hooks) => {
+      const engine = await loadEngine().catch(() => null);
+      // Offline before the tool was ever used whole.
+      if (!engine) throw new UserError('web_tool_load_failed', t('tool_merge'));
+      return engine.mergePdfs(sources, { pages: selected, fileName }, hooks);
+    }, { signal: leaving.signal });
     processing = false;
     if (!alive) return;
     render();
@@ -351,6 +376,7 @@ export async function mount(ctx) {
     pages.set([]);
     setName(defaultName);
     render();
+    empty.focus({ preventScroll: true });
   }
 
   // -------------------------------------------------------------------------------------------
@@ -360,7 +386,10 @@ export async function mount(ctx) {
     const has = inputs.length > 0;
     busy.hidden = !importing;
     empty.hidden = has;
-    empty.disabled = importing;
+    // Marked off rather than disabled, which would throw the keyboard focus out of it (to the
+    // page itself, where a password dialog closing would leave it).
+    setOff(empty, importing);
+    pageDrop(has);
     content.hidden = !has;
     modeRow.setAttribute('aria-checked', String(pageMode));
     track.setAttribute('aria-checked', String(pageMode));
@@ -371,8 +400,10 @@ export async function mount(ctx) {
     pagesSection.hidden = !pageMode;
     if (pageMode && !fromList) pageList.setItems(pages.pages);
     setText(noPages, pageMode && !pages.length ? t('pdf_need_page') : '');
-    addButton.disabled = importing;
-    run.disabled = !ready();
+    setOff(addButton, importing);
+    // While busy only marked off, so the focus stays on it (and comes back to it after Cancel).
+    run.disabled = !enough();
+    setOff(run, importing || processing);
   }
 
   function setText(el, text) {
@@ -386,7 +417,7 @@ export async function mount(ctx) {
     unmount() {
       alive = false;
       leaving.abort();
-      detachDrop();
+      pageDrop(false);
       empty.detachDrop?.();
       fileList.destroy();
       pageList.destroy();

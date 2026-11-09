@@ -5,6 +5,7 @@ import { h, clear, ensureCss, announce } from './dom.js';
 import { t, tp } from './i18n.js';
 import { icon } from './icons.js';
 import { toFileItems, fileKind, kindOfName, kindOfType, ACCEPT } from './files.js';
+import { listOfNames } from './names.js';
 
 ensureCss(new URL('../../css/components.css', import.meta.url));
 
@@ -31,12 +32,67 @@ const isRtl = (node) => getComputedStyle(node).direction === 'rtl';
 // ---------------------------------------------------------------------------------------------
 // Text that shrinks to fit (SegmentLabel, BarTitle): one line, smaller until it fits, then "…".
 
-const fitting = new Map();
+// Weakly, and watched only while in the page: a screen left behind takes its texts with it (a
+// strong list of every title ever made kept every screen, its PDFs and results, in memory).
+const fitting = new WeakMap();
 let fitObserver = null;
+// Texts taken off the page, by WeakRef: one put back is watched again once the window changes size.
+const parkedFits = new Set();
+
+// Made out here, so it holds no text of its own (the first one fitted would be kept by it).
+function onFitResize(entries) {
+  // Refitted after this delivery, so the font change can't loop back into the observer.
+  const due = [];
+  for (const e of entries) {
+    const f = fitting.get(e.target);
+    if (!f) continue;
+    if (!e.target.isConnected) {
+      // Taken off the page after being on it (a removed node gets a last, empty size). Not yet put
+      // on it: still watched, for when it is.
+      if (f.seen) park(e.target, f);
+      continue;
+    }
+    f.seen = true;
+    const w = Math.round(e.contentRect.width);
+    if (w !== f.width) {
+      f.width = w;
+      due.push(f.fit);
+    }
+  }
+  if (due.length) requestAnimationFrame(() => due.forEach((fn) => fn()));
+}
+
+function park(node, f) {
+  fitObserver.unobserve(node);
+  f.observed = false;
+  f.width = -1;
+  if (typeof WeakRef === 'undefined') return;
+  parkedFits.add(new WeakRef(node));
+  if (parkedFits.size === 1) window.addEventListener('resize', unpark);
+}
+
+function unpark() {
+  for (const ref of [...parkedFits]) {
+    const node = ref.deref();
+    if (!node || node.isConnected) parkedFits.delete(ref);
+    if (node?.isConnected) watchFit(node);
+  }
+  if (!parkedFits.size) window.removeEventListener('resize', unpark);
+}
+
+function watchFit(node) {
+  const f = fitting.get(node);
+  if (!f || f.observed || typeof ResizeObserver === 'undefined') return;
+  fitObserver ??= new ResizeObserver(onFitResize);
+  f.observed = true;
+  fitObserver.observe(node);
+}
 
 function fitText(node, min) {
   const fit = () => {
     if (!node.isConnected) return;
+    // Back on the page after a while off it (a result screen left for the tool again).
+    watchFit(node);
     node.style.fontSize = '';
     let size = parseFloat(getComputedStyle(node).fontSize) || 14;
     let guard = 40;
@@ -45,23 +101,8 @@ function fitText(node, min) {
       node.style.fontSize = size + 'px';
     }
   };
-  fitting.set(node, { fit, width: -1 });
-  if (typeof ResizeObserver === 'undefined') return fit;
-  fitObserver ??= new ResizeObserver((entries) => {
-    // Refitted after this delivery, so the font change can't loop back into the observer.
-    const due = [];
-    for (const e of entries) {
-      const f = fitting.get(e.target);
-      if (!f) continue;
-      const w = Math.round(e.contentRect.width);
-      if (w !== f.width) {
-        f.width = w;
-        due.push(f.fit);
-      }
-    }
-    if (due.length) requestAnimationFrame(() => due.forEach((fn) => fn()));
-  });
-  fitObserver.observe(node);
+  fitting.set(node, { fit, width: -1, observed: false, seen: false });
+  watchFit(node);
   return fit;
 }
 
@@ -133,6 +174,19 @@ export function bottomBar(...children) {
 // ---------------------------------------------------------------------------------------------
 // Top app bar
 
+const topBars = new WeakSet();
+let barScrollListening = false;
+
+/** Tints the bars inside whatever scrolled while it is scrolled down. */
+function onBarScroll(e) {
+  const scroller = e.target === document ? document.scrollingElement : e.target;
+  const inside = e.target === document ? document : e.target;
+  if (!scroller || typeof inside.querySelectorAll !== 'function') return;
+  for (const bar of inside.querySelectorAll('.ui-topbar')) {
+    if (topBars.has(bar)) bar.classList.toggle('is-scrolled', scroller.scrollTop > 0);
+  }
+}
+
 /**
  * The top app bar: back arrow (onBack; named backLabel, by default "Back"), a one-line title that
  * shrinks a little and then ends in "…", an optional subtitle, actions and an overflow menu. An
@@ -171,16 +225,13 @@ export function topBar({ title, subtitle, onBack, backLabel, actions = [], menu:
   bar.actions = buttons;
   bar.back = back;
 
-  // Tinted while whatever scrolls it (an ancestor, or the page) is scrolled down.
-  const onScroll = (e) => {
-    if (!bar.isConnected) {
-      document.removeEventListener('scroll', onScroll, true);
-      return;
-    }
-    const target = e.target === document ? document.scrollingElement : e.target;
-    if (target && target.contains?.(bar)) bar.classList.toggle('is-scrolled', target.scrollTop > 0);
-  };
-  document.addEventListener('scroll', onScroll, { capture: true, passive: true });
+  // Tinted while whatever scrolls it (an ancestor, or the page) is scrolled down: one listener for
+  // all bars, which finds them as the page scrolls (one per bar kept every bar, and its screen).
+  topBars.add(bar);
+  if (!barScrollListening) {
+    barScrollListening = true;
+    document.addEventListener('scroll', onBarScroll, { capture: true, passive: true });
+  }
   // A bar put on a page already scrolled starts tinted.
   requestAnimationFrame(() => {
     for (let n = bar.parentElement; n; n = n.parentElement) {
@@ -332,7 +383,8 @@ export function dropdown({ label, options, value, onChange, disabled } = {}) {
 /**
  * A row with a label (and a detail line under it) and a switch at its end; tapping anywhere on the
  * row flips it. The switch is role=switch, named by the label and described by the detail.
- * el.setChecked(b), el.setDisabled(b), el.checked, el.switch (the button).
+ * el.setChecked(b), el.setDisabled(b), el.setLabel(text), el.setDetail(text), el.checked,
+ * el.switch (the button).
  */
 export function switchRow({ label, detail, checked, onChange, disabled } = {}) {
   const id = uid('switch');
@@ -362,6 +414,8 @@ export function switchRow({ label, detail, checked, onChange, disabled } = {}) {
   row.setChecked = (b) => { state = !!b; render(); };
   row.setDisabled = (b) => { sw.disabled = !!b; row.classList.toggle('is-disabled', !!b); };
   row.setDetail = (s) => { if (detailEl) detailEl.textContent = s; };
+  // The switch is named by this text, so its name changes with it.
+  row.setLabel = (s) => { labelEl.textContent = s ?? ''; };
   Object.defineProperty(row, 'checked', { get: () => state, configurable: true });
   row.switch = sw;
   return row;
@@ -622,8 +676,15 @@ export function accepts(accept, item) {
   });
 }
 
+// The paste zones, newest last. A zone is held weakly (through its target, see zoneHolder): one
+// whose screen is gone is let go even if its detach() was never called. A zone whose target is off
+// the page for a while (a result screen showing in its place) is passed over, and takes a paste
+// again once it is back; only its detach() takes it off the list.
 const pasteZones = [];
+const zoneHolder = new WeakMap();
 let pasteListening = false;
+
+const zoneRef = (zone) => (typeof WeakRef === 'function' ? new WeakRef(zone) : { deref: () => zone });
 
 function onPaste(e) {
   const files = e.clipboardData?.files;
@@ -632,8 +693,9 @@ function onPaste(e) {
   const active = document.activeElement;
   if (active && (active.isContentEditable || /^(INPUT|TEXTAREA)$/.test(active.tagName) && !['range', 'checkbox', 'radio', 'button', 'file'].includes(active.type))) return;
   for (let i = pasteZones.length - 1; i >= 0; i--) {
-    const z = pasteZones[i];
-    if (!z.target.isConnected) { pasteZones.splice(i, 1); continue; }
+    const z = pasteZones[i].deref();
+    if (!z) { pasteZones.splice(i, 1); continue; }
+    if (!z.target.isConnected) continue;
     if (!z.target.getClientRects().length || z.target.closest('[inert]')) continue;
     const dialog = document.querySelector('dialog[open]');
     if (dialog && !dialog.contains(z.target)) return;
@@ -642,6 +704,9 @@ function onPaste(e) {
     return;
   }
 }
+
+// Drops a zone has taken the files of, so a zone around it only resets itself.
+const droppedOn = new WeakSet();
 
 // Files dropped outside a drop zone would otherwise open in the tab, leaving the app.
 let guardInstalled = false;
@@ -670,7 +735,7 @@ export function dropZone(target, { accept, multiple = true, onFiles, paste = tru
     });
     const taken = items.filter((i) => accepts(accept, i));
     const left = items.filter((i) => !taken.includes(i));
-    if (left.length) snackbar(tp('share_unsupported', left.length, left.length, left.map((i) => i.name).join(', ')));
+    if (left.length) snackbar(tp('share_unsupported', left.length, left.length, listOfNames(left.map((i) => i.name))));
     const chosen = multiple ? taken : taken.slice(0, 1);
     if (chosen.length) onFiles?.(chosen);
   };
@@ -692,9 +757,12 @@ export function dropZone(target, { accept, multiple = true, onFiles, paste = tru
   const drop = (e) => {
     if (!hasFiles(e)) return;
     e.preventDefault();
-    e.stopPropagation();
     depth = 0;
     target.classList.remove('is-dragover');
+    // The innermost zone takes the files; the drop goes on up so a zone around it lets go of its
+    // highlight too (stopped there, the outer one stayed marked as a drop target).
+    if (droppedOn.has(e)) return;
+    droppedOn.add(e);
     if (e.dataTransfer.files?.length) handle(e.dataTransfer.files);
   };
   target.addEventListener('dragenter', enter);
@@ -702,8 +770,14 @@ export function dropZone(target, { accept, multiple = true, onFiles, paste = tru
   target.addEventListener('dragleave', leave);
   target.addEventListener('drop', drop);
   const zone = { target, handle };
+  let entry = null;
   if (paste) {
-    pasteZones.push(zone);
+    // Kept alive by its target only (a WeakMap entry), so the list doesn't keep the screen.
+    if (!zoneHolder.has(target)) zoneHolder.set(target, new Set());
+    zoneHolder.get(target).add(zone);
+    for (let i = pasteZones.length - 1; i >= 0; i--) if (!pasteZones[i].deref()) pasteZones.splice(i, 1);
+    entry = zoneRef(zone);
+    pasteZones.push(entry);
     if (!pasteListening) {
       pasteListening = true;
       document.addEventListener('paste', onPaste);
@@ -714,7 +788,8 @@ export function dropZone(target, { accept, multiple = true, onFiles, paste = tru
     target.removeEventListener('dragover', over);
     target.removeEventListener('dragleave', leave);
     target.removeEventListener('drop', drop);
-    const i = pasteZones.indexOf(zone);
+    zoneHolder.get(target)?.delete(zone);
+    const i = pasteZones.indexOf(entry);
     if (i >= 0) pasteZones.splice(i, 1);
   };
 }
@@ -791,8 +866,10 @@ function openModal(surface, { cls = '', role = 'dialog', labelledBy, describedBy
  * A Material alert dialog: title, message (text or a node), and its buttons at the end: `dismiss`
  * (if given) and `confirm`. destructive: the confirm button is in the error colour and the focus
  * starts on the other one. Escape or a tap outside dismisses. Resolves true when confirmed.
+ * describe (true): the message is the dialog's description; false for a message that is controls
+ * (a list of choices), which a screen reader would otherwise read out whole as the description.
  */
-export function alertDialog({ title, message, confirm, dismiss, destructive } = {}) {
+export function alertDialog({ title, message, confirm, dismiss, destructive, describe = true } = {}) {
   const id = uid('alert');
   const cancelBtn = dismiss ? button({ label: dismiss, variant: 'text' }) : null;
   const okBtn = button({ label: confirm ?? t('ok'), variant: 'text', tone: destructive ? 'danger' : null });
@@ -803,7 +880,7 @@ export function alertDialog({ title, message, confirm, dismiss, destructive } = 
   const modal = openModal(surface, {
     role: 'alertdialog',
     labelledBy: title ? id + '-title' : null,
-    describedBy: message != null ? id + '-body' : null,
+    describedBy: message != null && describe ? id + '-body' : null,
     dismissResult: false,
     initialFocus: destructive && cancelBtn ? cancelBtn : okBtn,
   });
@@ -841,6 +918,8 @@ export function passwordDialog({ fileName, wrong = false, check, signal } = {}) 
   const canUnlock = () => field.value !== '' && !unlocking;
   const render = () => { okBtn.disabled = !canUnlock(); };
   const modal = openModal(surface, { labelledBy: id + '-title', describedBy: id + '-body', dismissResult: null, initialFocus: field.input });
+  // A very short window (400 % zoom) scrolls the dialog: the field typed in is brought into view.
+  requestAnimationFrame(() => { if (document.activeElement === field.input) field.input.scrollIntoView?.({ block: 'nearest' }); });
   const unlock = async () => {
     const password = field.value;
     if (!check) { modal.close(password); return; }
@@ -886,13 +965,19 @@ export function passwordDialog({ fileName, wrong = false, check, signal } = {}) 
  */
 export function bottomSheet({ title, content, actions, onClose, dismissible = true, cls } = {}) {
   const id = uid('sheet');
-  const handle = el('div', { class: 'ui-sheet-handle', 'aria-hidden': 'true' });
+  // The handle closes the sheet for screen readers on touch screens, which have no Escape and no
+  // scrim to tap (Material's drag handle gives TalkBack a dismiss action). Out of the Tab order:
+  // keyboards have Escape, and the focus still starts on the sheet's first control.
+  const handle = dismissible
+    ? el('button', { type: 'button', class: 'ui-sheet-handle', 'aria-label': t('web_sheet_close'), tabindex: '-1' })
+    : el('div', { class: 'ui-sheet-handle', 'aria-hidden': 'true' });
   const head = el('div', { class: 'ui-sheet-head' }, handle, title ? el('h2', { class: 'ui-dialog-title', id: id + '-title' }, title) : null);
   const body = el('div', { class: 'ui-sheet-body' }, ...[].concat(content ?? []));
   const surface = el('div', { class: 'ui-dialog-surface ui-sheet' + (cls ? ' ' + cls : '') }, head, body,
     actions?.length ? el('div', { class: 'ui-dialog-actions ui-sheet-actions' }, ...actions) : null);
   const modal = openModal(surface, { cls: 'ui-dialog--sheet', labelledBy: title ? id + '-title' : null, dismissible });
   modal.closed.then(() => onClose?.());
+  if (dismissible) handle.addEventListener('click', () => modal.close(null));
   // Swiping the handle or the title down drags the sheet, and far enough closes it.
   let startY = null;
   let dy = 0;
@@ -925,38 +1010,59 @@ export function bottomSheet({ title, content, actions, onClose, dismissible = tr
  * (fraction null: one that runs without end), a line saying how far it is (announced as it
  * changes) and a second line, and Cancel when cancellable. Like the app's, it only shows once the
  * work has taken `delay` ms (400), so quick work doesn't flash a dialog; the screen takes no input
- * meanwhile. Escape doesn't cancel. Returns { el, update(fraction|null, label?, detail?), setTitle(text), close() }.
+ * meanwhile. Escape doesn't cancel. A third line, `step` (the page, slide or chapter being made),
+ * isn't read out as it changes. Returns { el, dialog, update(fraction|null, label?, detail?, step?),
+ * setStep(text|null), setTitle(text), close() }; undefined leaves a line as it is, null or '' hides it.
  */
 export function progressDialog({ title, cancellable = true, onCancel, delay = 400 } = {}) {
   const id = uid('progress');
   const bar = linearProgress({ value: null, label: title });
   const label = el('p', { class: 'ui-progress-label', 'aria-live': 'polite' });
   const detail = el('p', { class: 'ui-progress-detail' });
+  const stepEl = el('p', { class: 'ui-progress-step' });
   label.hidden = true;
   detail.hidden = true;
+  stepEl.hidden = true;
   const titleEl = el('h2', { class: 'ui-dialog-title', id: id + '-title' }, title ?? '');
   const cancelBtn = cancellable ? button({ label: t('cancel'), variant: 'text' }) : null;
+  // Without a line to show, the lines' block takes no room (no gap under the bar), as the app's
+  // dialog for one PDF is its bar alone.
+  const textBlock = el('div', { class: 'ui-progress-text' }, label, detail, stepEl);
+  textBlock.hidden = true;
   const surface = el('div', { class: 'ui-dialog-surface ui-alert ui-progress-dialog' },
     titleEl,
-    el('div', { class: 'ui-dialog-body' }, bar, el('div', { class: 'ui-progress-text' }, label, detail)),
+    el('div', { class: 'ui-dialog-body' }, bar, textBlock),
     cancelBtn ? el('div', { class: 'ui-dialog-actions' }, cancelBtn) : null);
   surface.tabIndex = -1;
   const modal = openModal(surface, { cls: 'ui-dialog--progress', labelledBy: id + '-title', dismissible: false, initialFocus: cancelBtn ?? surface });
-  const timer = setTimeout(() => modal.dialog.classList.add('is-shown'), Math.max(0, delay));
-  if (delay <= 0) modal.dialog.classList.add('is-shown');
+  // Cancel can't take the focus while the dialog is still invisible: it gets it once it shows.
+  const show = () => {
+    modal.dialog.classList.add('is-shown');
+    const now = document.activeElement;
+    if (cancelBtn && !cancelBtn.disabled && (now === modal.dialog || now === surface || !surface.contains(now))) cancelBtn.focus({ preventScroll: true });
+  };
+  const timer = setTimeout(show, Math.max(0, delay));
+  if (delay <= 0) show();
   cancelBtn?.addEventListener('click', () => {
     cancelBtn.disabled = true;
     cancelBtn.setLabel(t('cancelling'));
     onCancel?.();
   });
+  const setLine = (node, s) => {
+    node.textContent = s ?? '';
+    node.hidden = !s;
+    textBlock.hidden = label.hidden && detail.hidden && stepEl.hidden;
+  };
   return {
     el: surface,
     dialog: modal.dialog,
-    update(fraction, text, second) {
+    update(fraction, text, second, step) {
       bar.setValue(fraction);
-      if (text !== undefined) { label.textContent = text ?? ''; label.hidden = !text; }
-      if (second !== undefined) { detail.textContent = second ?? ''; detail.hidden = !second; }
+      if (text !== undefined) setLine(label, text);
+      if (second !== undefined) setLine(detail, second);
+      if (step !== undefined) setLine(stepEl, step);
     },
+    setStep(s) { setLine(stepEl, s); },
     setTitle(s) { titleEl.textContent = s; },
     close() {
       clearTimeout(timer);
@@ -1059,9 +1165,34 @@ export function menu(anchorEl, items, { radio = false } = {}) {
   if (anchorEl.hasAttribute('aria-expanded')) anchorEl.setAttribute('aria-expanded', 'true');
   const first = buttons.find((b) => b.classList.contains('is-checked') && !b.disabled) ?? enabled()[0];
   first?.focus({ preventScroll: true });
-  const handle = { el: list, close: () => close(true) };
+  const handle = { el: list, close: () => close(true), dismiss: (focusAnchor = false) => close(focusAnchor) };
   openMenu = handle;
   return handle;
+}
+
+/**
+ * Closes the popup menu that is open, if any (a screen being left takes its menu away, so its
+ * items can't act on it). focus: give the focus back to its anchor, as Escape does.
+ * @returns {boolean} whether a menu was open
+ */
+export function closeMenu({ focus = false } = {}) {
+  if (!openMenu) return false;
+  openMenu.dismiss(focus);
+  return true;
+}
+
+/**
+ * What Android's Back closes before it leaves a screen: the open menu, else the topmost kit dialog
+ * or sheet that can be dismissed (as Escape does: alert dialogs, the password dialog, sheets; not
+ * the progress dialog). For the router to call first on the browser's Back.
+ * @returns {boolean} whether something was closed (Back then stays on the screen)
+ */
+export function closeTopOverlay() {
+  if (closeMenu({ focus: true })) return true;
+  const top = [...document.querySelectorAll('dialog.ui-dialog[open]:not(.is-closing)')].at(-1);
+  if (!top) return false;
+  top.dispatchEvent(new Event('cancel', { cancelable: true }));
+  return top.classList.contains('is-closing');
 }
 
 // ---------------------------------------------------------------------------------------------

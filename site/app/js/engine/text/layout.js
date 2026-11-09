@@ -838,6 +838,8 @@ function visualPieces(line) {
 /** What one line draws, relative to the paragraph's text box (x from its left, y from the part's top). */
 function lineItems(core, line, dy) {
   const items = { back: [], fore: [], deco: [], links: [] };
+  // Each piece's place and link, made into link areas at the end.
+  const spans = [];
   let x = line.x;
   const baseline = line.baseline - dy;
   const top = line.top - dy;
@@ -887,13 +889,22 @@ function lineItems(core, line, dy) {
           items.deco.push({ kind: 'rect', x, y: y0 - m.strikePosition * S, w, h: m.strikeThickness * S, color: st.color });
         }
       }
-      if (st.link && p.kind !== 'tab') {
-        const prev = items.links[items.links.length - 1];
-        if (prev && prev.link === st.link && Math.abs(prev.x + prev.w - x) < 0.01) prev.w += w;
-        else items.links.push({ kind: 'link', x, y: top, w, h: bottom - top, link: st.link });
-      }
+      spans.push({ x, w, link: st.link ?? null, tab: p.kind === 'tab' });
     }
     x += w;
+  }
+  // One link area for each run of pieces with the same link. A tab inside it (a contents line:
+  // its title, the leader, the page number) is part of it, as in Word; one at either end isn't.
+  for (let i = 0; i < spans.length;) {
+    const link = spans[i].link;
+    let j = i;
+    while (link && j + 1 < spans.length && spans[j + 1].link === link && Math.abs(spans[j].x + spans[j].w - spans[j + 1].x) < 0.01) j++;
+    let a = i;
+    let b = j;
+    while (a <= b && spans[a].tab) a++;
+    while (b >= a && spans[b].tab) b--;
+    if (link && a <= b) items.links.push({ kind: 'link', x: spans[a].x, y: top, w: spans[b].x + spans[b].w - spans[a].x, h: bottom - top, link });
+    i = j + 1;
   }
   return items;
 }

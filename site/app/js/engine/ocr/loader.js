@@ -180,9 +180,10 @@ function failure(e, signal, stalled) {
 
 /**
  * Starts a Tesseract worker for `lang`. `logger` receives tesseract.js's progress messages. A
- * start that makes no progress for STALL_TIMEOUT fails (tesseract.js waits forever when a file
- * can't be loaded). If `signal` is aborted meanwhile, this throws CancelledError at once and the
- * worker is ended as soon as it exists.
+ * failed job only rejects its own promise (nothing is thrown where it can't be caught). A start
+ * that makes no progress for STALL_TIMEOUT fails (tesseract.js waits forever when a file can't be
+ * loaded). If `signal` is aborted meanwhile, this throws CancelledError at once and the worker is
+ * ended as soon as it exists.
  */
 export function startWorker(lang, { logger, signal, stallTimeout = STALL_TIMEOUT } = {}) {
   if (signal?.aborted) return Promise.reject(new CancelledError());
@@ -210,6 +211,9 @@ export function startWorker(lang, { logger, signal, stallTimeout = STALL_TIMEOUT
           last = Date.now();
           logger?.(message);
         },
+        // Without a handler, tesseract.js throws a failed job's error in the worker's message
+        // handler, where nothing can catch it; the job's promise carries the error already.
+        errorHandler: () => {},
       });
     } catch (e) {
       finish(startFailure(e));

@@ -8,11 +8,33 @@ import {
   topBar, button, bottomBar, emptyState, fileCard, textField, linearProgress, dropZone, snackbar,
 } from '../../core/ui.js';
 import { pickFiles } from '../../core/files.js';
-import { openPdf, reportFileProblems } from '../../core/pdfdoc.js';
+import { openPdf, reportFileProblems, preloadPdfJs } from '../../core/pdfdoc.js';
 import { showResult } from '../../core/output.js';
 import { batchList, runBatch, BatchChoices } from '../../core/batch.js';
 import { CancelledError, UserError } from '../../core/errors.js';
-import { defaultName, outputNames, BATCH_NAMES } from '../../engine/stamps.js';
+import { defaultName, outputNames, BATCH_NAMES } from '../../engine/stamps-layout.js';
+
+/** The engines (with pdf-lib and the text engine), loaded once a PDF is added rather than with the screen. */
+let engine = null;
+
+/** Loads engine/stamps.js (once; again after a failure, back online say). */
+export function loadStampsEngine() {
+  engine ??= import('../../engine/stamps.js').catch((e) => {
+    engine = null;
+    throw e;
+  });
+  return engine;
+}
+
+/**
+ * Turns a control off for a moment without `disabled`, which would throw the keyboard focus out of
+ * it (the button just pressed, say); its click handler checks for itself.
+ */
+function setOff(el, off) {
+  if (!el) return;
+  if (off) el.setAttribute('aria-disabled', 'true');
+  else el.removeAttribute('aria-disabled');
+}
 
 /**
  * Mounts a batch stamp tool into ctx.root and returns its handle.
@@ -28,6 +50,8 @@ import { defaultName, outputNames, BATCH_NAMES } from '../../engine/stamps.js';
  *   checks the choices (saying what is wrong and giving null) and returns how to make each PDF
  */
 export async function mountStampTool(ctx, spec) {
+  // pdf.js (about 460 kB) loads while a PDF is being chosen; pdfdoc.js imports it only on demand.
+  preloadPdfJs();
   await ensureCss(new URL('./stamp-screen.css', import.meta.url));
 
   /** The PDFs picked, in order: { id, src } (src a PdfSource). */
@@ -53,9 +77,11 @@ export async function mountStampTool(ctx, spec) {
   const progress = linearProgress({ value: null, label: t('web_opening_pdfs') });
   progress.classList.add('stamps-progress');
   const content = h('div', { class: 'stamps-content' });
-  const page = h('div', { class: 'page stamps-page' }, progress, content);
+  // The screen's main landmark, which the skip link goes to.
+  const page = h('main', { class: 'page stamps-page', 'data-main': '' }, progress, content);
   const runButton = button({ label: t(spec.action), onClick: () => run() });
   const bottom = bottomBar(runButton);
+  bottom.classList.add('stamps-bottombar');
 
   const empty = emptyState({
     icon: 'add',
@@ -72,6 +98,8 @@ export async function mountStampTool(ctx, spec) {
   let single = null;
   // Several: the app's BatchList, each card with its name field, and Add PDFs after them.
   let list = null;
+  /** The PDFs the list shows, in its order, so a card can be told by its place. */
+  let listOrder = [];
   const listItems = new Map();
   let detachDrop = null;
 
@@ -130,23 +158,48 @@ export async function mountStampTool(ctx, spec) {
     });
   };
 
+  /** The PDF whose name field `el` is in (the one-PDF field or a card's), or null. */
+  const nameOwner = (el) => {
+    if (single?.name.contains(el)) return single.id;
+    if (!list?.contains(el)) return null;
+    const cards = [...list.querySelectorAll('.ui-batch-item')];
+    const at = cards.findIndex((c) => c.contains(el));
+    return at >= 0 && el.tagName === 'INPUT' ? listOrder[at] ?? null : null;
+  };
+
+  /** The name field of PDF `id` as laid out now. */
+  const nameInputOf = (id) => {
+    if (sources.length === 1) return single?.id === id ? single.name.input : null;
+    const at = sources.findIndex((x) => x.id === id);
+    return at >= 0 ? list?.querySelectorAll('.ui-batch-item')[at]?.querySelector('input') ?? null : null;
+  };
+
   /** Puts the parts in place for the PDFs there are now, as the app's screen lays them out. */
   const arrange = () => {
     if (closed || resultEl) return;
-    const hadFocus = content.contains(document.activeElement);
+    // What has the focus keeps it (PDFs added while a name is typed, say), as in the app.
+    const active = document.activeElement;
+    const hadFocus = content.contains(active);
+    const typingFor = hadFocus ? nameOwner(active) : null;
     progress.hidden = !importing;
-    empty.disabled = !!importing;
-    addButton.disabled = !!importing;
-    list?.setAddDisabled(!!importing);
+    // Off while PDFs open, but still in the focus order: `disabled` would throw the focus out of the
+    // button just pressed, and a cancelled password dialog would have nowhere to give it back.
+    setOff(empty, !!importing);
+    setOff(addButton, !!importing);
+    setOff(list?.querySelector('.ui-batch-add'), !!importing);
     const wide = isWide();
     const count = sources.length;
     options.setSource?.(sources[0]?.src ?? null);
     content.classList.toggle('stamps-content--empty', !count);
+    // The main button lines up with the column above it (the kit's --ui-column).
+    bottom.classList.toggle('stamps-bottombar--empty', !count);
     content.classList.toggle('stamps-content--panes', !!count && wide);
     if (!count) {
       place(content, [empty]);
     } else if (count === 1) {
       const one = singleFor(sources[0]);
+      // The name the PDF will get, which may have been changed in the list meanwhile.
+      if (document.activeElement !== one.name.input) one.name.setValue(nameOf(one.id));
       if (wide) {
         // The PDF and its name on one side, the choices on the other.
         place(filesPane, [one.card, addButton, one.name]);
@@ -158,6 +211,10 @@ export async function mountStampTool(ctx, spec) {
     } else {
       // What goes for all of them comes first, then each with the name its PDF gets.
       ensureList().setItems(sources.map(itemFor));
+      listOrder = sources.map((x) => x.id);
+      // The names the PDFs will get (one may have been typed in the one-PDF field); the field being
+      // typed in is left alone.
+      list.refreshNames();
       if (wide) {
         place(filesPane, [list]);
         place(optionsPane, [options.el, hint]);
@@ -171,10 +228,22 @@ export async function mountStampTool(ctx, spec) {
     else if (!count && detachDrop) { detachDrop(); detachDrop = null; }
     for (const id of [...listItems.keys()]) if (!sources.some((s) => s.id === id)) listItems.delete(id);
     if (single && !sources.some((s) => s.id === single.id)) single = null;
-    // A control removed with the focus in it leaves it to the next sensible place.
-    if (hadFocus && !content.contains(document.activeElement)) {
-      const next = content.querySelector('.ui-file-card button[aria-label], .ui-empty, .stamps-add, .ui-batch-add');
-      next?.focus();
+    if (hadFocus && document.activeElement !== active) {
+      if (active.isConnected && content.contains(active)) {
+        // Put back after being moved: typing goes on there.
+        active.focus({ preventScroll: true });
+      } else if (typingFor != null && nameInputOf(typingFor)) {
+        // The one-PDF field became a card's, or the other way: the same PDF's name, in its new
+        // place, typing going on at its end.
+        const input = nameInputOf(typingFor);
+        input.focus({ preventScroll: true });
+        input.setSelectionRange?.(input.value.length, input.value.length);
+      } else if (!content.contains(document.activeElement)) {
+        // A control removed with the focus in it (Choose PDFs once PDFs came): Add PDFs, or the
+        // empty card. Never a Remove button, which the next Space would press.
+        const next = count ? content.querySelector('.stamps-add, .ui-batch-add') : empty;
+        next?.focus({ preventScroll: true });
+      }
     }
     refreshButton();
   };
@@ -237,8 +306,16 @@ export async function mountStampTool(ctx, spec) {
     }
     for (const src of opened) sources.push({ id: src.id, src });
     choices = choices.following(sources.map((s) => s.id));
-    if (failed.length) reportFileProblems(failed);
+    if (failed.length === 1 && items.length === 1) {
+      // One PDF picked is told about without its name, as the app's addPdfs.
+      const { error } = failed[0];
+      snackbar(error instanceof UserError ? t(error.key, ...(error.args ?? [])) : t('pdf_import_failed'));
+    } else if (failed.length) {
+      reportFileProblems(failed);
+    }
     arrange();
+    // Loaded while the choices are made, so the main button doesn't wait for it.
+    if (sources.length) loadStampsEngine().catch(() => {});
   };
 
   const remove = (id) => {
@@ -268,6 +345,12 @@ export async function mountStampTool(ctx, spec) {
     refreshButton();
     let made;
     try {
+      try {
+        await loadStampsEngine();
+      } catch {
+        snackbar(t('web_tool_load_failed', t(ctx.tool.title)));
+        return;
+      }
       let work;
       try {
         work = await spec.prepare(taken.map((s) => s.src));

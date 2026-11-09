@@ -100,9 +100,30 @@ await test('fontkit\'s license file covers every package esbuild bundles into it
 await test('PDF.js\'s QuickJS build has its licenses next to it', async () => {
   const wasm = await readdir(join(vendor, 'pdfjs/wasm'));
   assert(wasm.includes('quickjs-eval.wasm') && wasm.includes('quickjs-eval.js'), 'QuickJS files');
-  for (const [name, text] of [['LICENSE_QUICKJS', 'QuickJS.txt'], ['LICENSE_PDFJS_QUICKJS', 'pdf.js.quickjs.txt']]) {
+  for (const [name, text] of [['LICENSE_QUICKJS.txt', 'QuickJS.txt'], ['LICENSE_PDFJS_QUICKJS.txt', 'pdf.js.quickjs.txt']]) {
     const shipped = await readFile(join(vendor, 'pdfjs/wasm', name), 'utf8');
     assert(shipped === await readFile(join(root, 'licenses', text), 'utf8'), `${name} is licenses/${text}`);
+  }
+});
+
+await test('every license text is served with an extension browsers show (.txt or .md), none bare', async () => {
+  // GitHub Pages and tools/serve.mjs serve a file without an extension as
+  // application/octet-stream, which browsers download instead of showing.
+  const all = await files(vendor);
+  const licenses = all.filter((f) => /^(?:licen[cs]e|copying)/i.test(f.split('/').pop()));
+  const bare = licenses.filter((f) => !/\.(?:txt|md)$/i.test(f));
+  assert(!bare.length, `license files without .txt or .md: ${bare}`);
+  // The ones the app's Open-source licenses screen links to (js/screens/licenses.js).
+  for (const f of ['pdf-lib/LICENSE.md', 'fontkit/LICENSE.txt', 'fflate/LICENSE.txt', 'pdfjs/LICENSE.txt',
+    'tesseract/LICENSE.md', 'tesseract/core/LICENSE.txt', 'libheif/LICENSE.txt', 'material-icons/LICENSE.txt']) {
+    assert(all.includes(f), `${f} is there`);
+  }
+  // Each is the package's own text, unchanged.
+  for (const [f, from] of [['fontkit/LICENSE.txt', '@cantoo/fontkit/LICENSE'], ['fflate/LICENSE.txt', 'fflate/LICENSE'],
+    ['pdfjs/LICENSE.txt', 'pdfjs-dist/LICENSE'], ['pdfjs/cmaps/LICENSE.txt', 'pdfjs-dist/cmaps/LICENSE'],
+    ['tesseract/core/LICENSE.txt', 'tesseract.js-core/LICENSE'], ['libheif/LICENSE.txt', 'libheif-js/LICENSE'],
+    ['material-icons/LICENSE.txt', '@material-design-icons/svg/LICENSE']]) {
+    assert((await readFile(join(vendor, f))).equals(await readFile(join(nm, from))), `${f} is ${from}`);
   }
 });
 

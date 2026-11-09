@@ -2,6 +2,10 @@
 // glyphs are drawn), the canvases whose content isn't written yet, pictures still being encoded,
 // and named destinations. It is all written into the PDF when it is saved: pdf-lib's save()
 // calls doc.flush(), which runs finishText() first.
+import { yieldToUI } from '../../core/dom.js';
+
+/** Work between two chances for the browser to paint and take input, in milliseconds. */
+const SLICE = 16;
 
 const states = new WeakMap();
 
@@ -55,7 +59,22 @@ export async function finishText(doc) {
     s.errors = [];
     throw e;
   }
-  for (const c of s.canvases) c.close();
-  for (const f of s.fonts.values()) f.write();
+  // Each page's content is compressed as it is written: a few milliseconds a page, which for a long
+  // document would freeze the screen (its progress and Cancel too) for seconds. So the browser gets
+  // its turn every SLICE ms.
+  let last = performance.now();
+  const breathe = async () => {
+    if (performance.now() - last < SLICE) return;
+    await yieldToUI();
+    last = performance.now();
+  };
+  for (const c of s.canvases) {
+    c.close();
+    await breathe();
+  }
+  for (const f of s.fonts.values()) {
+    f.write();
+    await breathe();
+  }
   if (s.writeDests) s.writeDests();
 }

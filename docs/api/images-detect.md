@@ -134,10 +134,10 @@ photoName('IMG_2041.HEIC') // 'IMG_2041.HEIC'
 
 ### Constants
 
-`MAX_PIXELS` (25 000 000), `CONVERTED_JPEG_QUALITY` (0.95), `IMAGE_ACCEPT` (an `accept` attribute
-listing every type, extensions included, as `ImageStore.pickableTypes`), and re-exported from
-`image-type.js`: `imageFileType`, `isLossyOpaqueWebp`, `IMAGE_MIME`, `IMAGE_HEADER_BYTES`,
-`WEBP_HEADER_BYTES`.
+`MAX_PIXELS` (25 000 000), `CONVERTED_JPEG_QUALITY` (0.95), and re-exported from `image-type.js`:
+`IMAGE_ACCEPT` (an `accept` attribute listing every type, extensions included, as
+`ImageStore.pickableTypes`), `imageFileType`, `isLossyOpaqueWebp`, `IMAGE_MIME`,
+`IMAGE_HEADER_BYTES`, `WEBP_HEADER_BYTES`.
 
 ## crop.js
 
@@ -254,8 +254,10 @@ page.pushOperators(pushGraphicsState(), concatTransformationMatrix(...pdfMatrix(
 ## image-type.js, image-meta.js, areas.js
 
 - `imageFileType(header) → 'jpeg'|'png'|'webp'|'bmp'|'gif'|'heif'|'avif'|null` (64 bytes are
-  enough: `IMAGE_HEADER_BYTES`); `isLossyOpaqueWebp(header)` (`WEBP_HEADER_BYTES`); `IMAGE_MIME`.
-  `core/files.js` can use `imageFileType` for "by content" (ImageFileType.kt).
+  enough: `IMAGE_HEADER_BYTES`); `isLossyOpaqueWebp(header)` (`WEBP_HEADER_BYTES`); `IMAGE_MIME`;
+  `IMAGE_ACCEPT` (the file picker's accept attribute). `image-type.js` has no imports, so
+  `core/files.js` can use `imageFileType` for "by content" (ImageFileType.kt) and `IMAGE_ACCEPT`
+  for its pickers without loading the decoders (`decode.js` re-exports both).
 - `readImageInfo(bytes, type) → { width, height, orientation, turnedByFile, taken, alpha, exifAt }`
   (never throws); `strippedJpeg(bytes)`, `strippedPng(bytes)` → bytes without metadata, or null when
   the file's structure can't be followed; `withoutExifOrientation(bytes, type, info)`.

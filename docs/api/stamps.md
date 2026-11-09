@@ -12,7 +12,16 @@ file input, and drop them on the card or the screen in other steps).
 import {
   addPageNumbers, addWatermark, numberedPages, numberedEach, watermarkStamp, paintWatermark,
 } from '../engine/stamps.js';
+// The layout, choices and names alone (no pdf-lib, no text engine), for screens to load first:
+import { numberedEach, PAGE_NUMBER_POSITIONS, WATERMARK_COLORS, defaultName, outputNames } from '../engine/stamps-layout.js';
 ```
+
+`engine/stamps-layout.js` holds everything below that is pure: `PageFrame`, the page-number
+positions, sizes and defaults, `numberedPages`, `numberedEach`, `numberMargin`, `numberOrigin`,
+`numberStyle`, the watermark's colours, opacities, limits and defaults, `watermarkStyle`,
+`placeWatermark`, `defaultName`, `outputNames`, `BATCH_NAMES` (and, for stamps.js, `positionOf`,
+`alphaOf`, `STAMP_PAD`, `FALLBACK_NAMES`). `engine/stamps.js` re-exports all of it with the
+engines, `frameOfPage`, `canDrawWatermark`, `watermarkStamp`, `drawStamp` and `paintWatermark`.
 
 What both engines do, as the app does:
 
@@ -239,6 +248,11 @@ Names typed for PDFs made together, made safe and told apart ignoring case (the 
 built on `js/tools/page-numbers/stamp-screen.js` (`mountStampTool(ctx, spec)`, the flow both
 batch tools share; its CSS classes start with `stamps-`):
 
+- The screens load only `stamps-layout.js`: the engines (`engine/stamps.js`, with pdf-lib, fontkit
+  and the text engine) load once a PDF is added, or the watermark preview has text to draw
+  (`loadStampsEngine()` from stamp-screen.js, shared by both tools), and are waited for when the
+  main button is pressed. If they can't be fetched: `web_tool_load_failed`.
+- The content is the screen's `<main data-main>` landmark, which the skip link goes to.
 - No PDF: the "Choose PDFs" card ("You can choose several at once."), a drop zone too.
 - One PDF: its card (Remove starts over), Add PDFs, the tool's choices, and "File name" (`.pdf`).
 - Several: the choices first, the line saying they go for all, then each PDF's card with its own
@@ -258,6 +272,16 @@ batch tools share; its CSS classes start with `stamps-`):
 - `hasUnsavedWork()` is true while a result isn't saved (as the app: choices alone aren't work),
   and while the PDFs are being made: the app ignores Back then; here leaving asks first, as the
   other tools do, and Discard stops the run.
+- While PDFs open, Choose PDFs and the Add PDFs buttons are off with `aria-disabled`, not
+  `disabled`: they keep the focus, so a cancelled password dialog gives it back there.
+- The focus stays where it is while PDFs come and go, as in the app: a name being typed keeps it
+  (a card that stays is never taken out of the page); when the one-PDF "File name" becomes the
+  list (or the list goes back to one PDF) the same PDF's name field takes it. A control removed
+  with the focus in it hands it to Add PDFs, or to the empty card; never to a Remove button.
+- Each name field shows the name its PDF will get: going from several PDFs to one, or back, the
+  field shows the name typed in the other layout.
+- One PDF picked that can't be opened is told about without its name ("Couldn't open that PDF…"),
+  as the app's addPdfs; several are named ("a.pdf, b.pdf: Couldn't open these PDFs…").
 - Snackbars show above the bottom bar while it is there: the kit's snackbar measures the bar
   (the screen sets no `--snackbar-offset`).
 
@@ -267,7 +291,8 @@ in words beside it), Size (segmented), Pages to skip with its hint and the note 
 Add watermark: Watermark text (at most 80 characters), Color (round swatches, a radio group),
 Opacity (segmented), and Preview: page 1 of the first PDF with the watermark drawn on it by
 `paintWatermark`, 280 × 220 px at most on phones (420 × 330 from 840 px), an A4 blank until page 1
-is drawn, the layer faded to the opacity chosen.
+is drawn, the layer faded to the opacity chosen. The preview is never wider than its column (two narrow
+panes just past 840 px): it is laid out again when the column changes width.
 
 ## Strings
 

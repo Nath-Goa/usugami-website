@@ -52,6 +52,10 @@ All settings are one JSON object in `localStorage['usugami.settings']` (for exam
 navigate(path, { files?, params?, replace? })   // '/', '/tool/<id>', '/recent', '/settings', '/choose'
 back()                                          // like the app's back arrow / Android back
 ```
+Added since (see `shell.md`): `navigate(..., { from?, force?, replaceScreen? })`; a screen handle's
+`discardQuestion()` may return `{ title, message?, confirm?, dismiss?, destructive? }`
+(`destructive: false` gives plain buttons, as Images to PDF's "Discard these images?"); the
+browser's Back closes an open dialog or menu first, as Android's Back does.
 
 ## core/icons.js (shell)
 
@@ -78,7 +82,9 @@ removeRecent(id), clearRecent()
 ## core/ui.js (kit)
 
 ```js
-topBar({ title, subtitle?, onBack?, actions?: [{ icon, label, onClick, disabled? }], menu?: [{ label, onClick }] })
+topBar({ title, subtitle?, onBack?, actions?: [{ icon?, label, onClick, disabled? }], menu?: [{ label, onClick }] })
+                                                    // an action with a label and no icon is a text button
+                                                    // (Recent files' "Clear list")
 button({ label, icon?, variant = 'filled' | 'tonal' | 'outlined' | 'text', onClick, disabled?, type? })
 iconButton({ icon, label, onClick, disabled?, selected? })
 fab({ label, icon, onClick })                       // extended floating action button (the app's main buttons)
@@ -88,13 +94,13 @@ dropdown({ label, options: [{ value, label }], value, onChange })     // "Page s
 switchRow({ label, detail?, checked, onChange, disabled? })           // el.setChecked(b)
 slider({ label, min, max, step, value, onChange, format? })           // el.setValue(v)
 textField({ label, value, suffix?, helper?, error?, placeholder?, inputmode?, onInput, onEnter? })
-                                                    // el.setValue(v), el.setError(text|null), el.input
+                                                    // el.setValue(v), el.setError(text|null), el.setLabel(text), el.input
 card({ icon, title, detail?, onClick, trailing? })  // a tool card as on Home
 fileCard({ name, detail?, thumbnail?: Node | Promise<Node>, onRemove?, actions? })
 emptyState({ icon, title, detail?, actions: Node[] })   // "Choose a PDF" etc.; on desktop it is also a drop zone
 dropZone(target, { accept, multiple, onFiles(fileItems) })  // drag-and-drop and paste of files onto target
 progressDialog({ title, cancellable = true, onCancel })  // returns { update(fraction|null, label?), close() }
-snackbar(message, { action?, onAction?, duration? })
+snackbar(message, { action?, onAction?, duration? })  // shows above a .ui-bottombar on screen, by itself
 alertDialog({ title, message, confirm, dismiss?, destructive? }): Promise<boolean>
 passwordDialog({ fileName, wrong }): Promise<string|null>
 bottomSheet({ title, content, actions? })           // returns { el, close() }; a side dialog on wide screens
@@ -116,8 +122,10 @@ ACCEPT                             // accept attribute strings per kind
 ## core/pdfdoc.js (kit)
 
 ```js
-openPdf(fileItem, { ask = true }): Promise<PdfSource|null>   // asks for a password (again if wrong); null if cancelled
-// PdfSource: { name, size, bytes, password, pageCount,
+openPdf(fileItem, { ask = true, password?, signal? }): Promise<PdfSource|null>
+                                   // tries `password`, else fileItem.password, first; asks for one (again if
+                                   // wrong); null if cancelled; aborting `signal` closes the question
+// PdfSource: { name, size, bytes, password, pageCount, viewBytes, viewPassword, hasView,
 //   pdfjs(): Promise<PDFDocumentProxy>, thumbnail(index, cssWidth): Promise<HTMLCanvasElement>,
 //   pageSize(index): Promise<{ width, height, rotation }>, close() }
 ```
@@ -128,11 +136,11 @@ openPdf(fileItem, { ask = true }): Promise<PdfSource|null>   // asks for a passw
 pageGrid({
   count, thumbnail(i, cssWidth): Promise<Node>,   // page previews, rendered lazily as they scroll into view
   label?(i): string,                              // under each page (default: its number)
-  selectable?: boolean, selected?: Set<number>, onToggle?(i),
+  selectable?: boolean | 'single', selected?: Set<number>, onToggle?(i),
   reorderable?: boolean, onMove?(from, to),       // long-press and drag (touch), drag (mouse), keyboard
   rotation?(i): number,                           // degrees, shown turned
   badge?(i): Node|null, overlay?(i): Node|null,
-})  // el.refresh() re-renders labels/rotations/selection; el.setCount(n)
+})  // el.refresh(indexes?) re-renders labels/rotations/selection (all, or those pages); el.setCount(n)
 ```
 
 ## core/output.js (kit)

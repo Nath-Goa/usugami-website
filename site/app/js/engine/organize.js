@@ -6,7 +6,12 @@ import {
 } from '../lib/pdf-lib.js';
 import { UserError, PasswordError, CancelledError, checkCancelled } from '../core/errors.js';
 import { loadPdf, savePdf, createPdf } from './pdf-common.js';
-import { parsePageSelection, parseRanges, fixedChunks, pagesToDelete, PageSelectionError } from './page-selection.js';
+import {
+  parsePageSelection, parseRanges, fixedChunks, pagesToDelete, PageSelectionError, defaultName, partSuffix,
+} from './page-selection.js';
+// File names as the app makes them (FileNames.kt, ported by the shell), so every tool names its files
+// alike. The names these tools give their PDFs are page-selection.js's (defaultName, partSuffix).
+import { sanitizeName as sanitize, withSuffixes, uniqueName as unique } from '../core/names.js';
 import {
   nm, resolve, dictOf, arrayOf, nameOf, numberOf, textOf, ticker, MAX_DEPTH,
   readPages, repairPageTree, setPages, rotationOf, boxesOf, resourcesOf, inherited, annotationsOf,
@@ -16,125 +21,6 @@ import {
 
 const PDF = 'application/pdf';
 const A4 = { width: 595.27563, height: 841.8898 };
-
-// ---------------------------------------------------------------------------------------------
-// File names (the app's FileNames.kt)
-
-const MAX_UTF8_BYTES = 200; // leaves room for " (99).pdf" within the usual 255-byte limit
-const ILLEGAL = /[\\/:*?"<>|\x00-\x1f\x7f]/g;
-// Windows' device names, which it won't give a file, in any case and whatever follows a dot.
-const WINDOWS_DEVICE = /^(CON|PRN|AUX|NUL|COM[0-9¹²³]|LPT[0-9¹²³])(?= *(\.|$))/i;
-// Kotlin's Char.isWhitespace.
-const WHITESPACE = /[\t\n\x0B\f\r\x1C-\x1F\p{Zs}\u2028\u2029]/u;
-const encoder = new TextEncoder();
-const utf8Size = (text) => encoder.encode(text).length;
-
-function trimWhere(text, test, start, end) {
-  const chars = [...text];
-  let a = 0;
-  let b = chars.length;
-  if (start) while (a < b && test(chars[a])) a++;
-  if (end) while (b > a && test(chars[b - 1])) b--;
-  return chars.slice(a, b).join('');
-}
-
-const isSpace = (ch) => WHITESPACE.test(ch);
-const isSpaceOrDot = (ch) => ch === '.' || WHITESPACE.test(ch);
-const trimEnd = (text) => trimWhere(text, isSpaceOrDot, false, true);
-
-/** `text` cut to at most `maxBytes` bytes of UTF-8 between whole characters as people see them. */
-function truncateUtf8(text, maxBytes) {
-  if (utf8Size(text) <= maxBytes) return text;
-  let end = '';
-  let bytes = 0;
-  const graphemes = typeof Intl !== 'undefined' && Intl.Segmenter
-    ? [...new Intl.Segmenter('und', { granularity: 'grapheme' }).segment(text)].map((s) => s.segment)
-    : [...text];
-  for (const g of graphemes) {
-    const size = utf8Size(g);
-    if (bytes + size > maxBytes) break;
-    bytes += size;
-    end += g;
-  }
-  if (end) return end;
-  // The first character alone is too long: whole code points of it, then.
-  for (const cp of text) {
-    const size = utf8Size(cp);
-    if (bytes + size > maxBytes) break;
-    bytes += size;
-    end += cp;
-  }
-  return end;
-}
-
-/**
- * User input made a safe PDF base name (no extension): characters file systems reject become '_',
- * surrounding spaces and dots go, a trailing ".pdf" is dropped and the name is kept to a sensible
- * length; a Windows device name gets '_' after it. `fallback` for a blank one.
- */
-function sanitize(input, fallback) {
-  let name = trimEnd(trimWhere(String(input ?? ''), isSpace, true, true).replace(ILLEGAL, '_'));
-  if (name.toLowerCase().endsWith('.pdf')) name = name.slice(0, -4);
-  name = trimWhere(trimEnd(name), isSpaceOrDot, true, false);
-  name = trimEnd(truncateUtf8(name, MAX_UTF8_BYTES));
-  return name.replace(WINDOWS_DEVICE, '$1_') || fallback;
-}
-
-/** `base` made safe and followed by `suffix`; when too long, `base` is cut, never `suffix`. */
-function withSuffix(base, suffix, fallback, spare = 0) {
-  const room = MAX_UTF8_BYTES - spare - utf8Size(suffix);
-  return sanitize(trimEnd(truncateUtf8(sanitize(base, fallback), Math.max(0, room))) + suffix, fallback);
-}
-
-/** Names from one `base` with their own suffixes, a long base cut once so that they sort together. */
-function withSuffixes(base, suffixes, fallback) {
-  const longest = Math.max(0, ...suffixes.map(utf8Size));
-  return suffixes.map((s) => withSuffix(base, s, fallback, longest - utf8Size(s)));
-}
-
-/** `base` if not in `taken` (ignoring case), otherwise "base (2)", "base (3)", ... */
-function unique(base, taken) {
-  const lower = new Set([...taken].map((t) => t.toLowerCase()));
-  if (!lower.has(base.toLowerCase())) return base;
-  let n = 2;
-  while (lower.has(`${base} (${n})`.toLowerCase())) n++;
-  return `${base} (${n})`;
-}
-
-function baseName(fileName) {
-  const dot = fileName.lastIndexOf('.');
-  return dot > 0 ? fileName.slice(0, dot) : fileName;
-}
-
-/**
- * What Split adds to the name of part `index` (zero-based), which holds `pages`: its number and
- * its first and last pages, counted from 1, as in "_2_4-6".
- */
-export function partSuffix(index, pages) {
-  return `_${index + 1}_${pages[0] + 1}-${pages[pages.length - 1] + 1}`;
-}
-
-/**
- * The name the tool's PDF gets unless another is typed (no extension), after `input`, the (first)
- * PDF: { name, pageCount? }. tool: 'split', 'merge', 'reorganize', 'delete-pages' or 'rotate'.
- * Report.pdf gives "Report_split", "Merged_PDF", "Report_reorganized", "Report_pages_deleted" and
- * "Report_rotated". Split leaves room for the part endings a PDF of this many pages can get.
- */
-export function defaultName(tool, input) {
-  const base = input?.name ? baseName(input.name) : 'Usugami';
-  const named = (suffix) => withSuffix(base, suffix, 'Usugami');
-  switch (tool) {
-    case 'split': {
-      const last = Math.max(1, input?.pageCount ?? 1) - 1;
-      return withSuffix(base, '_split', 'Usugami', partSuffix(last, [last]).length);
-    }
-    case 'merge': return 'Merged_PDF';
-    case 'rotate': return named('_rotated');
-    case 'delete-pages': return named('_pages_deleted');
-    case 'reorganize': return named('_reorganized');
-    default: throw new Error(`Unknown tool ${tool}`);
-  }
-}
 
 // ---------------------------------------------------------------------------------------------
 // Page labels (the app's PageLabeling.kt): the numbers viewers show, such as a book's "iv" before
@@ -1266,7 +1152,8 @@ export async function countPages(input) {
 }
 
 // Exported for tests and other tools that name files the app's way.
-export const fileNames = { sanitize, withSuffix, withSuffixes, unique, baseName };
+export { fileNames } from '../core/names.js';
+export { defaultName, partSuffix };
 
 // Kept for the screens' error handling: the same classes the engines throw.
 export { PageSelectionError, checkCancelled, resourcesOf };

@@ -2,7 +2,7 @@
 // in the app as a person would, by touch at phone size and by mouse and keyboard at desktop size,
 // with the PDFs made read back (page counts, turns, text with pdf.js, what the pages show).
 // Run with: node tests/organize-ui-a.test.mjs   (--quick: Chromium only, no screenshots;
-// --others: Firefox and WebKit only)
+// --others: Firefox and WebKit only; --review: Chromium, the reviewers' findings only)
 // Screenshots go to .tmp/organize-ui-a/screens/ to be looked at.
 import { readFile, mkdir, access } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -10,12 +10,14 @@ import { withPage, assert, root, runInPage } from './harness.mjs';
 import { PDFDocument, PDFName, rgb, degrees, StandardFonts } from '../site/app/vendor/pdf-lib/pdf-lib.esm.min.js';
 import { unzipSync, strToU8 } from '../site/app/vendor/fflate/fflate.esm.js';
 
-const QUICK = process.argv.includes('--quick');
+const REVIEW = process.argv.includes('--review');
+const QUICK = REVIEW || process.argv.includes('--quick');
 // --others: only Firefox and WebKit.
 const OTHERS = process.argv.includes('--others');
 const shots = join(root, '.tmp', 'organize-ui-a', 'screens');
 await mkdir(shots, { recursive: true });
-const appAssets = 'C:/Users/Nathan/OneDrive/Desktop/pdfer/app/src/androidTest/assets';
+// The Android app beside this repository (not there on CI: what needs it is skipped or made here).
+const appAssets = join(root, '..', 'pdfer', 'app', 'src', 'androidTest', 'assets');
 const exists = (p) => access(p).then(() => true, () => false);
 
 const PHONE = { width: 360, height: 780 };
@@ -93,7 +95,9 @@ async function fixtures() {
     locked = { bytes: await doc.save(), password: 'test123' };
   }
   const damaged = strToU8('%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 9 0 R >> endobj\nthis is not a PDF at all\n%%EOF');
-  return { report, big, other, locked, damaged };
+  // Without its first line, "%PDF-1.7": pdf.js still shows it, the engine (pdf-lib) refuses it.
+  const headless = report.subarray(report.indexOf(10) + 1);
+  return { report, big, other, locked, damaged, headless };
 }
 
 const asFile = (name, bytes) => ({ name, mimeType: 'application/pdf', buffer: Buffer.from(bytes) });
@@ -293,7 +297,7 @@ const selectedTiles = (page, scope) => page.$$eval(`${scope} .ui-page[aria-check
 // The strings: the app's keys and English (strings.xml), none redefining common.js's or kit.js's
 
 async function testStrings() {
-  const xmlPath = 'C:/Users/Nathan/OneDrive/Desktop/pdfer/app/src/main/res/values/strings.xml';
+  const xmlPath = join(root, '..', 'pdfer', 'app', 'src', 'main', 'res', 'values', 'strings.xml');
   const common = (await import('../site/app/locales/en/common.js')).default;
   const kit = (await import('../site/app/locales/en/kit.js')).default;
   const app = {};
@@ -304,6 +308,7 @@ async function testStrings() {
       app[m[1]] = m[2].replace(/\\'/g, "'").replace(/\\"/g, '"').replace(/%(\d)\$[sd]/g, '{$1}').replace(/&amp;/g, '&');
     }
   }
+  if (!Object.keys(app).length) console.log('strings.xml not found: app-string comparison skipped');
   for (const ns of ['split', 'delete-pages', 'rotate']) {
     const strings = (await import(`../site/app/locales/en/${ns}.js`)).default;
     for (const [key, text] of Object.entries(strings)) {
@@ -438,11 +443,12 @@ async function testSplit(page, url, fx, { touch, wide }) {
   ok(!(await page.$('.ui-result')) && await page.isVisible('.onepdf-card'), 'Forward: the tool as it was');
   eq(await page.inputValue('.split-field .ui-field-input'), '3,1', 'pages kept after Forward');
 
-  // Custom ranges: their own labels, the picker goes, what was typed is cleared. The field is the
-  // same one (the kit's setLabel), as the app's.
-  await page.evaluate(() => { window.__splitField = document.querySelector('.split-field'); });
+  // Custom ranges: their own labels, the picker goes, what was typed is cleared. The field and the
+  // Combine switch are the same ones (the kit's setLabel), as the app's.
+  await page.evaluate(() => { window.__splitField = document.querySelector('.split-field'); window.__splitSwitch = document.querySelector('.split-options .ui-switch-row'); });
   await press(page, `.split-options .ui-chip:has-text("${S.custom}")`, { touch });
   ok(await page.evaluate(() => document.querySelector('.split-field') === window.__splitField), 'the same field for custom ranges');
+  ok(await page.evaluate(() => document.querySelector('.split-options .ui-switch-row') === window.__splitSwitch), 'the same Combine switch for custom ranges');
   eq(await page.getAttribute('.split-field .ui-field-input', 'inputmode'), null, 'a text keyboard for ranges');
   await page.waitForSelector('.split-picker', { state: 'hidden' });
   eq(await page.inputValue('.split-field .ui-field-input'), '', 'text cleared with the mode');
@@ -660,11 +666,13 @@ async function testRotate(page, url, fx, { touch, wide }) {
   await press(page, btn(2, 'left'), { touch });
   eq(await turnOf(page, 2), -180, 'page 2 went left twice');
   eq(await turnedText(page, 2), S.upsideDown, 'upside down');
-  // Animated: the picture is mid-turn just after a press.
-  await press(page, btn(3, 'right'), { touch });
+  // Animated: the picture is mid-turn just after a press. Pressed in the page, so the frames are
+  // watched from the press on, however busy the machine is between the test and the browser.
+  await page.locator(btn(3, 'right')).scrollIntoViewIfNeeded();
   // The angles the picture shows over the next frames: some between the two.
-  const angles = await page.evaluate(async () => {
+  const angles = await page.evaluate(async (selector) => {
     const turn = document.querySelectorAll('.rotate-card')[2].querySelector('.rotate-turn');
+    document.querySelector(selector).click();
     const seen = [];
     for (let i = 0; i < 30; i++) {
       const x = new DOMMatrix(getComputedStyle(turn).transform);
@@ -672,7 +680,7 @@ async function testRotate(page, url, fx, { touch, wide }) {
       await new Promise((r) => requestAnimationFrame(r));
     }
     return seen;
-  });
+  }, btn(3, 'right'));
   ok(angles.some((a) => a > 5 && a < 85) && angles.at(-1) === 90, `turning, not jumping (${angles.join(' ')})`);
   await page.waitForTimeout(400);
   await themes(page, `rotate-turned-${size}`);
@@ -808,20 +816,40 @@ async function testDesktopExtras(page, url, fx) {
   eq(await selectedTiles(page, '.split-picker'), [5, 7], 'a page added to the frame');
   ok(typing < 250, `a page more typed in a 3000-page PDF redraws quickly (${typing.toFixed(1)} ms)`);
   await page.click(`.split-options .ui-chip:has-text("${S.every}")`);
-  await page.click('.onepdf > .ui-bottombar .ui-btn');
-  await page.waitForSelector('dialog[open].is-shown .ui-progress-dialog', { timeout: 20000 });
-  await shot(page, 'progress-desktop');
-  // Progress moves while the main thread answers.
-  const t0 = Date.now();
-  await page.evaluate(() => new Promise((r) => setTimeout(r, 0)));
-  ok(Date.now() - t0 < 1000, 'the page answers while it works');
-  await page.waitForFunction(() => Number(document.querySelector('dialog[open] .ui-progress')?.getAttribute('aria-valuenow') ?? 0) > 0, null, { timeout: 20000 });
-  checks++;
-  await page.click('dialog[open] .ui-btn:has-text("Cancel")');
+  // The CPU slowed down while it works, so the split can't be over before Cancel is pressed on a
+  // fast (or an idle) machine; the page must still answer.
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
+  try {
+    await page.click('.onepdf > .ui-bottombar .ui-btn');
+    await page.waitForSelector('dialog[open] .ui-progress-dialog', { timeout: 20000 });
+    await page.waitForSelector('dialog[open].is-shown .ui-progress-dialog', { timeout: 20000 });
+    // Its scale-in over, the Cancel button stands still to be clicked (the bar's endless sweep aside).
+    await page.waitForFunction(() => {
+      const d = document.querySelector('dialog[open].is-shown');
+      return !!d && d.getAnimations({ subtree: true })
+        .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
+        .every((a) => a.playState !== 'running');
+    }, null, { timeout: 20000 });
+    await shot(page, 'progress-desktop');
+    // Progress moves while the main thread answers.
+    const t0 = Date.now();
+    await page.evaluate(() => new Promise((r) => setTimeout(r, 0)));
+    ok(Date.now() - t0 < 1000, 'the page answers while it works');
+    await page.waitForFunction(() => Number(document.querySelector('dialog[open] .ui-progress')?.getAttribute('aria-valuenow') ?? 0) > 0, null, { timeout: 20000 });
+    checks++;
+    ok(!(await page.$('.ui-result')), 'still working when Cancel is pressed');
+    await page.click('dialog[open] .ui-btn:has-text("Cancel")');
+  } finally {
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+    await cdp.detach();
+  }
   await page.waitForSelector('dialog[open]', { state: 'detached', timeout: 20000 });
   await noSnack(page, 500);
   ok(!(await page.$('.ui-result')), 'cancelled: no result');
   ok(!(await mainButton(page).isDisabled()), 'ready to go again');
+  // The main button was only marked off meanwhile, so the dialog gave the focus back to it.
+  ok(await page.evaluate(() => document.activeElement === document.querySelector('.onepdf > .ui-bottombar .ui-btn')), 'the focus is back on Split PDF');
 
   // Tool opened with a PDF handed over (Choose a tool, Home's drop).
   await page.evaluate(async (b64) => {
@@ -832,14 +860,124 @@ async function testDesktopExtras(page, url, fx) {
   await chosen(page, 'Handed.pdf');
   eq(await page.locator('.rotate-card').count(), 3, 'the PDF handed over is open');
 
-  // Leaving while a password is asked for takes the question away with the tool.
+  // The browser's Back while a password is asked for closes the question, as Android's Back closes
+  // a dialog, and stays; the focus goes back to the card picked from.
   await openTool(page, url, 'split');
   await pick(page, asFile('protected.pdf', fx.locked.bytes));
   await page.waitForSelector('dialog[open] input[type="password"]');
   await page.goBack();
+  await page.waitForSelector('dialog[open]', { state: 'detached', timeout: 5000 });
+  eq(await page.evaluate(() => location.hash), '#/tool/split', 'Back closes the password question first');
+  ok(await page.evaluate(() => document.activeElement === document.querySelector('.onepdf .ui-empty')), 'the focus is back on Choose PDF');
+  // Leaving while a password is asked for takes the question away with the tool.
+  await pick(page, asFile('protected.pdf', fx.locked.bytes));
+  await page.waitForSelector('dialog[open] input[type="password"]');
+  await page.evaluate(async () => (await import(new URL('js/core/router.js', location.href).href)).navigate('/'));
   await page.waitForSelector('#app .screen[data-route="home"]:not([aria-busy])');
   await page.waitForSelector('dialog[open]', { state: 'detached', timeout: 5000 });
   checks++;
+}
+
+// ---------------------------------------------------------------------------------------------
+// What reviewers found, checked: the focus where a keyboard user expects it, failures heard once
+// the progress has gone, a paste after the result, the main button under its column.
+
+async function testReviewFixes(page, url, fx) {
+  const active = () => page.evaluate(() => {
+    const a = document.activeElement;
+    return a === document.body || !a ? 'BODY' : (a.getAttribute('aria-label') ?? a.textContent.trim());
+  });
+
+  // A password question cancelled with Escape: the focus stays on Choose PDF, opened from the keyboard.
+  await openTool(page, url, 'delete-pages');
+  await page.focus('.onepdf .ui-empty');
+  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.keyboard.press('Enter')]);
+  await chooser.setFiles(asFile('protected.pdf', fx.locked.bytes));
+  await page.waitForSelector('dialog[open] input[type="password"]');
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('dialog[open]', { state: 'detached', timeout: 5000 });
+  ok(await page.evaluate(() => document.activeElement === document.querySelector('.onepdf .ui-empty')), `password cancelled: the focus on Choose PDF (${await active()})`);
+
+  // A PDF pdf.js shows but the engine refuses (no %PDF header): the failure is said once the
+  // progress dialog has gone, when a screen reader can reach it.
+  await openTool(page, url, 'split');
+  await page.evaluate(() => {
+    window.__said = [];
+    const watch = () => {
+      const node = document.getElementById('announcer');
+      if (!node) return requestAnimationFrame(watch);
+      new MutationObserver(() => {
+        if (node.textContent) window.__said.push({ text: node.textContent, modal: !!document.querySelector('dialog[open]') });
+      }).observe(node, { childList: true, characterData: true, subtree: true });
+    };
+    watch();
+  });
+  // An announcement first, so the live region (made on first use) is there to watch.
+  await page.evaluate(async () => (await import(new URL('js/core/dom.js', location.href).href)).announce('start'));
+  await pick(page, asFile('Headless.pdf', fx.headless));
+  await chosen(page, 'Headless.pdf');
+  await page.click(`.split-options .ui-chip:has-text("${S.every}")`);
+  await page.click('.onepdf > .ui-bottombar .ui-btn');
+  await snack(page, S.importFailed);
+  await page.waitForFunction((text) => window.__said.some((s) => s.text === text), S.importFailed, { timeout: 5000 });
+  eq((await page.evaluate(() => window.__said)).filter((s) => s.text === S.importFailed).map((s) => s.modal), [false], 'said once, with no dialog over the page');
+
+  // A PDF pasted on the result screen, then one pasted on the tool: it takes the open one's place.
+  const paste = (name, bytes) => page.evaluate(({ name, b64 }) => {
+    const data = new DataTransfer();
+    data.items.add(new File([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], name, { type: 'application/pdf' }));
+    document.body.focus();
+    document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+  }, { name, b64: Buffer.from(bytes).toString('base64') });
+  await openTool(page, url, 'split');
+  await pick(page, asFile('Report.pdf', fx.report));
+  await chosen(page, 'Report.pdf');
+  await typeInto(page, '.split-field .ui-field-input', '1');
+  await runTool(page, { touch: false });
+  await paste('OnResult.pdf', fx.other);
+  await page.waitForTimeout(300);
+  // Back to editing from the keyboard: the focus goes to the main button.
+  await page.focus('.ui-result .ui-topbar-nav');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('.ui-result', { state: 'detached' });
+  eq(await active(), S.split, 'Back to editing: the focus on Split PDF');
+  eq(await page.textContent('.onepdf-card .ui-file-name'), 'Report.pdf', 'a paste on the result screen changes nothing');
+  await paste('Pasted.pdf', fx.other);
+  await chosen(page, 'Pasted.pdf');
+
+  // Start over from the keyboard (not saved: asked first): the focus on Choose PDF.
+  await typeInto(page, '.split-field .ui-field-input', '2');
+  await runTool(page, { touch: false });
+  await page.focus('.ui-result-startover');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('dialog[open] .ui-btn:has-text("Start over")');
+  await page.click('dialog[open] .ui-btn:has-text("Start over")');
+  await page.waitForSelector('.onepdf .ui-empty');
+  await page.waitForSelector('dialog[open]', { state: 'detached' });
+  ok(await page.evaluate(() => document.activeElement === document.querySelector('.onepdf .ui-empty')), `Start over: the focus on Choose PDF (${await active()})`);
+
+  // Rotate: Reset pages turns itself off; the focus goes to "Rotate all pages right".
+  await openTool(page, url, 'rotate');
+  await pick(page, asFile('Report.pdf', fx.report));
+  await chosen(page, 'Report.pdf');
+  await page.focus('.rotate-card:nth-of-type(2) .ui-icon-btn[aria-label="Rotate page 2 left"]');
+  await page.keyboard.press('Enter');
+  await page.focus('.rotate-reset');
+  await page.keyboard.press('Enter');
+  eq(await page.evaluate(() => [...document.querySelectorAll('.rotate-card')].map((c) => c.card.angle % 360)).then((a) => a.every((x) => x === 0)), true, 'Reset pages turns them back');
+  eq(await active(), 'Rotate all pages right', 'Reset pages: the focus on Rotate all pages right');
+
+  // On a wide screen the main button ends where the column above it ends.
+  for (const width of [1366, 1920]) {
+    await page.setViewportSize({ width, height: 900 });
+    const edges = await page.evaluate(() => {
+      const main = document.querySelector('.onepdf-main');
+      const column = main.getBoundingClientRect().right - parseFloat(getComputedStyle(main).paddingRight);
+      return { column, button: document.querySelector('.onepdf > .ui-bottombar .ui-btn').getBoundingClientRect().right };
+    });
+    ok(Math.abs(edges.column - edges.button) <= 1, `${width} px: the main button under the column's end (${JSON.stringify(edges)})`);
+  }
+  await page.setViewportSize(DESKTOP);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -919,7 +1057,11 @@ const step = async (name, fn) => {
   console.log(`  ok ${name} (${((performance.now() - t0) / 1000).toFixed(1)} s)`);
 };
 
-if (!OTHERS) {
+if (REVIEW) {
+  await withPage(async (page, url) => {
+    await step('focus, messages after the progress, paste after a result, layout', () => testReviewFixes(page, url, fx));
+  }, { viewport: DESKTOP, mobile: false });
+} else if (!OTHERS) {
 await step('strings', () => testStrings());
 console.log('Phone (360 px, touch), Chromium');
 await withPage(async (page, url) => {
@@ -932,10 +1074,15 @@ await withPage(async (page, url) => {
 
 console.log('Desktop (1366 px, mouse and keyboard), Chromium');
 await withPage(async (page, url) => {
+  // Nothing these tools do embeds a font with pdf-lib: fontkit (157 kB gzipped) isn't loaded.
+  const fontkit = [];
+  page.on('request', (r) => { if (r.url().includes('/vendor/fontkit/')) fontkit.push(r.url()); });
   await step('split', () => testSplit(page, url, fx, { touch: false, wide: true }));
   await step('delete pages', () => testDeletePages(page, url, fx, { touch: false, wide: true }));
   await step('rotate', () => testRotate(page, url, fx, { touch: false, wide: true }));
   await step('keyboard, drop, paste, long PDF, cancel', () => testDesktopExtras(page, url, fx));
+  await step('focus, messages after the progress, paste after a result, layout', () => testReviewFixes(page, url, fx));
+  eq(fontkit, [], 'no fontkit loaded by Split, Delete pages or Rotate');
 }, { viewport: DESKTOP, mobile: false });
 }
 

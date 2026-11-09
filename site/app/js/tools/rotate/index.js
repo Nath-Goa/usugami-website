@@ -177,7 +177,11 @@ export function mount(ctx) {
     function changed(only) {
       if (only != null) cards[only].update();
       else for (const card of cards) card.update();
+      const hadFocus = document.activeElement === reset;
       reset.disabled = !turned();
+      // Reset pressed, it turns itself off: the focus goes to "Rotate all pages right" rather than
+      // falling to the page.
+      if (hadFocus && reset.disabled) allRight.focus({ preventScroll: true });
       refresh();
     }
 
@@ -195,10 +199,11 @@ export function mount(ctx) {
     };
 
     const allHeadingId = uid('rotate-all');
+    const allRight = unmirrored(iconButton({ icon: 'rotate_right', label: t('rotate_all_right'), onClick: () => rotateAll(90) }));
     const all = h('div', { class: 'rotate-all-row', role: 'group', 'aria-labelledby': allHeadingId },
       h('h2', { class: 'onepdf-heading rotate-all-title', id: allHeadingId }, t('rotate_all')),
       unmirrored(iconButton({ icon: 'rotate_left', label: t('rotate_all_left'), onClick: () => rotateAll(-90) })),
-      unmirrored(iconButton({ icon: 'rotate_right', label: t('rotate_all_right'), onClick: () => rotateAll(90) })));
+      allRight);
     const head = h('div', { class: 'rotate-all' }, all, h('p', { class: 'onepdf-hint' }, t('rotate_hint')));
 
     return {

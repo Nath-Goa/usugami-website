@@ -867,7 +867,8 @@ await withPage(async (page, url, context) => {
   // Drawn with a finger, and highlighted.
   await tool(page, 'Draw').click();
   ok(await tool(page, 'Draw').getAttribute('aria-pressed') === 'true', 'Draw is on');
-  ok((await page.locator('.edit-hint').textContent()).startsWith('Draw on the page'), 'the drawing hint');
+  // On a touch screen, the app's own words (edit_hint_draw); the mouse wording is for computers.
+  ok(await page.locator('.edit-hint').textContent() === 'Draw with your finger. To scroll, swipe beside the page.', 'the drawing hint, as the app words it on a phone');
   ok(await page.getByRole('slider', { name: 'Thickness' }).isVisible(), "the pen's thickness shows while drawing");
   const a = await at(page, 60, 80);
   const yDraw = await page.evaluate(() => scrollY);
@@ -1150,13 +1151,254 @@ for (const browser of quick ? ['chromium'] : ['chromium', 'firefox', 'webkit']) 
       await navigate('/tool/edit', { files: [{ name: 'Locked.pdf', type: 'application/pdf', size: bytes.length, lastModified: 0, bytes }] });
     }, b64(locked));
     await page.locator('dialog[open] input[type="password"]').waitFor();
+    // As Android's Back, the first Back closes the dialog (the router does that now) and the
+    // next leaves; either way no dialog stays behind.
     await page.goBack();
-    await page.waitForSelector('.screen[data-route="home"]:not([aria-busy])');
     await page.waitForSelector('dialog[open]', { state: 'detached', timeout: 5000 });
+    if (await page.evaluate(() => location.hash) === '#/tool/edit') await page.goBack();
+    await page.waitForSelector('.screen[data-route="home"]:not([aria-busy])');
     await page.waitForTimeout(300);
     ok((await page.locator('.screen[data-tool="edit"]').count()) === 0 && !(await page.$('dialog[open]')), `${browser}: the password dialog went with the screen`);
   }, { browser, viewport: { width: 412, height: 915 } });
 }
+
+// ---- Review fixes: presses don't scroll, keys on sliders, focus kept, the app's language ----
+
+/** A one-page PDF pdf.js shows but whose page tree loops for pdf-lib, made slow to read (many objects). */
+async function loopingPdf() {
+  const doc = await PDFDocument.create();
+  doc.addPage([595.28, 841.89]);
+  const ctx = doc.context;
+  for (let i = 0; i < 15000; i++) ctx.register(ctx.obj({ Filler: i }));
+  // The page tree's own node among its kids: pdf.js finds page 1 before it, pdf-lib goes round.
+  const pagesRef = doc.catalog.get(PDFName.of('Pages'));
+  ctx.lookup(pagesRef).get(PDFName.of('Kids')).push(pagesRef);
+  return doc.save({ useObjectStreams: false });
+}
+
+step('desktop: a press at 400% doesn\'t scroll; keys on a slider; focus kept on Filled and the move buttons');
+await withPage(async (page, url) => {
+  await openEditor(page, url, mixed);
+  await addShape(page, 'Filled rectangle');
+  for (let i = 0; i < 4; i++) await page.getByRole('button', { name: 'Zoom in' }).click();
+  ok(near((await inspect(page)).zoom, 4, 0.001), 'zoomed to 400%');
+  await page.locator('.edit-frame').evaluate((el) => el.scrollIntoView({ block: 'center' }));
+  let s = await inspect(page);
+  const box = s.items[0];
+  // Scrolled so only the right fifth of the box shows, at the left of the view.
+  await page.evaluate(({ x1, x2, y1, y2 }) => {
+    const v = document.querySelector('.edit-viewport');
+    const k = document.querySelector('.edit-sheet').getBoundingClientRect().width / window.__edit.inspect().size.width;
+    v.scrollLeft = (x1 + (x2 - x1) * 0.8) * k - 4;
+    v.scrollTop = ((y1 + y2) / 2) * k - v.clientHeight / 2;
+  }, box);
+  await settle(page);
+  await page.keyboard.press('Escape');
+  ok((await inspect(page)).selected === null, 'let go');
+  const k = await scaleOf(page);
+  const before = await page.evaluate(() => [document.querySelector('.edit-viewport').scrollLeft, document.querySelector('.edit-viewport').scrollTop]);
+  const vbox = await page.locator('.edit-viewport').boundingBox();
+  // On the part of the box showing, at the left of the view, half way down it.
+  const grip = [vbox.x + 0.1 * (box.x2 - box.x1) * k, vbox.y + vbox.height / 2];
+  await mouseDrag(page, grip, [grip[0] + 20, grip[1]], 8);
+  const after = await page.evaluate(() => [document.querySelector('.edit-viewport').scrollLeft, document.querySelector('.edit-viewport').scrollTop]);
+  s = await inspect(page);
+  ok(after[0] === before[0] && after[1] === before[1], `a mouse press on a part showing doesn't scroll the page (${before} → ${after})`);
+  ok(near(s.items[0].x1 - box.x1, 20 / k, 1), `and the box moves as far as the mouse: ${(s.items[0].x1 - box.x1).toFixed(2)} pt for ${(20 / k).toFixed(2)}`);
+  // Chosen with the keyboard, an item out of view is scrolled to.
+  await page.keyboard.press('Escape');
+  await page.evaluate(() => { const v = document.querySelector('.edit-viewport'); v.scrollLeft = 0; v.scrollTop = 0; });
+  // Focused without the browser scrolling to it, so only choosing it scrolls.
+  await page.locator('.edit-node').first().evaluate((b) => b.focus({ preventScroll: true }));
+  await page.keyboard.press('Enter');
+  const revealed = await page.evaluate(() => document.querySelector('.edit-viewport').scrollLeft);
+  ok(revealed > 0, `an item chosen with Enter is scrolled to (${revealed})`);
+  for (let i = 0; i < 6; i++) if (!(await page.getByRole('button', { name: 'Zoom out' }).isDisabled())) await page.getByRole('button', { name: 'Zoom out' }).click();
+
+  // The size slider used with the mouse keeps the focus: Ctrl+Z, Ctrl+Y and Delete still work.
+  s = await inspect(page);
+  const w0 = s.items[0].x2 - s.items[0].x1;
+  const sizeSlider = page.getByRole('slider', { name: 'Size' });
+  const sb = await sizeSlider.boundingBox();
+  await page.mouse.click(sb.x + sb.width * 0.9, sb.y + sb.height / 2);
+  ok(await page.evaluate(() => document.activeElement?.type === 'range'), 'the slider has the focus');
+  const w1 = (await inspect(page)).items[0].x2 - (await inspect(page)).items[0].x1;
+  ok(w1 > w0 + 5, `the slider made it bigger (${w0.toFixed(0)} → ${w1.toFixed(0)})`);
+  await page.keyboard.press('Control+z');
+  s = await inspect(page);
+  ok(near(s.items[0].x2 - s.items[0].x1, w0, 0.01), 'Ctrl+Z on the slider undoes');
+  await page.keyboard.press('Control+y');
+  s = await inspect(page);
+  ok(near(s.items[0].x2 - s.items[0].x1, w1, 0.01), 'Ctrl+Y on the slider redoes');
+  await page.getByRole('slider', { name: 'Size' }).focus();
+  const centreBefore = (s.items[0].x1 + s.items[0].x2) / 2;
+  const valueBefore = await page.getByRole('slider', { name: 'Size' }).inputValue();
+  await page.keyboard.press('ArrowLeft');
+  s = await inspect(page);
+  ok(Number(await page.getByRole('slider', { name: 'Size' }).inputValue()) < Number(valueBefore), "the slider's own arrow keys change it");
+  ok(near((s.items[0].x1 + s.items[0].x2) / 2, centreBefore, 0.01), 'and not the place of the item');
+  await page.keyboard.press('Delete');
+  ok((await inspect(page)).items.length === 0, 'Delete on the slider removes the item');
+  await page.keyboard.press('Control+z');
+  ok((await inspect(page)).items.length === 1, 'and Ctrl+Z brings it back');
+
+  // Filled turned off and on with Space: the focus stays on the switch, Thickness comes and goes.
+  await page.locator('.edit-node').first().focus();
+  await page.keyboard.press('Enter');
+  await page.locator('.edit-fill [role="switch"]').focus();
+  await page.keyboard.press('Space');
+  ok(await page.evaluate(() => document.activeElement?.getAttribute('role') === 'switch'), 'Filled keeps the focus once off');
+  ok(await page.getByRole('slider', { name: 'Thickness' }).isVisible(), 'and Thickness shows');
+  await page.keyboard.press('Space');
+  ok(await page.evaluate(() => document.activeElement?.getAttribute('role') === 'switch'), 'and once on again');
+  ok((await page.getByRole('slider', { name: 'Thickness' }).count()) === 0, 'and Thickness goes');
+
+  // Move right pressed up to the edge: off, but the focus stays on it.
+  const right = page.getByRole('button', { name: 'Move right' });
+  await right.focus();
+  let pressed = 0;
+  while (pressed < 60 && (await right.getAttribute('aria-disabled')) !== 'true') { await page.keyboard.press('Enter'); pressed++; }
+  ok((await right.getAttribute('aria-disabled')) === 'true', `Move right is off against the edge (${pressed} presses)`);
+  ok(await page.evaluate(() => document.activeElement?.getAttribute('aria-label') === 'Move right'), 'and keeps the focus');
+  const xAtEdge = (await inspect(page)).items[0].x1;
+  await page.keyboard.press('Enter');
+  ok((await inspect(page)).items[0].x1 === xAtEdge, 'pressed again, nothing moves');
+
+  // The colour changed: the text never vanishes for a frame.
+  await page.keyboard.press('Escape');
+  await addText(page, 'BLINK TEST TEXT');
+  await settle(page);
+  const inkedNextFrame = await page.evaluate(async () => {
+    const canvas = document.querySelector('.edit-canvas');
+    const blue = () => {
+      const d = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+      let n = 0;
+      for (let i = 0; i < d.length; i += 4) if (d[i + 2] > 120 && d[i] < 90 && d[i + 1] < 140) n++;
+      return n;
+    };
+    document.querySelector('.edit-props-item [role="radio"][aria-label="Blue"]').click();
+    // The stage's frame was asked for first, so it has painted by the time this one runs.
+    await new Promise((r) => requestAnimationFrame(r));
+    return blue();
+  });
+  ok(inkedNextFrame > 20, `the text shows in its new colour in the very next frame (${inkedNextFrame} blue pixels)`);
+
+  // The next PDF starts with the app's default style.
+  ok((await inspect(page)).style.textColor !== '#000000', 'the style follows the colour picked');
+  await page.locator('.edit-card').getByRole('button', { name: 'Remove Mixed.pdf' }).click();
+  await page.locator('dialog[open]').getByRole('button', { name: 'Discard' }).click();
+  await page.locator('.ui-empty').waitFor();
+  await openEditor(page, url, mixed);
+  const fresh = await page.evaluate(async () => {
+    const { DEFAULT_STYLE } = await import('./js/engine/edit/layout.js');
+    return { style: window.__edit.inspect().style, DEFAULT_STYLE };
+  });
+  ok(JSON.stringify(fresh.style) === JSON.stringify(fresh.DEFAULT_STYLE), 'another PDF starts with the default style');
+}, { viewport: { width: 1366, height: 900 } });
+
+step('the page keeps what pdf.js decoded only for the page showing');
+await withPage(async (page, url) => {
+  await openEditor(page, url, mixed);
+  for (const n of [2, 3, 4, 1]) {
+    await page.getByRole('radio', { name: `Page ${n}` }).click();
+    await page.waitForFunction((i) => window.__edit.inspect().page === i, n - 1);
+    await page.waitForTimeout(150);
+  }
+  const kept = (await inspect(page)).keptPages;
+  ok(kept === 1, `after four pages shown, pdf.js keeps one (${kept})`);
+}, { viewport: { width: 1280, height: 800 } });
+
+step('phone: a finger press at 300% doesn\'t scroll the page');
+await withPage(async (page, url, context) => {
+  await openEditor(page, url, mixed);
+  const cdp = await context.newCDPSession(page);
+  await addShape(page, 'Filled rectangle');
+  for (let i = 0; i < 3; i++) await page.getByRole('button', { name: 'Zoom in' }).click();
+  const box = (await inspect(page)).items[0];
+  await page.locator('.edit-frame').evaluate((el) => el.scrollIntoView({ block: 'center' }));
+  await page.evaluate(({ x1, x2, y1, y2 }) => {
+    const v = document.querySelector('.edit-viewport');
+    const k = document.querySelector('.edit-sheet').getBoundingClientRect().width / window.__edit.inspect().size.width;
+    v.scrollLeft = (x1 + (x2 - x1) * 0.8) * k - 4;
+    v.scrollTop = ((y1 + y2) / 2) * k - v.clientHeight / 2;
+  }, box);
+  await settle(page);
+  // Let go of it with a tap on the page beside it.
+  const vb = await page.locator('.edit-viewport').boundingBox();
+  await page.touchscreen.tap(vb.x + vb.width * 0.85, vb.y + vb.height * 0.5);
+  await settle(page);
+  ok((await inspect(page)).selected === null, 'let go with a tap beside it');
+  const k = await scaleOf(page);
+  const before = await page.evaluate(() => document.querySelector('.edit-viewport').scrollLeft);
+  const from = [vb.x + 0.1 * (box.x2 - box.x1) * k, vb.y + vb.height / 2];
+  await touchDrag(cdp, from, [from[0] + 20, from[1]], 10);
+  await settle(page);
+  const after = await page.evaluate(() => document.querySelector('.edit-viewport').scrollLeft);
+  const s = await inspect(page);
+  ok(after === before, `a finger press doesn't scroll the page (${before} → ${after})`);
+  ok(near(s.items[0].x1 - box.x1, 20 / k, 1), `and the box follows the finger: ${(s.items[0].x1 - box.x1).toFixed(2)} pt for ${(20 / k).toFixed(2)}`);
+});
+
+step('the app\'s language for numbers, whatever the browser\'s; a failed save said after the progress dialog');
+await withPage(async (page0, url, context) => {
+  // A German browser with the app in English: 150% and 2.5 pt, as the rest of the screen.
+  const de = await context.browser().newContext({ locale: 'de-DE', viewport: { width: 1280, height: 800 } });
+  const page = await de.newPage();
+  await openEditor(page, url, mixed);
+  await addShape(page, 'Rectangle');
+  await page.getByRole('button', { name: 'Zoom in' }).click();
+  ok(await page.locator('.edit-zoom-label').textContent() === '150%', `the zoom reads 150% (${await page.locator('.edit-zoom-label').textContent()})`);
+  const thickness = await page.getByRole('slider', { name: 'Thickness' }).getAttribute('aria-valuetext');
+  ok(/^\d+(\.\d)? pt$/.test(thickness), `the thickness is written the English way (${thickness})`);
+  await de.close();
+
+  // A PDF pdf-lib can't read (its page tree loops): the snackbar comes once the progress dialog has gone.
+  const looping = await loopingPdf();
+  await openEditor(page0, url, looping, 'Looping.pdf');
+  await addShape(page0, 'Arrow');
+  await page0.evaluate(() => {
+    window.__seen = [];
+    new MutationObserver((list) => {
+      for (const m of list) for (const n of m.addedNodes) {
+        if (n.nodeType === 1 && n.classList.contains('ui-snackbar')) window.__seen.push({ text: n.textContent, modal: !!document.querySelector('dialog[open]') });
+        if (n.nodeType === 1 && n.matches('dialog')) window.__dialogShown = true;
+      }
+    }).observe(document.body, { childList: true, subtree: true });
+  });
+  const cdp = await context.newCDPSession(page0);
+  await cdp.send('Emulation.setCPUThrottlingRate', { rate: 6 });
+  await page0.getByRole('button', { name: 'Save PDF', exact: true }).click();
+  await page0.waitForFunction(() => window.__seen.length > 0, null, { timeout: 60000 });
+  await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+  const seen = await page0.evaluate(() => ({ seen: window.__seen, dialog: !!window.__dialogShown }));
+  ok(seen.dialog, 'the progress dialog showed');
+  ok(seen.seen[0].text.startsWith("Couldn't"), `the failure is said (${seen.seen[0].text})`);
+  ok(!seen.seen[0].modal, 'once the progress dialog has gone, so a screen reader hears it');
+}, { viewport: { width: 1280, height: 800 } });
+
+step('the editor\'s code loads after the empty card shows; a cancelled password leaves the focus on Choose PDF');
+await withPage(async (page, url) => {
+  // pdf-lib and fontkit never arrive: Choose PDF shows all the same.
+  await page.route('**/vendor/pdf-lib/**', () => {});
+  await page.route('**/vendor/fontkit/**', () => {});
+  await page.goto(url + 'app/#/tool/edit');
+  await page.locator('.ui-empty').waitFor({ timeout: 8000 });
+  ok(await page.locator('.ui-empty').isVisible(), 'Choose PDF shows without pdf-lib or fontkit');
+}, { viewport: { width: 1280, height: 800 }, ignoreProblems: true });
+await withPage(async (page, url) => {
+  await page.goto(url + 'app/#/tool/edit');
+  await page.waitForSelector('.screen[data-tool="edit"]:not([aria-busy])');
+  ok((await page.locator('main[data-main]').count()) === 1, 'the screen has one main landmark');
+  await page.locator('.ui-empty').focus();
+  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.keyboard.press('Enter')]);
+  await chooser.setFiles({ name: 'Locked.pdf', mimeType: 'application/pdf', buffer: Buffer.from(locked) });
+  await page.locator('dialog[open] input[type="password"]').waitFor();
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('dialog[open]', { state: 'detached' });
+  await page.waitForTimeout(200);
+  ok(await page.evaluate(() => document.activeElement?.classList.contains('ui-empty')), 'the password dialog cancelled, the focus is back on Choose PDF');
+  ok(!(await page.locator('.ui-empty').evaluate((b) => b.disabled)), 'which was never disabled');
+}, { viewport: { width: 1280, height: 800 } });
 
 // ---- Screenshots: phone and desktop, light and dark ----
 

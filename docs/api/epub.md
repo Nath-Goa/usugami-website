@@ -25,7 +25,8 @@ E-books (`.epub`, EPUB 2 and EPUB 3) laid out as PDF pages, in the browser: a po
   **bookmarks**, each leading to the page and height of its place; without one, each document's
   first main heading. The title, author and language go into the PDF.
 - Text stays real, searchable text with only the letters used embedded; pictures are stored at
-  no more than 150 pixels per inch, JPEG at quality 75 when opaque (OfficeImages, office-core).
+  no more than 150 pixels per inch, JPEG at quality 75 when that is smaller and the picture takes
+  2 KB or more, lossless otherwise (OfficeImages, office-core).
 - Books with DRM, other files, damaged and hostile books get the app's messages (below); a
   chapter that can't be read is left out and the rest converted, as in the app.
 
@@ -293,7 +294,8 @@ compressing PDF…", `creating_pdfs` "Creating and compressing PDFs…".
 - Pictures: sizes are read from the file's header for JPEG, PNG, GIF, BMP and WebP; HEIF and AVIF
   pictures count only where the browser decodes them (else their `alt` text shows, as for SVG).
   They are stored as office-core's OfficeImages stores them (150 pixels per inch where shown, JPEG
-  quality 75) rather than drawn at 200 dpi and then compressed.
+  quality 75 when that is smaller and the picture takes 2 KB or more, as Compress PDF leaves them)
+  rather than drawn at 200 dpi and then compressed.
 - Fonts are the bundled Noto fonts (serif, sans-serif, monospace) on every device; characters they
   lack (Chinese, Japanese, Arabic, Hebrew...) are drawn by the browser (see docs/api/text.md).
 - Lengths are laid out in fractional points rather than Android's tenths, so a line or page can

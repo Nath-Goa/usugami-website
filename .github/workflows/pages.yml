@@ -1,6 +1,6 @@
-# Publishes site/ to GitHub Pages. One-time setup: repository Settings > Pages > Source: GitHub Actions.
-# The site then appears at https://nath-goa.github.io/usugami-website/ (or at the custom domain set
-# in Settings > Pages; no CNAME file is needed when deploying with Actions).
+# Publishes site/ to GitHub Pages (repository Settings > Pages > Source: GitHub Actions). The site
+# is at the custom domain set there, https://usugami.com/; https://nath-goa.github.io/usugami-website/
+# redirects to it. No CNAME file is needed when deploying with Actions (don't add one).
 name: Deploy to GitHub Pages
 
 on:

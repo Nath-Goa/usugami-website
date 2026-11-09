@@ -14,6 +14,7 @@
 // Elements nested deeper than MAX_DEPTH, which the app skips, are cut out of the text, so the
 // browser's parser (which gives up at a few thousand levels) reads the rest as the app does.
 import { checkCancelled } from '../../core/errors.js';
+import { pause } from './pause.js';
 
 /** Far longer than any text or tag Office writes: a cell holds 32,767 characters at most. */
 export const MAX_RUN = 8 * 1024 * 1024;
@@ -396,8 +397,6 @@ export async function guardXmlAsync(text, { signal, doctype } = {}) {
   guard.end();
   return withoutCuts(t, guard.cuts);
 }
-
-const pause = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 // ---------------------------------------------------------------------------------------------
 // Encodings

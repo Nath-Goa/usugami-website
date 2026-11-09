@@ -899,7 +899,9 @@ async function gardens(page) {
   check('bookmarks from the EPUB 3 navigation document, not its hidden landmarks', JSON.stringify(r.outline.map((o) => o.title)) === '["Cover","Hello garden"]' &&
     r.outline[0].page === 0 && r.outline[1].page === 1 && JSON.stringify(r.outline[1].items.map((o) => o.title)) === '["The beds"]', r.outline);
   check('a book without an author has none in the PDF', r.info.title === 'A Small Garden' && !r.info.author && r.info.language === 'en', r.info);
-  check('pictures are compressed: opaque ones as JPEG, no bigger than 150 pixels per inch', r.objects.length === 2 && r.objects.every((o) => o.filter === '/DCTDecode') &&
+  // As Compress PDF leaves the app's: these flat pictures stay lossless (a JPEG would be no smaller
+  // than their few hundred bytes); photos become JPEGs (checked in office-core.test.mjs).
+  check('pictures are stored no bigger than 150 pixels per inch, flat ones losslessly', r.objects.length === 2 && r.objects.every((o) => o.filter === '/FlateDecode') &&
     r.objects.some((o) => o.width <= 600 && o.height <= 900) && r.objects.some((o) => o.width <= 459 && o.width >= 300), r.objects);
   const [pages, coverImgs, noCoverTexts] = r.noCover;
   check("a cover the book doesn't show is added first", pages === 2 && coverImgs.length === 1 && near(coverImgs[0].y1 - coverImgs[0].y0, 595, 2) && noCoverTexts[1].includes('Hello garden'), r.noCover);
@@ -1328,9 +1330,11 @@ async function main() {
       await reader(page);
       await orchard(page);
       await gardens(page);
+      await damaged(page);
       await refused(page);
       await eastAsian(page);
-    }, { browser });
+      // Firefox writes each XML error DOMParser meets to the console: those (and only those) are let through.
+    }, { browser, allowConsole: browser === 'firefox' ? [/XML Parsing Error/] : [] });
   }
   console.log(`epub: ${chromium} checks in Chromium, ${passed - chromium} in Firefox and WebKit`);
 }

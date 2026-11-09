@@ -9,8 +9,9 @@
 //
 // Run with: node tests/office-ui.test.mjs   (--quick: Chromium only, no screenshots)
 // Screenshots go to .tmp/office-ui/screens/ to be looked at.
-import { readFile, mkdir, access } from 'node:fs/promises';
+import { readFile, readdir, mkdir, access } from 'node:fs/promises';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { withPage, assert, root } from './harness.mjs';
 import { zipSync } from '../site/app/js/lib/fflate.js';
 import common from '../site/app/locales/en/common.js';
@@ -381,7 +382,39 @@ async function themes(page, name, options) {
 // ---------------------------------------------------------------------------------------------
 // In Node: the strings
 
+/**
+ * docs/api/office-ui.md's Strings section names each key's file as it is: those it lists for
+ * office.js are there, those for common.js and kit.js there, and office.js defines no key another
+ * locales/en file has.
+ */
+async function testDocStrings() {
+  const doc = await readFile(join(root, 'docs', 'api', 'office-ui.md'), 'utf8');
+  const section = doc.slice(doc.indexOf('## Strings'), doc.indexOf('## Differences from the app'));
+  const keysIn = (text) => [...text.matchAll(/`([a-z][a-z0-9_|]*)`/g)].map((m) => m[1]).filter((k) => k.includes('_') && !k.startsWith('_'))
+    .flatMap((k) => {
+      const [first, ...rest] = k.split('|');
+      const prefix = first.slice(0, first.lastIndexOf('_') + 1);
+      return [first, ...rest.map((r) => prefix + r)];
+    });
+  const commonAt = section.indexOf('from `common.js`');
+  const kitAt = section.indexOf('from `kit.js`');
+  ok(commonAt > 0 && kitAt > commonAt, 'office-ui.md: the Strings section names office.js, common.js and kit.js keys');
+  const lists = { office: keysIn(section.slice(0, commonAt)), common: keysIn(section.slice(commonAt, kitAt)), kit: keysIn(section.slice(kitAt)) };
+  const files = { office, common, kit };
+  for (const [file, keys] of Object.entries(lists)) {
+    ok(keys.length > 2, `office-ui.md lists ${file}.js keys`);
+    for (const key of keys) ok(key in files[file], `office-ui.md: ${key} is defined in ${file}.js`);
+  }
+  const dir = join(root, 'site', 'app', 'locales', 'en');
+  for (const name of (await readdir(dir)).filter((n) => n.endsWith('.js') && n !== 'office.js')) {
+    const other = (await import(pathToFileURL(join(dir, name)).href)).default;
+    const twice = Object.keys(office).filter((k) => k in other);
+    eq(twice, [], `office.js defines no key ${name} has`);
+  }
+}
+
 async function testStrings() {
+  await testDocStrings();
   const xml = await readFile(appRes, 'utf8').catch(() => null);
   if (!xml) {
     console.log('skip strings.xml check (the app is not next to the site)');
@@ -883,6 +916,37 @@ async function share(page, fx) {
   }, fx.map((f) => ({ name: f.name, type: f.mimeType, b64: f.buffer.toString('base64') })));
 }
 
+/** A long Word document: its conversion shows the progress dialog for a while. */
+const LONG = file('Long.docx', docx(Array.from({ length: 8000 }, (_, i) => (i % 40 === 39 ? '\f' : `Paragraph ${i + 1} of a long report about the garden, with enough words to wrap onto a second line of the page.`))), WORD_TYPE);
+
+/**
+ * The progress dialog laid out as the app's OfficeProgressDialog: its parts 12 px apart (one
+ * file: the bar, then the page; several: the bar, "PDF 2 of 5" and the name, then the page), the
+ * page in the dialog's own text colour.
+ */
+async function checkProgressLayout(page, { many }) {
+  const g = await page.evaluate(() => {
+    const body = document.querySelector('dialog.ui-dialog--progress .ui-dialog-body');
+    // Layout positions (the parts share one offset parent), not the screen's: the dialog may still
+    // be growing in as it opens (a transform).
+    const box = (el) => (el && getComputedStyle(el).display !== 'none' ? { top: el.offsetTop, bottom: el.offsetTop + el.offsetHeight } : null);
+    const bar = box(body.querySelector('.ui-progress'));
+    const text = box(body.querySelector('.ui-progress-text'));
+    const step = body.querySelector('.office-progress-step');
+    return {
+      bar: bar && { top: bar.top, bottom: bar.bottom }, text: text && { top: text.top, bottom: text.bottom }, step: box(step)?.top ?? null,
+      stepColor: getComputedStyle(step).color, bodyColor: getComputedStyle(body).color,
+    };
+  });
+  ok(g.bar && g.step != null, `progress${many ? ' (several)' : ''}: the bar and the page show (${JSON.stringify(g)})`);
+  if (many) {
+    ok(g.text && near(g.text.top - g.bar.bottom, 12, 1) && near(g.step - g.text.bottom, 12, 1), `progress (several): "PDF 3 of 3", its name and the page 12 px apart (${JSON.stringify(g)})`);
+  } else {
+    ok(!g.text && near(g.step - g.bar.bottom, 12, 1), `progress (one): the page 12 px under the bar, nothing between (${JSON.stringify(g)})`);
+  }
+  eq(g.stepColor, g.bodyColor, `progress${many ? ' (several)' : ''}: the page in the dialog's text colour`);
+}
+
 async function testSharedAndProgress(page, url, { touch }) {
   // Files handed over (shared to the app, or opened with it) are checked as picked ones are.
   await page.evaluate(() => { location.hash = '#/'; });
@@ -903,8 +967,7 @@ async function testSharedAndProgress(page, url, { touch }) {
 
   // While converting, shared files wait, and are added once it is done. A long document shows
   // the progress dialog: "PDF 1 of 2", its name, and the page being drawn.
-  const long = file('Long.docx', docx(Array.from({ length: 8000 }, (_, i) => (i % 40 === 39 ? '\f' : `Paragraph ${i + 1} of a long report about the garden, with enough words to wrap onto a second line of the page.`))), WORD_TYPE);
-  await share(page, [long]);
+  await share(page, [LONG]);
   await listed(page, 3);
   await press(page, '.office-run', { touch });
   await page.waitForSelector('dialog.ui-dialog--progress.is-shown', { timeout: 20000 });
@@ -913,6 +976,7 @@ async function testSharedAndProgress(page, url, { touch }) {
   eq(await page.textContent('dialog.ui-dialog--progress .ui-progress-detail'), 'Long.docx', 'progress: the file being converted');
   await page.waitForFunction(() => /\d/.test(document.querySelector('dialog.ui-dialog--progress .office-progress-step:not([hidden])')?.textContent ?? ''), null, { timeout: 60000, polling: 50 });
   ok(/^Page \d+$/.test(await page.textContent('dialog.ui-dialog--progress .office-progress-step')), 'progress: the page being drawn');
+  await checkProgressLayout(page, { many: true });
   if (!QUICK) await page.screenshot({ path: join(shots, `progress-${touch ? 'phone' : 'desktop'}.png`) });
   eq((await handleState(page)).processing, true, 'converting');
   await share(page, [FX.garden]);
@@ -968,6 +1032,110 @@ async function testSharedAndProgress(page, url, { touch }) {
   await press(page, `dialog[open] .ui-btn:has-text("${say('keep')}")`, { touch });
   await page.waitForSelector('dialog[open]', { state: 'detached' });
   ok(await page.$('.ui-result'), 'Keep: still on the result');
+}
+
+// ---------------------------------------------------------------------------------------------
+// Opening fast, the main landmark, the browser's Back and Forward, one file's progress
+
+/**
+ * Each converter's empty "Choose" screen shows at once, without waiting for any library (pdf.js,
+ * pdf-lib, fontkit): they are held back here until all four have shown, then let through, and a
+ * file is converted.
+ */
+async function testOpensWithoutLibraries(page, url, { touch, browser }) {
+  await page.goto(url + 'app/');
+  await page.waitForSelector('html[data-ready="true"]', { timeout: 20000 });
+  await page.waitForSelector('#app .screen[data-route="home"]:not([aria-busy])', { timeout: 20000 });
+  const held = [];
+  await page.route('**/vendor/**', (route) => { held.push(route); });
+  for (const tool of ['word', 'powerpoint', 'excel', 'epub']) {
+    const start = Date.now();
+    await page.evaluate((id) => { location.hash = '#/tool/' + id; }, tool);
+    await page.waitForSelector(`#app .screen[data-tool="${tool}"]:not([aria-busy]) .office-content .ui-empty`, { timeout: 3000 });
+    ok(Date.now() - start < 3000, `${browser}: ${tool} shows its empty screen at once (${Date.now() - start} ms) with the libraries held back`);
+    await page.evaluate(() => { location.hash = '#/'; });
+    await page.waitForSelector('#app .screen[data-route="home"]:not([aria-busy])', { timeout: 20000 });
+  }
+  ok(held.length > 0, `${browser}: the converters' libraries were asked for meanwhile, to be ready when needed`);
+  await page.unroute('**/vendor/**');
+  for (const route of held) await route.continue().catch(() => {});
+  await openTool(page, url, 'word');
+  await pickWith(page, '.ui-empty', [FX.second], { touch, browser });
+  await listed(page, 1);
+  const files = await runToResult(page, { touch });
+  eq(files.map((f) => f.name), ['Second.pdf'], `${browser}: once they come, a document converts`);
+  ok((await readBack(page, files[0].bytes)).pages[0].text.includes('Seed list'), `${browser}: with its text`);
+}
+
+/** One main landmark holding the screen's content, which "Skip to content" moves to. */
+async function testLandmark(page, url, { browser }) {
+  await openTool(page, url, 'excel');
+  const marks = await page.evaluate(() => [...document.querySelectorAll('#app main, #app [role="main"]')].map((m) => ({
+    data: m.hasAttribute('data-main'), content: !!m.querySelector('.office-content'), bar: !!m.querySelector('.ui-topbar'),
+  })));
+  eq(marks, [{ data: true, content: true, bar: false }], `${browser}: one main landmark, with the content and not the top bar`);
+  await page.focus('.skip-link');
+  await page.keyboard.press('Enter');
+  ok(await page.evaluate(() => document.activeElement?.matches('#app main')), `${browser}: "Skip to content" moves to it`);
+  await page.keyboard.press('Tab');
+  ok(await page.evaluate(() => !!document.activeElement?.closest('#app main')), `${browser}: the next Tab lands in it, past the top bar`);
+}
+
+/**
+ * The browser's Back and Forward between the files and the result (pushStep('result') and
+ * onStep), as the other tools: Forward shows the result left with Back; after Start over it stays
+ * on the files; a reload on the result's step leaves that step.
+ */
+async function testSteps(page, url, { touch, browser }) {
+  await openTool(page, url, 'word');
+  await pickWith(page, '.ui-empty', [FX.second], { touch, browser });
+  await listed(page, 1);
+  await runToResult(page, { touch });
+  ok(await page.evaluate(() => history.state?.step === 'result'), `${browser}: the result is a step of its own in the history`);
+  await backToEditing(page, { browserBack: true });
+  await listed(page, 1);
+  await page.goForward();
+  await page.waitForSelector('.ui-result', { timeout: 10000 });
+  ok(true, `${browser}: Forward shows the result again`);
+  await backToEditing(page, { browserBack: true });
+  await page.goForward();
+  await page.waitForSelector('.ui-result', { timeout: 10000 });
+  await press(page, `.ui-result .ui-btn:has-text("${say('start_over')}")`, { touch });
+  await page.waitForSelector(`dialog[open] .ui-dialog-title:has-text("${say('start_over_title')}")`);
+  await press(page, `dialog[open] .ui-btn:has-text("${say('start_over')}")`, { touch });
+  await page.waitForSelector('.ui-result', { state: 'detached' });
+  await listed(page, 0);
+  await page.goForward();
+  await page.waitForFunction(() => !history.state?.step, null, { timeout: 10000 });
+  await page.waitForTimeout(300);
+  ok(!(await page.$('.ui-result')) && await page.$('.office-content--empty'), `${browser}: Forward to a result that has gone stays on the files`);
+  // A reload on the result's step: the result is gone, and its step with it.
+  await pickWith(page, '.ui-empty', [FX.second], { touch, browser });
+  await listed(page, 1);
+  await runToResult(page, { touch });
+  const accept = (dialog) => dialog.accept().catch(() => {});
+  page.on('dialog', accept);
+  await page.reload();
+  page.off('dialog', accept);
+  await page.waitForSelector('#app .screen[data-tool="word"]:not([aria-busy]) .office-content--empty', { timeout: 20000 });
+  await page.waitForFunction(() => !history.state?.step, null, { timeout: 10000 });
+  ok(!(await page.$('.ui-result')), `${browser}: reloaded on the result: the files' screen, without the result's step`);
+}
+
+/** One long file converting: the bar, then the page 12 px under it in the dialog's text colour. */
+async function testOneFileProgress(page, url, { touch, browser }) {
+  await openTool(page, url, 'word');
+  await pickWith(page, '.ui-empty', [LONG], { touch, browser });
+  await listed(page, 1);
+  await press(page, '.office-run', { touch });
+  await page.waitForSelector('dialog.ui-dialog--progress.is-shown', { timeout: 20000 });
+  eq(await page.textContent('dialog.ui-dialog--progress .ui-dialog-title'), say('creating_pdf'), `${browser}: one file: "Creating and compressing PDF…"`);
+  await page.waitForFunction(() => /\d/.test(document.querySelector('dialog.ui-dialog--progress .office-progress-step:not([hidden])')?.textContent ?? ''), null, { timeout: 60000, polling: 50 });
+  await checkProgressLayout(page, { many: false });
+  if (!QUICK && browser === 'chromium') await page.screenshot({ path: join(shots, 'progress-one.png') });
+  await press(page, 'dialog.ui-dialog--progress .ui-btn', { touch });
+  await page.waitForSelector('dialog.ui-dialog--progress', { state: 'detached', timeout: 30000 });
+  ok(!(await page.$('.ui-result')), `${browser}: cancelled: no result`);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1045,12 +1213,26 @@ await withPage(async (page, url) => {
   console.log('converter load failure ok');
 }, { viewport: PHONE, ignoreProblems: true });
 
+for (const browser of QUICK ? ['chromium'] : ['chromium', 'firefox', 'webkit']) {
+  const touch = browser !== 'firefox';
+  await withPage(async (page, url) => {
+    await testOpensWithoutLibraries(page, url, { touch, browser });
+    console.log(`opening without libraries ${browser} ok`);
+    await testLandmark(page, url, { browser });
+    console.log(`landmark ${browser} ok`);
+    await testSteps(page, url, { touch, browser });
+    console.log(`back and forward ${browser} ok`);
+    await testOneFileProgress(page, url, { touch, browser });
+    console.log(`one file's progress ${browser} ok`);
+  }, { viewport: PHONE, browser, allowConsole: browser === 'firefox' ? [/XML Parsing Error/] : [] });
+}
+
 if (!QUICK) {
   for (const browser of ['firefox', 'webkit']) {
     await withPage(async (page, url) => {
       await testEpub(page, url, { touch: browser !== 'firefox', label: browser, browser });
       console.log(`epub ${browser} ok`);
-    }, { viewport: PHONE, browser, allowConsole: [/^XML Parsing Error/] });
+    }, { viewport: PHONE, browser, allowConsole: [/XML Parsing Error/] });
   }
 }
 

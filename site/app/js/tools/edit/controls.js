@@ -1,7 +1,7 @@
 // Edit PDF's controls (EditPdfOptions.kt): the row of tools, the colours, the chosen item's
 // controls (or the pen's while drawing), the row of pages and the text dialog.
 import { h, announce } from '../../core/dom.js';
-import { t, tWeb } from '../../core/i18n.js';
+import { t, tWeb, formatNumber } from '../../core/i18n.js';
 import { icon } from '../../core/icons.js';
 import { iconButton, slider, switchRow, textField, button, bottomSheet, uid } from '../../core/ui.js';
 import {
@@ -15,7 +15,11 @@ export function describe(item) {
   return arg != null ? t(key, arg) : t(key);
 }
 
-const formatPoints = (v) => t('web_edit_points', new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(v));
+// In the app's language, as every number on the screen.
+const formatPoints = (v) => t('web_edit_points', formatNumber(v, { maximumFractionDigits: 1 }));
+
+/** Whether a button is off for now (aria-disabled, so it keeps the focus it may have). */
+const isOff = (b) => b.getAttribute('aria-disabled') === 'true';
 
 // ---- The row of tools ----
 
@@ -178,7 +182,7 @@ export function colorSwatches({ value, onSelect }) {
  * A slider whose drag (or each step with the keys) is one change: onBegin() before the first
  * value, onValue(v) for each, onEnd(last) once let go, with the last value onValue had (or null).
  */
-function changeSlider({ label, range, value, step, onBegin, onValue, onEnd }) {
+function changeSlider({ label, range, value, step, onBegin, onValue, onEnd, part }) {
   let moving = false;
   let last = null;
   const s = slider({
@@ -199,6 +203,7 @@ function changeSlider({ label, range, value, step, onBegin, onValue, onEnd }) {
     onCommit: () => finish(),
   });
   s.classList.add('edit-slider');
+  if (part) s.dataset.part = part;
   const finish = () => {
     if (!moving) return;
     moving = false;
@@ -260,10 +265,21 @@ export function properties(hooks) {
   };
   const colorOf = (item) => (item.type === 'picture' ? null : item.color);
 
+  /** Focuses control `part` (its data-part) of the item's controls, if it has one. */
+  const focusPart = (part) => {
+    const holder = itemBox.querySelector(`[data-part="${part}"]`);
+    if (!holder) return;
+    const target = holder.matches('button, input') ? holder
+      : holder.querySelector('[role="switch"], input, [role="radio"][tabindex="0"], button');
+    target?.focus({ preventScroll: true });
+  };
+
   const buildItem = (item) => {
     const title = h('p', { class: 'edit-props-title' });
     const editBtn = item.type === 'text' ? iconButton({ icon: 'edit', label: t('edit_text_change'), onClick: () => ifChosen(() => hooks.onEditText()) }) : null;
+    if (editBtn) editBtn.dataset.part = 'edit';
     const deleteBtn = iconButton({ icon: 'delete', label: t('edit_delete'), onClick: () => ifChosen(() => hooks.onDelete()) });
+    deleteBtn.dataset.part = 'delete';
     const head = h('div', { class: 'edit-props-head' }, title, editBtn, deleteBtn);
     const nudges = [
       ['west', 'edit_move_left', -1, 0],
@@ -275,18 +291,22 @@ export function properties(hooks) {
         icon: name,
         label: t(label),
         onClick: () => ifChosen(() => {
+          if (isOff(b)) return;
           const step = NUDGE * Math.min(state.pageWidth, state.pageHeight);
           hooks.onMove(dx * step, dy * step);
         }),
       });
+      b.classList.add('edit-nudge');
       b.dataset.dx = String(dx);
       b.dataset.dy = String(dy);
+      b.dataset.part = name;
       return b;
     });
     const nudgeRow = h('div', { class: 'edit-nudges' }, ...nudges);
     const range = sizeRange(item, state.pageWidth, state.pageHeight);
     const sizeSlider = changeSlider({
       label: t('sign_size'),
+      part: 'size',
       range,
       value: itemSize(item),
       step: item.type === 'text' ? 0.5 : 1,
@@ -303,6 +323,7 @@ export function properties(hooks) {
       const highlighter = item.type === 'ink' && item.highlighter;
       widthSlider = changeSlider({
         label: t('edit_thickness'),
+        part: 'width',
         range: highlighter ? HIGHLIGHTER_WIDTHS : PEN_WIDTHS,
         value: lw,
         step: 0.5,
@@ -327,6 +348,7 @@ export function properties(hooks) {
         onChange: (b) => ifChosen((it) => hooks.onChange(copy(it, { filled: b }))),
       });
       fill.classList.add('edit-fill');
+      fill.dataset.part = 'fill';
     }
     let colors = null;
     if (colorOf(item) != null) {
@@ -339,6 +361,7 @@ export function properties(hooks) {
           else hooks.onStyle({ ...state.style, shapeColor: color });
         }),
       });
+      colors.dataset.part = 'colors';
     }
     itemBox.replaceChildren(...[head, nudgeRow, sizeSlider, widthSlider, fill, colors].filter(Boolean));
     return { title, nudges, sizeSlider, widthSlider, fill, colors };
@@ -370,10 +393,15 @@ export function properties(hooks) {
     if (item && state.mode === 'select') {
       const shape = shapeOf(item);
       if (!built || built.id !== item.id || built.shape !== shape) {
+        // The same item's controls made again (Filled turned on or off): the focus stays on the
+        // control it was on, as the app's row stays where it is.
+        const active = document.activeElement;
+        const keep = built?.id === item.id && itemBox.contains(active) ? active.closest('[data-part]')?.dataset.part : null;
         parts?.sizeSlider.finish();
         parts?.widthSlider?.finish();
         parts = buildItem(item);
         built = { id: item.id, shape };
+        if (keep) focusPart(keep);
       }
       const label = describe(item);
       parts.title.textContent = label;
@@ -383,8 +411,11 @@ export function properties(hooks) {
         const dx = Number(b.dataset.dx);
         const dy = Number(b.dataset.dy);
         const step = NUDGE * Math.min(state.pageWidth, state.pageHeight);
-        // Off once the item is against that edge of the page.
-        b.disabled = sameItem(moved(item, dx * step, dy * step, state.pageWidth, state.pageHeight), item);
+        // Off once the item is against that edge of the page, but kept in the focus order, so a
+        // keyboard user who pressed it up to the edge isn't thrown out of it.
+        const off = sameItem(moved(item, dx * step, dy * step, state.pageWidth, state.pageHeight), item);
+        if (off) b.setAttribute('aria-disabled', 'true');
+        else b.removeAttribute('aria-disabled');
       }
       parts.sizeSlider.setRange(sizeRange(item, state.pageWidth, state.pageHeight), itemSize(item));
       const lw = lineWidthOf(item);

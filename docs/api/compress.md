@@ -26,10 +26,16 @@ What it does to a PDF:
 - The new image replaces the old one **only if it is smaller**; an image used several times is
   encoded once and the copy used everywhere it was (the app's `done` map). The old one is dropped
   when nothing uses it any more.
+- **A damaged page tree is mended first**, as the app mends it when a PDF is picked: the pages
+  compressed are the pages viewers show (`engine/flatten/pages.js`' `viewerPages`, see
+  flatten.md), and the PDF made has a sound tree.
 - **Never bigger:** a PDF that doesn't get at least 1% smaller is handed back byte for byte
   (`keptOriginal: true`). A PDF opened with a password is always saved again, **without the
   password**, even if no smaller (as every tool's PDFs are). A PDF locked only against changes
-  (empty user password) counts as one without a password, as in the app.
+  (an owner password, none to open it) opens without asking but is never kept as it was either:
+  it is saved anew without the restriction, as every tool's PDFs are (the app's `asItIs`; its
+  PageMarkDeviceTest `aRestrictedPdfIsNeitherMarkedNorKeptAsItIs`). Nor is one that carried
+  Usugami's own watermark (taken off as it is read), nor one whose page tree had to be mended.
 
 ## Levels
 
@@ -72,10 +78,14 @@ const out = await compressPdf(
 - `hooks.signal`: an `AbortSignal`; aborting throws `CancelledError` (checked between pages and
   images, and inside long work: inflating, reading rows, the grey JPEG encoder). The page gets a
   chance to paint every ~25 ms of work (a 12 MP Flate image: worst frame ~150 ms in Chromium,
-  mostly pdf-lib's own parsing and saving).
+  mostly pdf-lib's own parsing and saving). A JPEG is decoded and shrunk by the browser away from
+  the page where it can (`createImageBitmap` with its resize), then read back, checked for grey and
+  stored again in slices, a pause between the steps: a 50-page scan (1654 × 2339 JPEG pages) at 4x
+  CPU throttling went from a ~300 ms task on every page to a few over 200 ms in all.
 - Returns an OutputFile plus:
   - `keptOriginal`: the PDF couldn't be made at least 1% smaller, so `bytes` is a copy of the input,
-    byte for byte (never for a PDF that had a password).
+    byte for byte (never for a PDF that had a password, was restricted by an owner password,
+    carried Usugami's watermark or had its page tree mended: those are saved anew).
   - `originalSize`: the input's size in bytes.
   - `pageCount`, `imagesReduced` (how many images were replaced, for tests and curiosity).
 
@@ -107,8 +117,9 @@ const text = d?.key === 'compressed_from' ? t('compressed_from', formatSize(d.or
 
 Returns `{ key: 'compressed_from', originalSize, percent }` when it got at least 1% smaller
 ("Compressed from {1} ({2}% smaller)", `kit.js`), `{ key: 'original_kept' }` when the original was
-kept ("Already compact: the original was kept", `kit.js`), else `null` (a PDF that had a password
-and came out no smaller: nothing under it, as in the app).
+kept ("Already compact: the original was kept", `kit.js`), else `null` (a PDF that had a password,
+or that couldn't be kept as it was for another reason above, and came out no smaller: nothing
+under it, as in the app).
 
 ### `compressNotes(outcomes)` — the messages (snackbar) after compressing
 
@@ -128,6 +139,8 @@ for (const m of compressNotes(outcomes)) snackbar(m.count !== undefined ? tp(m.k
   process {1} files: {2}. Check the files and free storage."), then `batch_not_smaller` naming those
   with a password that came out no smaller (one "{2} couldn't be made any smaller.", other "{1} PDFs
   couldn't be made any smaller: {2}."). Kept ones say so under their own names (`compressDetail`).
+  `{2}` is `namesArg(names)` (core/names.js): the names, or with more than four the message
+  `names_and_more` ("a.pdf, b.pdf, c.pdf and 2 more") as an argument the screen puts in words.
 
 ## The Usugami watermark (docs/api/mark.md)
 
@@ -137,9 +150,8 @@ Where the app decides it (`PdfToolsEngine.compressTo`, `ResultMarker.bringTo`, `
 - **A PDF that has Usugami's watermark is compressed without it**: `loadPdf` takes it off as every
   tool's PDF is read, and such a PDF can't be kept as it was. In the app `compressTo` keeps the
   original only when the PDF had no password, wasn't encrypted (an owner password alone counts) and
-  had no watermark taken off. `engine/pdf-common.js` now tells the last two:
-  `wasEncrypted(doc)` and `wasUnmarked(doc)` (see the follow-up below). Until the engine checks
-  them, the result screen takes a watermark off a PDF kept as it was (`keptOriginal` then false).
+  had no watermark taken off; the engine checks the same (`wasEncrypted(doc)` and `wasUnmarked(doc)`
+  from `engine/pdf-common.js`), so a PDF kept as it was never has the watermark.
 - **With the watermark on**, the result screen puts it on the PDF made, kept as it was or not: the
   PDF is then no longer the original (`keptOriginal: false`) and a little bigger. The messages
   (`compressNotes`) and the line under each PDF (`compressDetail`, or the result screen's own) are
@@ -150,12 +162,6 @@ Where the app decides it (`PdfToolsEngine.compressTo`, `ResultMarker.bringTo`, `
 - **Turned off again** on the result screen, the PDF is the one the engine made, byte for byte: a
   kept original is the original again (`keptOriginal: true`, "Already compact: the original was
   kept").
-
-Follow-up for this engine (not yet made): `const keptOriginal = !hasPassword && !wasEncrypted(doc)
-&& !wasUnmarked(doc) && savedPercent(original.length, bytes.length) == null;` (imports from
-`./pdf-common.js`), as the app's `asItIs`; a PDF only restricted by an owner password is then
-saved anew without the restriction, as PageMarkDeviceTest's `aRestrictedPdfIsNeitherMarkedNorKeptAsItIs`
-expects.
 
 ## Small helpers
 
@@ -210,11 +216,21 @@ pages' resources and their form XObjects too).
   comments, arrays, dictionaries and inline images.
 - `placements.js`: `findImages(ctx, pages)` → `Map<PDFRef, { ref, stream, width, height, uses,
   extent, unknown }>`; `measureImages(ctx, pages, images, { signal, onPage })`.
-- `image.js`: `colourSpaceOf`, `examine(ctx, stream)` → `{ ok, reason | facts }`, `readImage`,
-  `encodeImage`, `imageStream`, `flateComponents`, `isGreyRgb`, `MIN_IMAGE_BYTES`, `MAX_IMAGE_PIXELS`.
+- `image.js`: `colourSpaceOf`, `examine(ctx, stream)` → `{ ok, reason | facts }`,
+  `readImage(ctx, facts, w, h, { signal, rgba })` (with `rgba`, a three-component JPEG comes back
+  as `{ pixels: null, rgba: ImageData, components: 3 }`), `encodeImage(pixels, w, h, components,
+  options)` (`pixels` may be that RGBA ImageData for three components), `imageStream`,
+  `flateComponents`, `isGreyRgb(pixels, tolerance = 3, stride = 3)` (stride 4 reads RGBA),
+  `MIN_IMAGE_BYTES`, `MAX_IMAGE_PIXELS`.
 - `samples.js`: `readSamples(ctx, data, filters, image, { signal })` → `{ pixels, complete }`.
 - `jpeg-source.js`: `jpegFacts`, `transformsAgree`, `canDecode`, `jpegForDecoding`,
-  `decodeJpeg(bytes, { width, height, components }, outWidth, outHeight)`, `shrink(source, w, h)`.
+  `decodeJpegImage(bytes, { width, height }, outWidth, outHeight)` → opaque RGBA `ImageData` or
+  null, `decodeJpeg(bytes, { width, height, components }, outWidth, outHeight, { signal })` → its
+  components as a `Uint8Array` or null, `shrink(source, w, h)` (for a browser that ignores
+  `createImageBitmap`'s resize: Safari).
+- `budget.js`: `WorkBudget(signal)` with `check()` (a pause once ~24 ms of work have gone by) and
+  `each(count, step(from, to), slice)` (pixel loops in slices; `step` returning false stops it).
+- `../flatten/pages.js`: `viewerPages(doc)` and `wasMended(doc)` (flatten.md).
 
 ## Differences from the app
 
@@ -228,7 +244,9 @@ pages' resources and their form XObjects too).
   so they are reduced too (a PDF the app finds "already compact" because of a transparent picture
   can get smaller here). Grey images stay grey (one component) instead of Android's encoder's choice.
 - **Shrinking** averages the source pixels (area averaging) where the app subsamples and then
-  scales bilinearly; JPEGs are encoded by the browser (libjpeg-turbo in Chrome and Firefox, ImageIO in
+  scales bilinearly (a JPEG is shrunk by the browser's own createImageBitmap resize, smooth: in
+  Chrome the same pixels as the canvas's high-quality drawing; Safari, which ignores the resize,
+  shrinks it on a canvas by halves); JPEGs are encoded by the browser (libjpeg-turbo in Chrome and Firefox, ImageIO in
   Safari), so sizes differ slightly from Android's at the same quality.
 - **Saving** is pdf-lib's (object streams, cross-reference stream) rather than PDFBox's, so a PDF
   re-saved with nothing to compress can come out a little smaller or larger than the app's copy;

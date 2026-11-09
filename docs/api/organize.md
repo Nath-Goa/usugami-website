@@ -27,6 +27,11 @@ What every engine here does, as the app does:
   a catalog or page tree that isn't a dictionary; no page tree; a page tree without `/Kids`, whose
   `/Kids` isn't a list or holds no pages, or that only leads back into itself) fails with
   `UserError('pdf_import_failed')` in every engine, never a `TypeError` or `pdf_process_failed`.
+  A file without a catalog already fails in `loadPdf` (engine/pdf-common.js), so every engine
+  that opens PDFs with it says the same.
+- No fontkit: `loadPdf` and `createPdf` register none, as nothing these engines do embeds a font
+  with pdf-lib. An engine that does (`doc.embedFont(bytes)`) registers it itself first, as
+  engine/ocr/text-layer.js does; the other tools then don't load its 157 kB (gzipped).
 - Long work yields to the browser every 30 ms, reports progress and stops on `hooks.signal`. It
   yields with a timer, not core/dom.js's `yieldToUI()`: where the browser has `scheduler.yield()`,
   yielding that often with it kept Chromium from drawing Split's progress on a 3000-page PDF.
@@ -47,6 +52,9 @@ What every engine here does, as the app does:
 Page numbers passed to engines are **zero-based**; typed text is one-based ("1,3-5").
 
 ## page-selection.js
+
+Also `defaultName(tool, input)` and `partSuffix(index, pages)` (see organize.js below), which the
+screens import from here, light, before the engine has loaded.
 
 All throw `PageSelectionError` (a `UserError`: show `t(e.key, ...e.args)`), whose `problem` is one of
 `'FORMAT' | 'RANGES_FORMAT' | 'OUT_OF_RANGE' | 'REVERSED' | 'CHUNK_SIZE' | 'ALL_PAGES'` and
@@ -174,7 +182,9 @@ await rotatePdf(input, { rotations: { 0: 90, 2: 180 }, fileName: 'Report_rotated
 ### defaultName(tool, input) → string
 The name the tool's PDF gets unless another is typed (no extension), as the view model's
 `defaultName`: `tool` is `'split' | 'merge' | 'reorganize' | 'delete-pages' | 'rotate'`, `input`
-`{ name, pageCount }` (the first PDF).
+`{ name, pageCount }` (the first PDF). Defined in page-selection.js (with `partSuffix`), which
+loads without pdf-lib, so a screen can show the name before this engine has loaded; organize.js
+exports both too.
 ```js
 defaultName('split', { name: 'Report.pdf', pageCount: 12 })   // 'Report_split' (room left for '_12_12-12')
 defaultName('merge')                                          // 'Merged_PDF'
@@ -204,7 +214,8 @@ tree without pages; `UserError('pdf_import_failed')` for a file without a catalo
 ### fileNames
 The app's `FileNames` helpers, for tools that name files alike: `sanitize(input, fallback)`,
 `withSuffix(base, suffix, fallback, spare)`, `withSuffixes(base, suffixes, fallback)`,
-`unique(base, takenSet)`, `baseName(fileName)`.
+`unique(base, takenSet)`, `baseName(fileName)`, `uniqueNames(names, fallback)`. The shell's port
+(core/names.js's `fileNames`), re-exported: the engines name their files with it too.
 ```js
 fileNames.sanitize(' a/b.pdf ', 'X')   // 'a_b'
 fileNames.unique('report', new Set(['Report']))   // 'report (2)'

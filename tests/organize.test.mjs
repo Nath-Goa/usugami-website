@@ -13,6 +13,7 @@ import {
 import { withPage, assert, runInPage, saveOutput } from './harness.mjs';
 import {
   parsePageSelection, parseRanges, fixedChunks, pagesToDelete, formatPages, formatPagesInOrder, PageSelectionError,
+  defaultName as lightDefaultName,
 } from '../site/app/js/engine/page-selection.js';
 
 const ENGINE = 'app/js/engine/organize.js';
@@ -411,7 +412,8 @@ function contentOf(doc, index) {
   return streams.map((s) => Buffer.from(decodePDFRawStream(s).decode()).toString('latin1')).join(' ');
 }
 
-const pdfIn = (name, bytes, extra = {}) => ({ name, bytes: { __b64: Buffer.from(bytes).toString('base64') }, ...extra });
+// runInPage passes Uint8Arrays (and Buffers) through as they are.
+const pdfIn = (name, bytes, extra = {}) => ({ name, bytes: new Uint8Array(bytes), ...extra });
 
 /** Each page's text and the labels viewers show, read by pdf.js in the page. */
 async function readBack(page, url, bytes, password) {
@@ -485,6 +487,10 @@ async function engineTests(page, url) {
   equal(await call('defaultName', 'rotate', { name: 'Report.pdf' }), 'Report_rotated', 'Rotate default name');
   equal(await call('defaultName', 'delete-pages', { name: 'Report.pdf' }), 'Report_pages_deleted', 'Delete pages default name');
   equal(await call('defaultName', 'reorganize', { name: 'Report.pdf' }), 'Report_reorganized', 'Reorganize default name');
+  // The same names from page-selection.js, which the screens use before the engine has loaded.
+  for (const [tool, input] of [['merge'], ['reorganize', { name: 'Report.pdf' }], ['split', { name: 'R.pdf', pageCount: 300 }], ['rotate', { name: 'CON.pdf' }]]) {
+    equal(lightDefaultName(tool, input), await call('defaultName', tool, input), `${tool}: page-selection.js names it as organize.js`);
+  }
   const long = 'é'.repeat(150);
   const longSplit = await call('defaultName', 'split', { name: `${long}.pdf`, pageCount: 120 });
   check(longSplit.endsWith('_split') && Buffer.byteLength(longSplit) + '_12_120-120'.length <= 200, `A long name is cut, not its _split: ${longSplit.length}`);
@@ -1084,6 +1090,7 @@ async function damagedTrees(page, url, browser) {
           r[label] = `${e.name}: ${e.key ?? e.message}`;
         }
       };
+      await run('loadPdf', async () => { await p.loadPdf(bytes()); return 'done'; });
       await run('readPages', async () => c.readPages(await p.loadPdf(bytes())).pages.length);
       await run('repairPageTree', async () => c.repairPageTree(await p.loadPdf(bytes())).pages.length);
       await run('setPages', async () => { c.setPages(await p.loadPdf(bytes()), []); return 'done'; });
@@ -1126,6 +1133,8 @@ async function damagedTrees(page, url, browser) {
       equal([r.readPages, r.countPages, r.dropRemovedPages], [0, 0, 'done'], `${where}: no pages are read`);
     }
     equal(r.setPages, NO_CATALOG.has(name) ? damaged : 'done', `${where}: setPages`);
+    // Without a catalog loadPdf itself says so; with one, the engines find what is missing.
+    equal(r.loadPdf, NO_CATALOG.has(name) ? damaged : 'done', `${where}: loadPdf`);
     equal(r.shownPageSize, { width: 595.27563, height: 841.8898 }, `${where}: a page size that can't be read is A4`);
   }
   const looping = results.looping;
@@ -1156,9 +1165,13 @@ async function otherBrowserTests(page, url, browser) {
 
 pageSelectionTests();
 await withPage(async (page, url) => {
+  // None of these engines embeds a font with pdf-lib: fontkit (157 kB gzipped) isn't loaded for them.
+  const fontkitRequests = [];
+  page.on('request', (r) => { if (r.url().includes('/vendor/fontkit/')) fontkitRequests.push(r.url()); });
   await page.goto(url + 'app/vendor/VERSIONS.json');
   await engineTests(page, url);
   await damagedTrees(page, url, 'chromium');
+  equal(fontkitRequests, [], 'no fontkit loaded for splitting, merging, reorganizing, deleting or rotating');
 });
 for (const browser of ['firefox', 'webkit']) {
   await withPage(async (page, url) => {

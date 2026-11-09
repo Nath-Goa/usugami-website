@@ -15,6 +15,13 @@ html {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
   background: var(--background);
+  /* A control reached with Tab is scrolled clear of the sticky top bar (64 px and the safe area)
+     and, while a screen has one, of its bottom bar (its main button), not left under them. */
+  scroll-padding-block-start: calc(72px + env(safe-area-inset-top, 0px));
+}
+
+html:has(.ui-bottombar:not([hidden])) {
+  scroll-padding-block-end: calc(80px + env(safe-area-inset-bottom, 0px));
 }
 
 body {
@@ -918,4 +925,26 @@ h2[tabindex="-1"]:focus,
 .language-page p {
   margin: 0 0 var(--space-3);
   color: var(--on-surface-variant);
+}
+
+/* ---- Contrast themes (Windows' forced colours) ----
+   Backgrounds and shadows are dropped there: what only a background drew gets a border, and what
+   is chosen shows in the system's highlight colour. (The kit's components have their own.) */
+
+@media (forced-colors: active) {
+  .scan-card,
+  .home-search,
+  .shell-button-filled {
+    border: 1px solid CanvasText;
+  }
+
+  .choice-row[aria-selected="true"] .choice-radio {
+    border-color: Highlight;
+  }
+
+  .choice-row[aria-selected="true"] .choice-radio::after,
+  .route-progress::before {
+    forced-color-adjust: none;
+    background: Highlight;
+  }
 }

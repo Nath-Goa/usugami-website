@@ -162,6 +162,6 @@ Other converters don't need these; they are listed for whoever works on PowerPoi
   conversion, as in the app.
 - Hebrew, Arabic, Chinese, Japanese and Korean text is drawn by the browser into the page as
   pictures with invisible text over it (the text engine's way), not as embedded fonts.
-- Pictures follow office-pdf.js (decoded once at 150 pixels per inch, JPEG at quality 75 when
-  opaque); see office-core.md.
+- Pictures follow office-pdf.js (decoded once at 150 pixels per inch, JPEG at quality 75 when that
+  is smaller and the picture takes 2 KB or more, else lossless); see office-core.md.
 - Links look as in the app (theme colour, underlined) and, as in the app, aren't clickable.

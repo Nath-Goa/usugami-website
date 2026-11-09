@@ -5,6 +5,7 @@
 // openZip and OfficePackage, EpubBook.kt's EpubArchive); this follows its rules.
 import { Inflate } from '../../lib/fflate.js';
 import { checkCancelled } from '../../core/errors.js';
+import { pause } from './pause.js';
 
 /** More entries than any Office file or e-book has (a book of pictures has a few thousand). */
 export const MAX_ENTRIES = 100000;
@@ -37,7 +38,6 @@ export function isZip(bytes) {
   return !!bytes && bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04;
 }
 
-const pause = () => new Promise((resolve) => setTimeout(resolve, 0));
 const nameDecoder = new TextDecoder('utf-8');
 
 function u64(dv, at) {
