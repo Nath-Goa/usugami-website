@@ -549,7 +549,9 @@ async function testDialogs(page, { wide }) {
       onClose: () => log.push('sheet closed'),
     });
   });
-  await page.waitForTimeout(400);
+  // Measured once it has slid in: a slow machine can still be sliding it after a fixed wait.
+  await page.evaluate(() => Promise.all(sheet.el.getAnimations({ subtree: true }).map((a) => a.finished)));
+  await page.waitForTimeout(100);
   const box = await page.evaluate(() => { const r = sheet.el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, vw: innerWidth, vh: innerHeight, handle: getComputedStyle(sheet.el.querySelector('.ui-sheet-handle')).display }; });
   if (wide) check('sheet is a centred dialog on wide screens', Math.abs((box.top + box.bottom) / 2 - box.vh / 2) < 4 && box.handle === 'none', JSON.stringify(box));
   else check('sheet comes from the bottom on phones', Math.abs(box.bottom - box.vh) < 2 && box.left === 0 && box.handle !== 'none', JSON.stringify(box));
@@ -1396,6 +1398,32 @@ async function testTouchReorder(page) {
   await page.waitForTimeout(400);
   r = { scrolled: await page.evaluate(() => window.scrollY), log: await page.evaluate(() => log.slice()) };
   check('a swipe scrolls the grid, moving nothing', r.scrolled > before && !r.log.length, JSON.stringify({ before, ...r }));
+
+  // A tap whose lifting is handled late (the page busy drawing) after the long press timer lifted
+  // the page is still a tap: its click gets through. A real long press keeps the click back.
+  const lateLift = (heldMs) => page.evaluate(async (heldMs) => {
+    window.scrollTo(0, 0);
+    const button = grid.querySelectorAll('.ui-page')[2];
+    const box = button.getBoundingClientRect();
+    const at = { clientX: box.left + box.width / 2, clientY: box.top + box.height / 2, pointerId: 41, pointerType: 'touch', isPrimary: true, bubbles: true };
+    let clicks = 0;
+    const count = () => { clicks++; };
+    window.addEventListener('click', count);
+    button.dispatchEvent(new PointerEvent('pointerdown', at));
+    // An event's time is when it was made: made now, it is a finger lifted now.
+    const early = heldMs ? null : new PointerEvent('pointerup', at);
+    await new Promise((r) => setTimeout(r, 600));
+    const lifted = !!grid.querySelector('.ui-page-tile.is-dragging');
+    button.dispatchEvent(early ?? new PointerEvent('pointerup', at));
+    button.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: at.clientX, clientY: at.clientY }));
+    window.removeEventListener('click', count);
+    await new Promise((r) => setTimeout(r, 450));
+    return { lifted, clicks, still: !!grid.querySelector('.ui-page-tile.is-dragging') };
+  }, heldMs);
+  r = await lateLift(0);
+  check('a tap handled after the long press time is still a tap', r.lifted && r.clicks === 1 && !r.still, JSON.stringify(r));
+  r = await lateLift(600);
+  check('a long press keeps its click back', r.lifted && r.clicks === 0 && !r.still, JSON.stringify(r));
 
   // Held near the bottom of the screen, the page scrolls the grid along.
   await page.evaluate(() => { window.scrollTo(0, 0); log = []; });

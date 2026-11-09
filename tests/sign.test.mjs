@@ -12,7 +12,7 @@
 import {
   PDFDocument, PDFName, PDFArray, PDFDict, PDFRawStream, PDFString, StandardFonts, rgb, degrees, decodePDFRawStream,
 } from '@cantoo/pdf-lib';
-import { withPage, assert, saveOutput, fixture } from './harness.mjs';
+import { withPage, assert, saveOutput, fixture, chooserFromKeyboard } from './harness.mjs';
 import * as S from '../site/app/js/engine/sign.js';
 
 const quick = process.argv.includes('--quick');
@@ -1102,8 +1102,7 @@ async function reviewTests() {
       await doc.encrypt({ userPassword: 'pw', ownerPassword: 'owner' });
       return doc.save({ useObjectStreams: false });
     })();
-    await page.locator('.sign-page .ui-empty').focus();
-    const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.keyboard.press('Enter')]);
+    const chooser = await chooserFromKeyboard(page, '.sign-page .ui-empty');
     await chooser.setFiles({ name: 'locked.pdf', mimeType: 'application/pdf', buffer: Buffer.from(locked) });
     await page.locator('dialog[open] input[type="password"]').waitFor();
     await page.keyboard.press('Escape');

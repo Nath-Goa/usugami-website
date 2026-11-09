@@ -724,7 +724,9 @@ await withPage(async (page, url) => {
       return { text: recognition.text, turned: recognition.turned };
     });
     assert(r.turned === 0, `read as it is: ${r.turned}`);
-    assert(r.text.split('\n')[0] === 'Photo of a gravel path', `the text is read: ${JSON.stringify(r.text)}`);
+    // The words, whatever the spacing: Linux draws the text a little differently and Tesseract once
+    // read "g ravel" there. This test is about the page not being read turned.
+    assert(r.text.split('\n')[0].replace(/\s+/g, '') === 'Photoofagravelpath', `the text is read: ${JSON.stringify(r.text)}`);
   });
 
   await test('one worker reads many pages, reporting each page\'s progress', async () => {

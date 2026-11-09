@@ -46,7 +46,9 @@ it).
 ```
 
 It is always upright: EXIF orientation (and a HEIF/AVIF file's own turn) is applied when it is
-added, so there is no `exifOrientation` to carry; the user's extra quarter turns (`rotation` in
+added, so there is no `exifOrientation` to carry. (An AVIF file's own turn is left to the browser's
+decoder: WebKit on Linux, as in GNOME Web, leaves it out, so there such a picture stays as
+stored.) the user's extra quarter turns (`rotation` in
 the app's `ImageItem`) are the screen's to keep, and `image-transform.js` places them in the PDF.
 A screen keeps the StoredImage a page was cropped from as the page's "original" (the app's
 `OriginalImage`) with the corners it was cropped at, so it can be cropped again from scratch.

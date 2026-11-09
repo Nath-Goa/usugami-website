@@ -172,9 +172,11 @@ Edit PDF use it to refuse text the device can't show (the app's `watermark_no_fo
 `browserCanDraw` is the browser half, for one cluster no bundled font has (cached per cluster).
 
 How a missing character is told from a glyph: the cluster is drawn on a small canvas at 40 px and
-compared with what the browser draws for characters no font has (U+FDD0, U+FFFF, U+1FFFE,
-U+10FFFD, U+FFFFD). Chromium and WebKit on Windows draw one box for all of them, so the same pixels
-mean missing. Firefox draws a box with the character's code in hex inside (four digits in the first
+compared with what the browser draws for characters no font has (U+FDD0, U+FFFF, U+2FEF,
+U+FFE7, U+1FFFE, U+10FFFD, U+FFFFD). Chromium and WebKit on Windows draw one box for all of them, so the same pixels
+mean missing. On Linux with GNU Unifont installed (as on GitHub's Ubuntu runners), Chromium and WebKit
+draw unassigned characters of the first plane with Unifont's box holding the code in hex; U+2FEF and
+U+FFE7 (unassigned) are such boxes there, so they match them by their frame. Firefox draws a box with the character's code in hex inside (four digits in the first
 plane, six beyond, and the box can be wider for six), and Safari on Apple devices the Last Resort
 font's box for the character's block, so the pixels differ inside: a cluster with the same advance,
 its ink in exactly the same place, and the same frame (the edge of its ink) as one of those boxes is
@@ -616,7 +618,8 @@ const lineHeight = 11 * (officeLineHeight('Calibri') + 0.14);
   invisible over them, so it is still found and copied); the app draws them as text with the
   phone's fonts. Their look depends on the device's fonts. At text sizes they are 1-bit masks at
   160 pixels per em painted in the text colour (about 0.7 KB per different character), larger
-  and emoji with smooth edges; each different character is stored once per PDF.
+  and emoji with smooth edges; each different character is stored once per PDF. WebKit on Linux
+  (GNOME Web) draws colour emoji on a canvas without their colours, so there they come out dark.
 - Browsers have no `Paint.hasGlyph`: `canDraw` tells a missing character by drawing it and
   comparing it with the box the browser draws for characters no font has (see Fonts).
 - TextScales.kt isn't needed: it puts right a bug of Android 8's PDF writer with narrowed text;

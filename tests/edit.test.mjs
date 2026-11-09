@@ -6,7 +6,7 @@
 // saved PDF checked against the preview, screenshots at phone and desktop sizes, light and dark).
 //
 // Run: node tests/edit.test.mjs   (--quick: the engine and the phone screen in Chromium only)
-import { withPage, assert, saveOutput, outputDir } from './harness.mjs';
+import { withPage, assert, saveOutput, outputDir, chooserFromKeyboard } from './harness.mjs';
 import { PDFDocument, StandardFonts, degrees, PDFName, PDFString, PDFArray, PDFDict, PDFRawStream, PDFStream } from '@cantoo/pdf-lib';
 import { mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -1389,8 +1389,7 @@ await withPage(async (page, url) => {
   await page.goto(url + 'app/#/tool/edit');
   await page.waitForSelector('.screen[data-tool="edit"]:not([aria-busy])');
   ok((await page.locator('main[data-main]').count()) === 1, 'the screen has one main landmark');
-  await page.locator('.ui-empty').focus();
-  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.keyboard.press('Enter')]);
+  const chooser = await chooserFromKeyboard(page, '.ui-empty');
   await chooser.setFiles({ name: 'Locked.pdf', mimeType: 'application/pdf', buffer: Buffer.from(locked) });
   await page.locator('dialog[open] input[type="password"]').waitFor();
   await page.keyboard.press('Escape');

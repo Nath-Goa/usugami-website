@@ -459,7 +459,7 @@ export function pageGrid(o) {
     const button = e.target.closest('.ui-page');
     if (!button || !grid.contains(button)) return;
     const tile = button.closest('.ui-page-tile').tile;
-    press = { tile, id: e.pointerId, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, type: e.pointerType, timer: 0 };
+    press = { tile, id: e.pointerId, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, type: e.pointerType, timer: 0, downAt: e.timeStamp };
     if (e.pointerType !== 'mouse') {
       press.timer = setTimeout(() => {
         if (press?.tile === tile) startDrag(press.x, press.y);
@@ -498,7 +498,9 @@ export function pageGrid(o) {
   };
 
   const onPointerUp = (e) => {
-    if (dragging && e.pointerId === dragging.id) endDrag();
+    // A tap whose lifting waited behind other work (thumbnails being drawn) can come after the long
+    // press timer has lifted the page: by when the finger really lifted, it is still a tap.
+    if (dragging && e.pointerId === dragging.id) endDrag(dragging.held && e.timeStamp - dragging.downAt < LONG_PRESS_MS && dragging.tile.index === dragging.from);
     else if (press && e.pointerId === press.id) cancelPress();
   };
 
@@ -536,7 +538,7 @@ export function pageGrid(o) {
     // The grid's places, in its own coordinates: the k-th tile's place stays the k-th place
     // whichever page is in it, so they are measured once.
     const slots = tiles.map((t) => ({ left: t.wrap.offsetLeft, top: t.wrap.offsetTop, right: t.wrap.offsetLeft + t.wrap.offsetWidth, bottom: t.wrap.offsetTop + t.wrap.offsetHeight }));
-    dragging = { tile, id: press.id, from: tile.index, x, y, dx: x - slot.left, dy: y - slot.top, slots };
+    dragging = { tile, id: press.id, from: tile.index, x, y, dx: x - slot.left, dy: y - slot.top, slots, held: press.type !== 'mouse', downAt: press.downAt };
     press = null;
     tile.wrap.classList.add('is-dragging');
     grid.classList.add('is-dragging');
@@ -596,7 +598,8 @@ export function pageGrid(o) {
     scrollFrame = requestAnimationFrame(step);
   };
 
-  const endDrag = () => {
+  /** Puts the lifted page down; `tap`: it was a tap after all, so its click chooses the page. */
+  const endDrag = (tap = false) => {
     const d = dragging;
     if (!d) return;
     dragging = null;
@@ -608,8 +611,10 @@ export function pageGrid(o) {
     grid.classList.remove('is-dragging');
     // The page settles into its place.
     wrap.style.transform = '';
-    suppressClick = true;
-    setTimeout(() => { suppressClick = false; }, 400);
+    if (!tap) {
+      suppressClick = true;
+      setTimeout(() => { suppressClick = false; }, 400);
+    }
     const to = d.tile.index;
     opts.onMoveEnd?.(d.from, to);
     if (to !== d.from) announce(t('web_page_moved', to + 1, count));

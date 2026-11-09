@@ -8,7 +8,7 @@
 //   node tests/redact-ui.test.mjs --quick    Chromium only, no screenshots
 import { readFile } from 'node:fs/promises';
 import { PDFDocument, StandardFonts, degrees } from '@cantoo/pdf-lib';
-import { withPage, assert, runInPage, outputDir } from './harness.mjs';
+import { withPage, assert, runInPage, outputDir, chooserFromKeyboard } from './harness.mjs';
 import * as R from '../site/app/js/engine/redact/boxes.js';
 import strings from '../site/app/locales/en/redact.js';
 import common from '../site/app/locales/en/common.js';
@@ -625,6 +625,9 @@ await test('quick taps act on the boxes as they are (RedactQuickTapsDeviceTest)'
       await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     }
     await cdp.detach();
+    // The taps' clicks can come late on a slow machine: wait for the first to delete a box, then a
+    // moment more, in which the second must not delete another.
+    for (let waited = 0; (await state(page)).boxes.length === 3 && waited < 5000; waited += 100) await page.waitForTimeout(100);
     await page.waitForTimeout(400);
     s = await state(page);
     eq(s.boxes, [B, C], 'double tap on Delete box');
@@ -870,8 +873,7 @@ await test('the keyboard keeps its place; one main landmark; a failure is said o
 
     // Choose PDF by keyboard, then the password dialog cancelled: the focus is back on Choose PDF.
     const locked = await samplePdf({ pages: 1, password: 'secret' });
-    await page.focus('.redact-page .ui-empty');
-    const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.keyboard.press('Enter')]);
+    const chooser = await chooserFromKeyboard(page, '.redact-page .ui-empty');
     await chooser.setFiles({ name: 'Locked.pdf', mimeType: 'application/pdf', buffer: Buffer.from(locked.bytes) });
     await page.waitForSelector('dialog[open] input[type=password]');
     await page.keyboard.press('Escape');
@@ -881,7 +883,7 @@ await test('the keyboard keeps its place; one main landmark; a failure is said o
     assert(back.cls.includes('ui-empty') && back.inScreen, `cancelled: the focus is on Choose PDF, not ${back.tag}`);
 
     // Chosen by keyboard: the PDF's card takes the focus from Choose PDF, which has gone.
-    const [chooser2] = await Promise.all([page.waitForEvent('filechooser'), page.keyboard.press('Enter')]);
+    const chooser2 = await chooserFromKeyboard(page);
     await chooser2.setFiles({ name: 'Sample report.pdf', mimeType: 'application/pdf', buffer: Buffer.from(sample.bytes) });
     await waitReady(page);
     const chosen = await active();

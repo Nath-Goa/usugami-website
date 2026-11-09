@@ -11,7 +11,7 @@
 //   node tests/organize-ui-b.test.mjs --review Chromium only, the reviewers' findings only
 import { readFile, mkdir, access } from 'node:fs/promises';
 import { join } from 'node:path';
-import { withPage, root } from './harness.mjs';
+import { withPage, root, chooserFromKeyboard } from './harness.mjs';
 import { PDFDocument, StandardFonts, rgb, degrees } from '../site/app/vendor/pdf-lib/pdf-lib.esm.min.js';
 import {
   PageList, pageKey, pagesOf, samePages, BLANK, MAX_UNDO, enginePages, turnedKey,
@@ -956,8 +956,7 @@ async function openFromHome(page, url, id) {
 
 /** Picks a PDF from the keyboard (Enter on the focused card), gives the locked PDF, cancels its password. */
 async function cancelPassword(page, selector) {
-  await page.focus(selector);
-  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.keyboard.press('Enter')]);
+  const chooser = await chooserFromKeyboard(page, selector);
   await chooser.setFiles([fx.locked]);
   await page.waitForSelector('dialog[open] .ui-password');
   await page.keyboard.press('Escape');

@@ -6,7 +6,7 @@
 // Screenshots go to .tmp/organize-ui-a/screens/ to be looked at.
 import { readFile, mkdir, access } from 'node:fs/promises';
 import { join } from 'node:path';
-import { withPage, assert, root, runInPage } from './harness.mjs';
+import { withPage, assert, root, runInPage, chooserFromKeyboard } from './harness.mjs';
 import { PDFDocument, PDFName, rgb, degrees, StandardFonts } from '../site/app/vendor/pdf-lib/pdf-lib.esm.min.js';
 import { unzipSync, strToU8 } from '../site/app/vendor/fflate/fflate.esm.js';
 
@@ -890,8 +890,7 @@ async function testReviewFixes(page, url, fx) {
 
   // A password question cancelled with Escape: the focus stays on Choose PDF, opened from the keyboard.
   await openTool(page, url, 'delete-pages');
-  await page.focus('.onepdf .ui-empty');
-  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.keyboard.press('Enter')]);
+  const chooser = await chooserFromKeyboard(page, '.onepdf .ui-empty');
   await chooser.setFiles(asFile('protected.pdf', fx.locked.bytes));
   await page.waitForSelector('dialog[open] input[type="password"]');
   await page.keyboard.press('Escape');

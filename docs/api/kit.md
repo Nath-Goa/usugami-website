@@ -383,7 +383,8 @@ decoded images until the PDF is closed.
 | `ariaLabel` | the grid's name |
 | `moveButtons` (true) | each page's "Move page 3 earlier/later" buttons (shown on hover or focus; always there for screen readers) |
 
-Moving: a long press (450 ms) and drag on touch screens (a quick swipe still scrolls), a drag with
+Moving: a long press (450 ms, timed by the events' own times, so a tap handled late while the page
+is busy stays a tap) and drag on touch screens (a quick swipe still scrolls), a drag with
 a mouse, Ctrl (⌘) + arrow keys on a focused page (Ctrl+Home/End: first/last), or the move
 buttons. Arrow keys alone move the focus. The page dragged near the top or bottom edge scrolls the
 grid (or the page). Moves are announced ("Moved to place 5 of 12"). Columns: at least 96 px wide

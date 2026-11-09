@@ -140,8 +140,11 @@ const drawable = new Map();
 // draws a box with the character's code in hex inside (four digits in the first plane, six beyond,
 // in boxes that can differ in width), and Safari on Apple devices the Last Resort font's box for
 // the character's block: those boxes differ inside, but have the advance, the size and the frame
-// of one of these.
-const NO_FONT = ['\u{FDD0}', '\u{FFFF}', '\u{1FFFE}', '\u{10FFFD}', '\u{FFFFD}'];
+// of one of these. On Linux with GNU Unifont installed, Chromium and WebKit draw unassigned
+// characters of the first plane with Unifont's own box holding the code in hex, while
+// noncharacters get the last font's empty box: U+2FEF and U+FFE7 (unassigned, between blocks and
+// in the half-width forms) are Unifont's boxes there, and the box no font has elsewhere.
+const NO_FONT = ['\u{FDD0}', '\u{FFFF}', '\u{2FEF}', '\u{FFE7}', '\u{1FFFE}', '\u{10FFFD}', '\u{FFFFD}'];
 // Characters drawn on their own, unlike marks, joiners and selectors, which change the character
 // before them: in a cluster, each of these is checked alone too.
 const STANDS_ALONE = /^[\p{L}\p{N}\p{S}\p{P}\p{Co}\p{Cn}]$/u;

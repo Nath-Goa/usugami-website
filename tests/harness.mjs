@@ -66,7 +66,13 @@ export async function withPage(fn, opts = {}) {
   });
   const page = await context.newPage();
   const problems = [];
-  page.on('pageerror', (e) => problems.push(`page error: ${e.message}`));
+  const origin = new URL(server.url).origin;
+  // WebKit on Linux reports a module of the site's own whose loading a reload or navigation cut
+  // short as a page error ("<url> due to access control checks"), although the app catches the
+  // import. A module that really fails still shows: as a 404 console error and a broken screen.
+  const cutShort = (message) => name === 'webkit' && message.endsWith('due to access control checks.') &&
+    message.includes(origin.replace(/^https?:\/\//, '/'));
+  page.on('pageerror', (e) => { if (!cutShort(e.message)) problems.push(`page error: ${e.message}`); });
   page.on('console', (m) => {
     if (m.type() !== 'error') return;
     const text = m.text();
@@ -74,7 +80,6 @@ export async function withPage(fn, opts = {}) {
     const at = m.location()?.url;
     if (!allowConsole.some((re) => re.test(text))) problems.push(`console error: ${text}${at ? ` (${at})` : ''}`);
   });
-  const origin = new URL(server.url).origin;
   await context.route('**/*', (route) => {
     const u = route.request().url();
     if (allowExternal || u.startsWith(origin) || u.startsWith('blob:') || u.startsWith('data:')) return route.continue();
@@ -92,6 +97,31 @@ export async function withPage(fn, opts = {}) {
 
 export function assert(condition, message) {
   if (!condition) throw new Error('Assertion failed: ' + message);
+}
+
+/**
+ * Presses Enter on `selector` (focused first), or else on what has the focus, and returns the file
+ * chooser that opens. On GitHub's Linux runners Chromium now and then opens none for an Enter, so
+ * after 10 s it says where the focus was and presses Enter once more on the same element.
+ */
+export async function chooserFromKeyboard(page, selector = null) {
+  if (selector) await page.focus(selector);
+  const target = await page.evaluateHandle(() => document.activeElement);
+  for (let attempt = 1; ; attempt++) {
+    const chooser = page.waitForEvent('filechooser', { timeout: attempt === 1 ? 10000 : 30000 });
+    await page.keyboard.press('Enter');
+    try {
+      return await chooser;
+    } catch {
+      const where = await page.evaluate((t) => {
+        const name = (n) => n ? `${n.tagName.toLowerCase()}.${String(n.className).trim().replace(/\s+/g, '.')}` : 'nothing';
+        return `the focus on ${name(document.activeElement)}, Enter meant for ${name(t)}${t?.isConnected ? '' : ' (gone)'}`;
+      }, target);
+      if (attempt === 2) throw new Error(`Enter opened no file chooser, twice: ${where}`);
+      console.log(`  note: Enter opened no file chooser within 10 s (${where}); pressing it again`);
+      await target.evaluate((t) => t.focus());
+    }
+  }
 }
 
 export const fixture = (name) => readFile(join(fixturesDir, name));

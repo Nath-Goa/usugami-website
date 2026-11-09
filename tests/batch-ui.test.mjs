@@ -8,7 +8,7 @@
 // Screenshots go to .tmp/batch-ui/screens/ to be looked at.
 import { readFile, mkdir, access } from 'node:fs/promises';
 import { join } from 'node:path';
-import { withPage, assert, root, runInPage } from './harness.mjs';
+import { withPage, assert, root, runInPage, chooserFromKeyboard } from './harness.mjs';
 import {
   PDFDocument, PDFName, PDFString, PDFHexString, PDFBool, PDFDict, PDFArray, StandardFonts,
   pushGraphicsState, popGraphicsState, concatTransformationMatrix, drawObject,
@@ -996,8 +996,7 @@ async function testFlatten(page, url, fx, { touch, label }) {
 async function testDesktopKeyboard(page, url, fx) {
   await openTool(page, url, 'compress');
   // Picked from the keyboard: the focus stays on the screen, on the first PDF's card.
-  await page.focus('.ui-empty');
-  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.keyboard.press('Enter')]);
+  const chooser = await chooserFromKeyboard(page, '.ui-empty');
   await chooser.setFiles([fx.scan, fx.compact]);
   await page.waitForFunction(() => document.querySelector('.compress-run')?.getAttribute('aria-disabled') === 'true' || document.querySelectorAll('.ui-batch-item').length === 2);
   await listed(page, 2);

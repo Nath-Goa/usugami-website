@@ -736,10 +736,15 @@ const noSideScroll = (page) => page.evaluate(() => document.documentElement.scro
 
 /** Saves the result's PDFs with Save to Downloads and gives their names and bytes. */
 async function saveAll(page, count) {
+  // WebKit on Linux reports a download's name with underscores for its spaces (its own choice: the
+  // app names it with spaces, as Safari keeps them), so there it is matched back to the name shown.
+  const lossy = page.context().browser().browserType().name() === 'webkit' && process.platform === 'linux';
+  const shown = lossy ? await page.$$eval('.ui-result-name', (els) => els.map((e) => e.textContent)) : [];
+  const named = (n) => (lossy && shown.find((s) => s !== n && s.replace(/ /g, '_') === n)) || n;
   const downloads = [];
   const got = new Promise((resolve) => {
     page.on('download', async (d) => {
-      downloads.push({ name: d.suggestedFilename(), bytes: await readFile(await d.path()) });
+      downloads.push({ name: named(d.suggestedFilename()), bytes: await readFile(await d.path()) });
       if (downloads.length === count) resolve();
     });
   });
