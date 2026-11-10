@@ -293,11 +293,12 @@ const AVIF_PROBE = 'AAAAIGZ0eXBhdmlmAAAAAGF2aWZtaWYxbWlhZk1BMUIAAAD1bWV0YQAAAAAA
 /**
  * Whether `name` is no name worth keeping: what a camera app or a photo picker gives a photo whose
  * real name it hides, such as "image.jpg" (a photo just taken, on an iPhone), "image (2).jpg", or
- * a number ("1000000163.jpg", the Android photo picker's; a camera's time in milliseconds).
+ * a long number ("1000000163.jpg", the Android photo picker's; a camera's time in milliseconds).
  */
 export function isUnnamedPhoto(name) {
   const n = (name ?? '').trim();
-  return n === '' || /^\d+(\.[A-Za-z0-9]+)?$/.test(n) || /^image(?: ?\(\d+\))?(\.[A-Za-z0-9]+)?$/i.test(n);
+  // Ten digits or more: a short number (1.jpg, 002.png, 2024.jpg) is a name someone gave a page.
+  return n === '' || /^\d{10,}(\.[A-Za-z0-9]+)?$/.test(n) || /^image(?: ?\(\d+\))?(\.[A-Za-z0-9]+)?$/i.test(n);
 }
 
 /**

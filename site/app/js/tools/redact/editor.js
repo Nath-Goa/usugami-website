@@ -344,8 +344,15 @@ export function createEditor({ engine: E, state, onSelect, onAdd, onChange, onKe
 
   function focusBox(index) {
     const b = buttons.find((x) => Number(x.dataset.index) === index);
-    if (b) b.focus({ preventScroll: true });
-    return !!b;
+    if (!b) return false;
+    // The buttons are reused by position, so after a box before this one is deleted its button may
+    // be the one that already has the focus: no focus event comes then, and the box is chosen here.
+    if (b === document.activeElement) {
+      if (state().selected !== index) onSelect(index);
+    } else {
+      b.focus({ preventScroll: true });
+    }
+    return true;
   }
 
   /** Where the focus goes when the box that had it is gone. */

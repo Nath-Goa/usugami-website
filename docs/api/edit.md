@@ -70,7 +70,7 @@ Throws:
 | `watermark_no_font` | This phone has no font for some of these characters. Try different text. (web: `web_watermark_no_font`, "This device has…") | A text has characters no bundled font nor the browser can draw (`canDrawText`). Checked before anything is drawn. |
 | `edit_picture_failed` | Couldn't read that picture. | A picture can't be decoded any more. |
 | `web_fonts_unavailable` | Usugami couldn't load its fonts. Check your connection and try again. | From the text engine, offline before the fonts were saved for offline use. |
-| `pdf_import_failed` | Couldn't open that PDF. It may be damaged or unsupported. | pdf-lib can't read the PDF (`pdf-common.js`), or its page tree loops or is damaged (also from `shownPageSizes`). |
+| `pdf_import_failed` | Couldn't open that PDF. It may be damaged or unsupported. | pdf-lib can't read the PDF (`pdf-common.js`), or it has no pages that can be found (also from `shownPageSizes`). A page tree that loops, or a page without its `/Type`, is mended first (`flatten/pages.js` `viewerPages`, as Flatten PDF and Compress PDF do), so items go on the pages the preview shows. |
 | `PasswordError` | — | The password is missing or wrong. |
 | `CancelledError` | — | `signal` aborted. |
 

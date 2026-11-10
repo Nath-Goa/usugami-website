@@ -535,6 +535,8 @@ const images = new OfficeImages(pkgOrZipOrFunction, pdf.doc, { signal });
 const pic = await images.picture('word/media/image1.png', widthPt, heightPt, crop /* [l, t, r, b] or null */);
 pic.draw(canvas, rect);                       // ImagePicture: the picture, cropped; a grey box when it can't be decoded
 await images.image(path, widthPt, heightPt)   // { ref, width, height } for canvas.drawImage, or null
+await images.image(path, widthPt, heightPt, crop)   // only the part the crop leaves is stored ({ ..., cut: true }):
+                                              // what was cropped away is not in the PDF. ImagePicture.load() does this.
 new ImagePicture(images, path, w, h, crop); await picture.load();   // the same in two steps
 rich.appendObject(inlinePicture(pic, w, h), style);   // a picture in a line of text (PictureSpan)
 const chart = await StandInPicture.create('Sales by region'); chart.draw(canvas, rect);   // grey box with its title

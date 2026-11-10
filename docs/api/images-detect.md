@@ -122,7 +122,8 @@ ctx.drawImage(bitmap, 0, 0); bitmap.close();
 ### `photoName(name, taken = null, now = new Date()) → string` and `isUnnamedPhoto(name) → boolean`
 
 A photo with no useful name (`image.jpg`, `image (2).jpg` as iPhones name camera captures, a number
-such as `1000000163.jpg` from Android's photo picker or a camera's milliseconds, or nothing) is named
+of ten digits or more such as `1000000163.jpg` from Android's photo picker or a camera's
+milliseconds, or nothing; a shorter number such as `12.jpg` is a page someone numbered, and stays) is named
 `Photo_yyyyMMdd_HHmmss` and its extension, from when it was taken (EXIF DateTimeOriginal, else the
 file's `lastModified`, else now), as the app names photos from its Photos picker. Any other name is
 kept (only its last path part). `importImage` already does this. (The app names a photo taken with

@@ -902,6 +902,8 @@ async function drawingPdf(page) {
     shape({ rect: R(20, 230, 200, 30), geometry: 'rect', line: new D.Outline(0xff000000, 2, true) });
     shape({ rect: R(300, 200, 100, 20), rotation: 90, geometry: 'rect', fill: solid(0x800080) });
     const cropped = await images.picture(read.blip.path, 100, 50, read.blip.crop);
+    // The same picture at the same size without its crop, to compare what is stored.
+    const uncropped = await images.image(read.blip.path, 200, 50);
     shape({ picture: true, rect: R(400, 20, 100, 50), fill: read.blip, pictureObject: cropped });
     const whole = await images.picture(read.tile.path, 100, 50, null);
     shape({ picture: true, rect: R(400, 100, 100, 50), flipH: true, fill: read.tile, pictureObject: whole, line: new D.Outline(0xff000000, 1, false) });
@@ -935,14 +937,18 @@ async function drawingPdf(page) {
     return {
       bytes,
       read: JSON.parse(JSON.stringify(read, (k, v) => (v instanceof Map ? [...v] : v))),
+      stored: [cropped.image?.width, cropped.image?.height, cropped.image?.cut, uncropped?.width, uncropped?.height, cropped.image?.ref !== uncropped?.ref],
       sizes: [bigPicture.image?.width, bigPicture.image?.height, bigPicture.image === again.image, broken.image, O.opdf.decodedSize(2000, 1000, 150, 75), O.opdf.decodedSize(4000, 3000, 800, 600), O.opdf.decodedSize(100, 100, 300, 300)],
     };
   });
 }
 
 async function drawing(page) {
-  const { bytes, read, sizes } = await drawingPdf(page);
+  const { bytes, read, sizes, stored } = await drawingPdf(page);
   const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  // Cropped to its right half: half the pixels are in the PDF, not the whole picture behind a clip.
+  check('a cropped picture is stored without the part cut off', stored[3] > 1 && stored[0] === stored[3] - Math.round(stored[3] / 2) &&
+    stored[1] === stored[4] && stored[2] === true && stored[5] === true, stored);
   check('fills are read: solid, gradients sorted, pictures with their crop, none, patterns', read.solid.type === 'solid' && read.solid.color === 0xffed7d31 &&
     eq(read.grad, { type: 'gradient', stops: [[0, 0xffff0000], [1, 0xff0000ff]], angle: 0, radial: false }) && read.radial.radial === true && read.radial.angle === 90 &&
     eq(read.blip, { type: 'image', path: 'ppt/media/image1.png', crop: [0.5, 0, 0, 0], tile: false }) && read.tile.tile === true && read.tile.crop === null &&

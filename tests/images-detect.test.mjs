@@ -817,6 +817,9 @@ await test('Names: a photo without a name is named by when it was taken', () => 
   const taken = new Date(2024, 4, 1, 13, 45, 12);
   for (const n of ['image.jpg', 'image (2).jpg', '1000000163.jpg', '1714567890123.jpeg', 'IMAGE.PNG', '', '1000000163']) assert(isUnnamedPhoto(n), n);
   for (const n of ['IMG_2041.HEIC', 'Scan_20240501_134512.jpg', 'holiday.png', 'image of a cat.jpg', 'PXL_20240501_134512345.jpg']) assert(!isUnnamedPhoto(n), n);
+  // A short number is a name someone gave a page: it stays, so numbered pages sort by their numbers.
+  for (const n of ['1.jpg', '12.jpeg', '002.png', '2024.jpg', '20240501.jpg', '7']) assert(!isUnnamedPhoto(n), n);
+  assert(photoName('12.jpg', taken) === '12.jpg', 'a numbered page keeps its name');
   assert(photoName('1000000163.jpg', taken) === 'Photo_20240501_134512.jpg', photoName('1000000163.jpg', taken));
   assert(photoName('image.HEIC', taken) === 'Photo_20240501_134512.HEIC', 'extension kept');
   assert(photoName('1000000163', taken) === 'Photo_20240501_134512', 'no extension');

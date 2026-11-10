@@ -98,7 +98,10 @@ export function toIntOrNull(s, radix = 10) {
 // Java's grammar for a double, as Kotlin screens it before Double.parseDouble.
 const DIGITS = '[0-9]+';
 const EXP = `[eE][+-]?${DIGITS}`;
-const DECIMAL = `(?:${DIGITS}\\.?(?:[0-9]*)(?:${EXP})?|\\.${DIGITS}(?:${EXP})?)`;
+// The digits after the point come only with the point: were they optional on their own, a long run
+// of digits could be split between the two parts in as many ways as it has digits, and a value that
+// isn't a number after all (a hundred thousand digits and a letter) would take minutes to refuse.
+const DECIMAL = `(?:${DIGITS}(?:\\.[0-9]*)?(?:${EXP})?|\\.${DIGITS}(?:${EXP})?)`;
 const HEX = '0[xX](?:([0-9a-fA-F]+)\\.?|([0-9a-fA-F]*)\\.([0-9a-fA-F]+))[pP]([+-]?[0-9]+)';
 const DOUBLE = new RegExp(`^[\\x00-\\x20]*([+-]?)(?:(NaN)|(Infinity)|(${DECIMAL})[fFdD]?|(?:${HEX})[fFdD]?)[\\x00-\\x20]*$`);
 

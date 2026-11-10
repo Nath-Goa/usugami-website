@@ -2068,6 +2068,18 @@ const model = await import(fileUrl(MODEL));
 const nodeResult = suite(numbers, model, GOLDEN);
 report('Node', nodeResult);
 
+// Kotlin's toDoubleOrNull, which every cell value that isn't plainly a number goes through: a long
+// run of digits that isn't a number after all is refused at once, not after minutes of trying.
+{
+  const { toDoubleOrNull } = await import(fileUrl('app/js/engine/office/xlsx-numbers-kt.js'));
+  const cases = [['12', 12], ['12.', 12], ['12.5', 12.5], ['.5', 0.5], ['1e3', 1000], ['12.5e-1', 1.25], ['-7d', -7], [' 3f ', 3],
+    ['', null], ['.', null], ['1e', null], ['1.e', null], ['12x', null], ['1..2', null]];
+  for (const [text, expected] of cases) assert(toDoubleOrNull(text) === expected, `toDoubleOrNull(${JSON.stringify(text)}) gave ${toDoubleOrNull(text)}, not ${expected}`);
+  const began = Date.now();
+  for (const tail of ['x', 'e', '.x']) assert(toDoubleOrNull('1'.repeat(200000) + tail) === null, `200,000 digits and "${tail}" is no number`);
+  assert(Date.now() - began < 2000, `long digit runs took ${Date.now() - began} ms to refuse`);
+}
+
 const expression = (base) => `(async () => {
   const numbers = await import(${JSON.stringify(new URL(NUMBERS, base).href)});
   const model = await import(${JSON.stringify(new URL(MODEL, base).href)});

@@ -440,8 +440,10 @@ export function slider({ label, min = 0, max = 100, step = 1, value = min, onCha
     const text = format(v);
     shown.textContent = text;
     input.setAttribute('aria-valuetext', text);
-    const span = Number(max) - Number(min);
-    input.style.setProperty('--fill', (span > 0 ? ((v - min) / span) * 100 : 0) + '%');
+    // From the input, not from the options: a screen may change its min and max afterwards.
+    const lo = Number(input.min);
+    const span = Number(input.max) - lo;
+    input.style.setProperty('--fill', (span > 0 ? ((v - lo) / span) * 100 : 0) + '%');
   };
   input.addEventListener('input', () => { render(); onChange?.(Number(input.value)); });
   input.addEventListener('change', () => onCommit?.(Number(input.value)));

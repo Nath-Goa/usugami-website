@@ -134,15 +134,19 @@ export class OfficeImages {
   /**
    * The picture in part `path`, to be shown `width` × `height` points big, decoded and put into the
    * PDF: { ref, width, height } (pixels) to draw with canvas.drawImage, or null when the browser
-   * can't decode it (EMF and WMF drawings, TIFF, damaged files).
+   * can't decode it (EMF and WMF drawings, TIFF, damaged files). With `crop` (the share of each
+   * side cut off, [left, top, right, bottom]) only the part left is put into the PDF, and the
+   * result says so (`cut: true`): what the document's author cropped away is not in the file for
+   * anyone to take out again.
    */
-  image(path, width, height) {
+  image(path, width, height, crop = null) {
     const targetW = clampInt(roundToInt((width / 72) * DPI) || 1, 1, MAX_SIDE);
     const targetH = clampInt(roundToInt((height / 72) * DPI) || 1, 1, MAX_SIDE);
-    const key = `${path}@${targetW}×${targetH}`;
+    const cut = crop && crop.some((v) => v > 0) ? crop : null;
+    const key = `${path}@${targetW}×${targetH}${cut ? '#' + cut.join(',') : ''}`;
     let found = this.cache.get(key);
     if (!found) {
-      found = this.decode(path, targetW, targetH).catch((e) => {
+      found = this.decode(path, targetW, targetH, cut).catch((e) => {
         if (e?.name === 'CancelledError') throw e;
         return null;
       });
@@ -156,7 +160,7 @@ export class OfficeImages {
     return new ImagePicture(this, path, width, height, crop).load();
   }
 
-  async decode(path, targetW, targetH) {
+  async decode(path, targetW, targetH, crop = null) {
     checkCancelled(this.signal);
     const bytes = await this.open(path);
     checkCancelled(this.signal);
@@ -195,12 +199,38 @@ export class OfficeImages {
       ctx.drawImage(bitmap, 0, 0, w, h);
       bitmap.close?.();
       bitmap = null;
-      return await storePicture(this.doc, canvas, ctx.getImageData(0, 0, w, h).data, w, h);
+      const part = crop ? cropPixels(crop, w, h) : null;
+      if (!part) return await storePicture(this.doc, canvas, ctx.getImageData(0, 0, w, h).data, w, h);
+      // Only the part that shows, on a canvas of its own.
+      const shown = makeCanvas(part.width, part.height);
+      try {
+        const sctx = context2d(shown, { willReadFrequently: true });
+        sctx.drawImage(canvas, part.x, part.y, part.width, part.height, 0, 0, part.width, part.height);
+        const stored = await storePicture(this.doc, shown, sctx.getImageData(0, 0, part.width, part.height).data, part.width, part.height);
+        return { ...stored, cut: true };
+      } finally {
+        releaseCanvas(shown);
+      }
     } finally {
       bitmap?.close?.();
       releaseCanvas(canvas);
     }
   }
+}
+
+/**
+ * The pixels of a `w` × `h` picture left by `crop` (the share of each side cut off, [left, top,
+ * right, bottom]; a negative share cuts nothing), as { x, y, width, height }, or null when that is
+ * the whole picture or nothing of it.
+ */
+function cropPixels(crop, w, h) {
+  const left = clampInt(roundToInt(crop[0] * w), 0, w - 1);
+  const top = clampInt(roundToInt(crop[1] * h), 0, h - 1);
+  const right = clampInt(roundToInt(w - crop[2] * w), 1, w);
+  const bottom = clampInt(roundToInt(h - crop[3] * h), 1, h);
+  if (!(right - left > 0 && bottom - top > 0)) return null;
+  if (left === 0 && top === 0 && right === w && bottom === h) return null;
+  return { x: left, y: top, width: right - left, height: bottom - top };
 }
 
 /**
@@ -361,7 +391,7 @@ export class ImagePicture {
   }
 
   async load() {
-    if (this.image === undefined) this.image = await this.images.image(this.path, this.width / this.shownX, this.height / this.shownY);
+    if (this.image === undefined) this.image = await this.images.image(this.path, this.width / this.shownX, this.height / this.shownY, this.crop);
     return this;
   }
 
@@ -370,16 +400,8 @@ export class ImagePicture {
     const image = this.image;
     if (!image) return StandInPicture.EMPTY.draw(canvas, r);
     const c = this.crop;
-    let source = null;
-    if (c) {
-      const w = image.width;
-      const h = image.height;
-      const left = clampInt(roundToInt(c[0] * w), 0, w - 1);
-      const top = clampInt(roundToInt(c[1] * h), 0, h - 1);
-      const right = clampInt(roundToInt(w - c[2] * w), 1, w);
-      const bottom = clampInt(roundToInt(h - c[3] * h), 1, h);
-      if (right - left > 0 && bottom - top > 0) source = { x: left, y: top, width: right - left, height: bottom - top };
-    }
+    // A picture stored already cut to its crop (OfficeImages.image) is drawn whole.
+    const source = c && !image.cut ? cropPixels(c, image.width, image.height) : null;
     // A side cropped by a negative share (Crop > Fit) leaves that much of the frame empty, rather
     // than the picture being stretched over it.
     let target = r;

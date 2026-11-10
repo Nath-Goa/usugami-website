@@ -469,6 +469,53 @@ await withPage(async (page, url) => {
     ok(doc.getPages().map((p) => p.getRotation().angle).join() === '0,90,0,270', 'turns kept');
   }
 
+  step('a page without its /Type: items go on the page the preview shows');
+  {
+    // pdf-lib's own page list skips such a page; viewers, and so the preview, show it.
+    const made = await PDFDocument.create();
+    for (const size of [[300, 400], [500, 600], [700, 800]]) made.addPage(size);
+    made.getPages()[0].node.delete(PDFName.of('Type'));
+    const untyped = await made.save({ useObjectStreams: false });
+    const r = await page.evaluate(async (pdfB64) => {
+      const E = await import('./js/engine/edit.js');
+      const bytes = Uint8Array.from(atob(pdfB64), (c) => c.charCodeAt(0));
+      const sizes = await E.shownPageSizes({ bytes });
+      const items = [E.shapeItem({ id: 1, page: 1, kind: 'rect', x1: 20, y1: 20, x2: 120, y2: 90, width: 2, color: '#d32f2f' })];
+      const out = await E.editPages({ name: 'u.pdf', bytes }, { items });
+      let s = '';
+      for (let i = 0; i < out.bytes.length; i += 0x8000) s += String.fromCharCode(...out.bytes.subarray(i, i + 0x8000));
+      return { widths: sizes.map((p) => p.width), pageCount: out.pageCount, b64: btoa(s) };
+    }, b64(untyped));
+    ok(r.widths.join() === '300,500,700', `all three pages are found: ${r.widths}`);
+    ok(r.pageCount === 3, `three pages in the result: ${r.pageCount}`);
+    const pages = (await PDFDocument.load(fromB64(r.b64))).getPages();
+    const drawn = pages.map((p) => !!p.node.Contents());
+    ok(pages.length === 3 && pages.map((p) => p.getWidth()).join() === '300,500,700', 'the saved PDF has its three pages in order');
+    ok(drawn.join() === 'false,true,false', `the item is on the second page only: ${drawn}`);
+  }
+
+  step('a page tree that loops is mended, as the preview mends it');
+  {
+    const made = await PDFDocument.create();
+    made.addPage([300, 400]);
+    const pagesRef = made.catalog.get(PDFName.of('Pages'));
+    made.context.lookup(pagesRef).get(PDFName.of('Kids')).push(pagesRef);
+    const looping = await made.save({ useObjectStreams: false });
+    const r = await page.evaluate(async (pdfB64) => {
+      const E = await import('./js/engine/edit.js');
+      const bytes = Uint8Array.from(atob(pdfB64), (c) => c.charCodeAt(0));
+      const sizes = await E.shownPageSizes({ bytes });
+      const items = [E.shapeItem({ id: 1, page: 0, kind: 'rect', x1: 20, y1: 20, x2: 120, y2: 90, width: 2, color: '#d32f2f' })];
+      const out = await E.editPages({ name: 'l.pdf', bytes }, { items });
+      let s = '';
+      for (let i = 0; i < out.bytes.length; i += 0x8000) s += String.fromCharCode(...out.bytes.subarray(i, i + 0x8000));
+      return { widths: sizes.map((p) => p.width), pageCount: out.pageCount, b64: btoa(s) };
+    }, b64(looping));
+    ok(r.widths.join() === '300' && r.pageCount === 1, `its one page is found: ${r.widths}, ${r.pageCount}`);
+    const pages = (await PDFDocument.load(fromB64(r.b64))).getPages();
+    ok(pages.length === 1 && !!pages[0].node.Contents(), 'and the saved PDF has the item on it');
+  }
+
   step('highlighter: see-through, multiplied, text stays dark');
   {
     const r = await page.evaluate(async (mixedB64) => {
@@ -1164,15 +1211,17 @@ for (const browser of quick ? ['chromium'] : ['chromium', 'firefox', 'webkit']) 
 
 // ---- Review fixes: presses don't scroll, keys on sliders, focus kept, the app's language ----
 
-/** A one-page PDF pdf.js shows but whose page tree loops for pdf-lib, made slow to read (many objects). */
-async function loopingPdf() {
+/**
+ * A one-page PDF pdf.js shows (as a Letter page) but the engine can't draw on: its page has no
+ * /MediaBox. Made slow to read (many objects). A page tree that loops no longer does for this: the
+ * engine mends it, as the preview does.
+ */
+async function unsavablePdf() {
   const doc = await PDFDocument.create();
-  doc.addPage([595.28, 841.89]);
+  const page = doc.addPage([595.28, 841.89]);
   const ctx = doc.context;
   for (let i = 0; i < 15000; i++) ctx.register(ctx.obj({ Filler: i }));
-  // The page tree's own node among its kids: pdf.js finds page 1 before it, pdf-lib goes round.
-  const pagesRef = doc.catalog.get(PDFName.of('Pages'));
-  ctx.lookup(pagesRef).get(PDFName.of('Kids')).push(pagesRef);
+  page.node.delete(PDFName.of('MediaBox'));
   return doc.save({ useObjectStreams: false });
 }
 
@@ -1352,9 +1401,9 @@ await withPage(async (page0, url, context) => {
   ok(/^\d+(\.\d)? pt$/.test(thickness), `the thickness is written the English way (${thickness})`);
   await de.close();
 
-  // A PDF pdf-lib can't read (its page tree loops): the snackbar comes once the progress dialog has gone.
-  const looping = await loopingPdf();
-  await openEditor(page0, url, looping, 'Looping.pdf');
+  // A PDF the engine can't draw on (its page has no size): the snackbar comes once the progress dialog has gone.
+  const unsavable = await unsavablePdf();
+  await openEditor(page0, url, unsavable, 'Unsavable.pdf');
   await addShape(page0, 'Arrow');
   await page0.evaluate(() => {
     window.__seen = [];

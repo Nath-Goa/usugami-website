@@ -633,6 +633,15 @@ await test('quick taps act on the boxes as they are (RedactQuickTapsDeviceTest)'
     eq(s.boxes, [B, C], 'double tap on Delete box');
     eq(s.selected, -1, 'none chosen after a double tap');
     // Keys pressed quickly do the same.
+    // Delete on a box that isn't the page's last: the next box takes the focus and is chosen. Its
+    // button is the one that had the focus already, so no focus event says so.
+    await setUp();
+    await page.focus('.redact-box[data-index="0"]');
+    await page.keyboard.press('Delete');
+    s = await state(page);
+    eq(s.boxes, [B, C], 'Delete on the first box of the page');
+    eq(s.selected, 1, 'C, the next box of the page, is chosen');
+    eq(await page.evaluate(() => document.activeElement?.getAttribute('aria-pressed')), 'true', 'and its button shows it');
     await setUp();
     await page.focus('.redact-box[data-index="0"]');
     await page.evaluate(() => {

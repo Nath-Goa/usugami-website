@@ -16,6 +16,7 @@ import { paintedAreas, pageArea } from './edit/layout.js';
 import { textLayout, canDrawText, TEXT_MAX_LENGTH } from './edit/text.js';
 import { pdfImage } from './edit/pictures.js';
 import { drawItem } from './edit/draw.js';
+import { viewerPages } from './flatten/pages.js';
 
 export * from './edit/layout.js';
 export { EditHistory, MAX_UNDO } from './edit/history.js';
@@ -44,13 +45,16 @@ export async function shownPageSizes(input) {
 }
 
 /**
- * The pages of `doc`. A page tree that loops or is damaged makes pdf-lib overflow its stack or throw
- * a TypeError: that PDF can't be opened (UserError('pdf_import_failed')), as redact.js says it.
+ * The pages of `doc` as viewers and the preview find them, a damaged page tree mended first (as
+ * Flatten PDF and Compress PDF read it): pdf-lib's own getPages() skips a page that lacks its
+ * /Type, and an item would then land on the page after the one it was put on. A PDF without pages
+ * that can be found can't be opened (UserError('pdf_import_failed')).
  */
 function pagesOf(doc) {
   try {
-    return doc.getPages();
-  } catch {
+    return viewerPages(doc);
+  } catch (e) {
+    if (e instanceof UserError) throw e;
     throw new UserError('pdf_import_failed');
   }
 }
