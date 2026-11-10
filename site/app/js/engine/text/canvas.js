@@ -92,11 +92,16 @@ export function pageFrame(page, frame = 'shown') {
  * that leaves nothing (a crop box beside the page, or an empty one).
  */
 function shownBox(page) {
-  const media = page.getMediaBox();
-  const crop = page.getCropBox();
   const side = (b) => [Math.min(b.x, b.x + b.width), Math.min(b.y, b.y + b.height), Math.max(b.x, b.x + b.width), Math.max(b.y, b.y + b.height)];
-  const m = side(media);
+  // Throws for a page with neither box, as it always has.
+  const crop = page.getCropBox();
   const c = side(crop);
+  let m = c;
+  try {
+    m = side(page.getMediaBox());
+  } catch {
+    // A crop box and no media box: the crop box as it is.
+  }
   const cut = [Math.max(c[0], m[0]), Math.max(c[1], m[1]), Math.min(c[2], m[2]), Math.min(c[3], m[3])];
   const [left, bottom, right, top] = cut[2] - cut[0] > 0 && cut[3] - cut[1] > 0 ? cut : m;
   return { x: left, y: bottom, width: right - left, height: top - bottom };

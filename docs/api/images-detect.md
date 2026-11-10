@@ -197,7 +197,8 @@ GPU, 0.45 s with the processor slowed 4×.
 
 PageLooks.straightened: the page inside `quad` (corners on `source`, an ImageBitmap or canvas)
 straightened onto a new canvas on white, at most `maxSide` long: for showing a page on Filters before
-it is cropped. Null when the corners can't be mapped onto a rectangle.
+it is cropped. Null when the corners can't be mapped onto a rectangle. Throws `RangeError` when
+memory is too short for a picture this size, so the caller can ask again for a smaller one.
 
 ```js
 const shown = await loadImage(image, { maxSide: 1600 });

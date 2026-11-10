@@ -28,7 +28,7 @@ import {
 } from '../../engine/edit.js';
 ```
 
-**Units and coordinates.** Everything is in **points on the page as it is shown** (its crop box, turned
+**Units and coordinates.** Everything is in **points on the page as it is shown** (its crop box cut to its media box, or the whole media box when that leaves nothing; turned
 as `/Rotate` turns it), from the shown page's **top-left corner, y down**, as on a screen. Colours are
 CSS hex strings (`'#d32f2f'`).
 
