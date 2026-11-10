@@ -8,6 +8,9 @@ import { PDFName, PDFDict, PDFArray, PDFStream, PDFRef, PDFNumber } from '../lib
 import { UserError, PasswordError, CancelledError, checkCancelled } from '../core/errors.js';
 import { sanitizeName } from '../core/names.js';
 import { yieldToUI } from '../core/dom.js';
+// With the engine, not when a page with form fields or comments is first signed: the device may
+// be offline by then.
+import { bakeUnder } from './flatten.js';
 import { Signature, INKS, clampPlacement, defaultPlacement, pdfArea, pixels, renderSignature } from './signature.js';
 
 // The signature, its picture and its place (no pdf-lib), for the screen to load on its own.
@@ -217,7 +220,6 @@ export async function signPdf(input, options = {}, { onProgress, signal } = {}) 
     progress(2);
     // It goes over the form fields and comments under it, as the preview shows it.
     if (hasAnnotations(ctx, node)) {
-      const { bakeUnder } = await import('./flatten.js');
       try {
         await bakeUnder(doc, index, [pageArea(frame.matrix, area.x, area.y, area.width, area.height)], { signal });
       } catch (e) {

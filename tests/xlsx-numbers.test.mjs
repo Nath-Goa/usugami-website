@@ -2068,6 +2068,13 @@ const model = await import(fileUrl(MODEL));
 const nodeResult = suite(numbers, model, GOLDEN);
 report('Node', nodeResult);
 
+// Bulgarian and Lithuanian have no short month name of their own (Intl gives the month's number):
+// mmm then shows the name, not digits.
+for (const lang of ['bg', 'lt', 'en', 'fr', 'ja']) {
+  const short = numbers.sheetLocale(lang).shortMonths;
+  assert(short.length === 12 && short.every((m) => m && !/^[0-9]+$/.test(m)), `${lang}: short month names are names (${short.join(' ')})`);
+}
+
 // Kotlin's toDoubleOrNull, which every cell value that isn't plainly a number goes through: a long
 // run of digits that isn't a number after all is refused at once, not after minutes of trying.
 {

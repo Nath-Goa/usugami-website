@@ -516,6 +516,49 @@ await withPage(async (page, url) => {
     ok(pages.length === 1 && !!pages[0].node.Contents(), 'and the saved PDF has the item on it');
   }
 
+  step('pages that share their content list and resources: only the edited page changes');
+  {
+    const made = await PDFDocument.create();
+    const ctx = made.context;
+    const resources = ctx.register(ctx.obj({}));
+    const contents = ctx.register(ctx.obj([ctx.register(ctx.stream('0 0 m 10 10 l S'))]));
+    for (let i = 0; i < 2; i++) {
+      const p = made.addPage([300, 400]);
+      p.node.set(PDFName.of('Resources'), resources);
+      p.node.set(PDFName.of('Contents'), contents);
+    }
+    const shared = await made.save({ useObjectStreams: false });
+    const outB64 = await page.evaluate(async (pdfB64) => {
+      const E = await import('./js/engine/edit.js');
+      const bytes = Uint8Array.from(atob(pdfB64), (c) => c.charCodeAt(0));
+      const items = [E.inkItem({ id: 1, page: 0, points: [20, 20, 200, 20], width: 24, color: '#ffe600', highlighter: true })];
+      const out = await E.editPages({ name: 's.pdf', bytes }, { items });
+      let s = '';
+      for (let i = 0; i < out.bytes.length; i += 0x8000) s += String.fromCharCode(...out.bytes.subarray(i, i + 0x8000));
+      return btoa(s);
+    }, b64(shared));
+    const [first, second] = (await PDFDocument.load(fromB64(outB64))).getPages();
+    const states = (p) => p.node.Resources()?.lookupMaybe(PDFName.of('ExtGState'), PDFDict)?.keys().length ?? 0;
+    ok(first.node.Contents().size() > 1 && states(first) > 0, 'the edited page has the stroke and its graphics state');
+    ok(second.node.Contents().size() === 1, `the other page's content is still its one stream (${second.node.Contents().size()})`);
+    ok(states(second) === 0, `and its resources got nothing added (${states(second)})`);
+  }
+
+  step('a crop box reaching outside the page: the page as viewers show it');
+  {
+    const made = await PDFDocument.create();
+    const boxes = [[-50, -50, 662, 842], [1000, 1000, 1200, 1300], [100, 100, 500, 700]];
+    for (const box of boxes) made.addPage([612, 792]).node.set(PDFName.of('CropBox'), made.context.obj(box));
+    const bytes = await made.save({ useObjectStreams: false });
+    const sizes = await page.evaluate(async (pdfB64) => {
+      const E = await import('./js/engine/edit.js');
+      return E.shownPageSizes({ bytes: Uint8Array.from(atob(pdfB64), (c) => c.charCodeAt(0)) });
+    }, b64(bytes));
+    ok(sizes[0].box.join() === '0,0,612,792' && sizes[0].width === 612 && sizes[0].height === 792, `a crop box bigger than the page is cut to it: ${sizes[0].box}`);
+    ok(sizes[1].box.join() === '0,0,612,792', `a crop box beside the page: the whole page (${sizes[1].box})`);
+    ok(sizes[2].box.join() === '100,100,500,700' && sizes[2].width === 400 && sizes[2].height === 600, `a crop box inside the page is kept: ${sizes[2].box}`);
+  }
+
   step('highlighter: see-through, multiplied, text stays dark');
   {
     const r = await page.evaluate(async (mixedB64) => {

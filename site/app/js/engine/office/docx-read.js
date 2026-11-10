@@ -876,6 +876,7 @@ export class Reader {
       for (const c of e.children()) {
         if (c.name === 'tr') rows.push(this.row(c, tableStyle()));
         else if (c.name === 'sdt' || c.name === 'sdtContent' || c.name === 'customXml') rowsIn(c);
+        else if (c.name === 'bookmarkStart' && c.ns === Ns.WORD) this.bookmark(c, this.pendingBookmarks);
       }
     };
     for (const c of x.children()) {
@@ -886,6 +887,9 @@ export class Reader {
           break;
         case 'tr': rows.push(this.row(c, tableStyle())); break;
         case 'sdt': case 'customXml': rowsIn(c); break;
+        // A bookmark between rows (or between cells, below) marks the next paragraph read, so a
+        // link to it has somewhere to go.
+        case 'bookmarkStart': if (c.ns === Ns.WORD) this.bookmark(c, this.pendingBookmarks); break;
         default: break;
       }
     }
@@ -902,6 +906,7 @@ export class Reader {
       for (const c of e.children()) {
         if (c.name === 'tc') cells.push(this.cell(c, tableStyle));
         else if (c.name === 'sdt' || c.name === 'sdtContent' || c.name === 'customXml') cellsIn(c);
+        else if (c.name === 'bookmarkStart' && c.ns === Ns.WORD) this.bookmark(c, this.pendingBookmarks);
       }
     };
     for (const c of x.children()) {
@@ -918,6 +923,7 @@ export class Reader {
           break;
         case 'tc': cells.push(this.cell(c, tableStyle)); break;
         case 'sdt': case 'customXml': cellsIn(c); break;
+        case 'bookmarkStart': if (c.ns === Ns.WORD) this.bookmark(c, this.pendingBookmarks); break;
         default: break;
       }
     }

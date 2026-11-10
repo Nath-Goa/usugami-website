@@ -680,11 +680,14 @@ export function createStage(hooks) {
 
     setMode(m, s) {
       if (m !== mode && gesture?.kind === 'draw') cancelGesture();
+      const changed = m !== mode;
       mode = m;
       style = s;
       el.classList.toggle('is-drawing', mode !== 'select');
       frame.dataset.mode = mode;
-      sheet.style.cursor = mode !== 'select' ? 'crosshair' : '';
+      // Only when the mode changes: every step of a drag comes through here too, and would put the
+      // plain arrow back in place of the move or resize cursor.
+      if (changed) sheet.style.cursor = mode !== 'select' ? 'crosshair' : '';
       redraw();
     },
 

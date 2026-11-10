@@ -305,7 +305,9 @@ export async function straighten(source, quad, maxSide, { signal } = {}) {
   try {
     return await straightenOnto(source, corners, width, height, { transparent: false, signal });
   } catch (e) {
-    if (e instanceof CancelledError) throw e;
+    // Memory too short for a picture this size (RangeError) is the caller's to answer, with a
+    // smaller one; null is only for corners that can't be straightened.
+    if (e instanceof CancelledError || e instanceof RangeError) throw e;
     return null;
   }
 }

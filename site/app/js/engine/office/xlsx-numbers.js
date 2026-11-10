@@ -1026,8 +1026,11 @@ export function sheetLocale(lang) {
     const shortMonths = [];
     for (let m = 0; m < 12; m++) {
       const date = Date.UTC(2023, m, 15);
-      months.push(name({ month: 'long' }, date, 'month', ENGLISH.months[m]));
-      shortMonths.push(name({ month: 'short' }, date, 'month', ENGLISH.shortMonths[m]));
+      const long = name({ month: 'long' }, date, 'month', ENGLISH.months[m]);
+      const short = name({ month: 'short' }, date, 'month', ENGLISH.shortMonths[m]);
+      months.push(long);
+      // Bulgarian and Lithuanian have no short month name, only its number: the long name then.
+      shortMonths.push(/^[0-9]+$/.test(short) ? long : short);
     }
     const days = [];
     const shortDays = [];

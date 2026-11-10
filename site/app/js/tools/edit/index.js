@@ -402,6 +402,9 @@ export async function mount(ctx) {
       // by the stage.
       onSelect: (id) => {
         if (processing) return;
+        // An item chosen from the keyboard while drawing: drawing ends, so the item's own controls
+        // show (else neither they nor the pen's would).
+        if (id != null && mode !== 'select') mode = 'select';
         history.select(id);
       },
       onBegin: () => { if (!processing) history.begin(); },

@@ -68,7 +68,7 @@ export function pageFrame(page, frame = 'shown') {
   let rotation = 0;
   if (frame === 'page') box = page.getMediaBox();
   else {
-    box = page.getCropBox();
+    box = shownBox(page);
     rotation = ((page.getRotation().angle % 360) + 360) % 360;
     if (rotation % 90) rotation = 0;
   }
@@ -84,7 +84,22 @@ export function pageFrame(page, frame = 'shown') {
   const shownWidth = sideways ? height : width;
   const shownHeight = sideways ? width : height;
   const topLeft = [m[0], m[1], -m[2], -m[3], m[4] + m[2] * shownHeight, m[5] + m[3] * shownHeight];
-  return { matrix: topLeft, width: shownWidth, height: shownHeight, rotation };
+  return { matrix: topLeft, width: shownWidth, height: shownHeight, rotation, box: [left, bottom, left + width, bottom + height] };
+}
+
+/**
+ * The part of `page` viewers show: its crop box cut to its media box, or the whole media box when
+ * that leaves nothing (a crop box beside the page, or an empty one).
+ */
+function shownBox(page) {
+  const media = page.getMediaBox();
+  const crop = page.getCropBox();
+  const side = (b) => [Math.min(b.x, b.x + b.width), Math.min(b.y, b.y + b.height), Math.max(b.x, b.x + b.width), Math.max(b.y, b.y + b.height)];
+  const m = side(media);
+  const c = side(crop);
+  const cut = [Math.max(c[0], m[0]), Math.max(c[1], m[1]), Math.min(c[2], m[2]), Math.min(c[3], m[3])];
+  const [left, bottom, right, top] = cut[2] - cut[0] > 0 && cut[3] - cut[1] > 0 ? cut : m;
+  return { x: left, y: bottom, width: right - left, height: top - bottom };
 }
 
 // ---- Paths ----

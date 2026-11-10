@@ -8,6 +8,7 @@
 // item's ink (not those inside an outline or beside a stroke) become part of the page first, so the
 // item covers them as the preview showed. Pages without items aren't touched.
 import { loadPdf, savePdf } from './pdf-common.js';
+import { PDFName, PDFDict, PDFArray } from '../lib/pdf-lib.js';
 import { UserError, checkCancelled } from '../core/errors.js';
 import { yieldToUI } from '../core/dom.js';
 import { sanitizeName } from '../core/names.js';
@@ -17,6 +18,9 @@ import { textLayout, canDrawText, TEXT_MAX_LENGTH } from './edit/text.js';
 import { pdfImage } from './edit/pictures.js';
 import { drawItem } from './edit/draw.js';
 import { viewerPages } from './flatten/pages.js';
+// With the engine, not when a page with form fields or comments is first saved: the device may be
+// offline by then, and the edits couldn't be saved.
+import { bakeUnder } from './flatten.js';
 
 export * from './edit/layout.js';
 export { EditHistory, MAX_UNDO } from './edit/history.js';
@@ -33,14 +37,14 @@ export { drawItem, drawLiveStroke, tracePath } from './edit/draw.js';
  * preview draws the page at, so items go where they show on it.
  * @param {{ bytes: Uint8Array, password?: string }} input
  * @returns {Promise<Array<{ width: number, height: number, rotation: number, box: number[], matrix: number[] }>>}
- *   box: the crop box [left, bottom, right, top] in the page's own coordinates; matrix: shown → page
+ *   box: the part of the page shown (its crop box, cut to its media box) as [left, bottom, right,
+ *   top] in the page's own coordinates; matrix: shown → page
  */
 export async function shownPageSizes(input) {
   const doc = await loadPdf(input.bytes, input.password ? { password: input.password } : {});
   return pagesOf(doc).map((page) => {
     const f = pageFrame(page);
-    const crop = page.getCropBox();
-    return { width: f.width, height: f.height, rotation: f.rotation, box: [crop.x, crop.y, crop.x + crop.width, crop.y + crop.height], matrix: f.matrix };
+    return { width: f.width, height: f.height, rotation: f.rotation, box: f.box, matrix: f.matrix };
   });
 }
 
@@ -57,6 +61,28 @@ function pagesOf(doc) {
     if (e instanceof UserError) throw e;
     throw new UserError('pdf_import_failed');
   }
+}
+
+/**
+ * Gives `page` a /Contents array and /Resources of its own before anything is added to them. Pages
+ * often share both (one list of resources for the whole PDF, a duplicated page's content): what is
+ * drawn on one page mustn't show on, or travel with, the others.
+ */
+function ownDrawing(doc, page) {
+  const ctx = doc.context;
+  const node = page.node;
+  const copy = (dict) => PDFDict.fromMapWithContext(new Map(dict.entries()), ctx);
+  const contents = ctx.lookup(node.get(PDFName.of('Contents')));
+  if (contents instanceof PDFArray) node.set(PDFName.of('Contents'), ctx.obj(contents.asArray().slice()));
+  const shared = ctx.lookupMaybe(node.getInheritableAttribute(PDFName.of('Resources')), PDFDict);
+  if (!shared) return;
+  const own = copy(shared);
+  // The lists inside (fonts, pictures, graphics states), which are what gets added to.
+  for (const [key, value] of shared.entries()) {
+    const inner = ctx.lookup(value);
+    if (inner instanceof PDFDict) own.set(key, copy(inner));
+  }
+  node.set(PDFName.of('Resources'), own);
 }
 
 /** Whether a page has annotations (comments, form fields, links) at all. */
@@ -118,7 +144,6 @@ export async function editPages(input, options = {}, hooks = {}) {
     // The items go over the form fields and comments under their ink, as the preview shows them.
     if (hasAnnotations(page)) {
       const inked = onPage.flatMap((item) => paintedAreas(item).map((a) => pageArea(frame.matrix, a.x, a.y, a.width, a.height)));
-      const { bakeUnder } = await import('./flatten.js');
       await bakeUnder(doc, index, inked, { signal });
     }
     for (const item of onPage) {
@@ -127,6 +152,7 @@ export async function editPages(input, options = {}, hooks = {}) {
     }
     // Added after the page's own drawing, which the canvas wraps in q/Q, so whatever state that
     // leaves behind can't move or recolour what is added.
+    ownDrawing(doc, page);
     const canvas = new PdfCanvas(page);
     const look = {
       text: (item) => layouts.get(`${item.color}\n${item.text.slice(0, TEXT_MAX_LENGTH)}`),

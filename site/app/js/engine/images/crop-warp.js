@@ -235,10 +235,11 @@ async function cpuWarp(source, m, width, height, transparent, signal) {
       const a01 = s[i01 + 3];
       const a10 = s[i10 + 3];
       const a11 = s[i11 + 3];
+      // d is a clamped byte array: it rounds what it is given to the nearest level by itself.
       if ((a00 & a01 & a10 & a11) === 255) {
-        d[o] = s[i00] * w00 + s[i01] * w01 + s[i10] * w10 + s[i11] * w11 + 0.5;
-        d[o + 1] = s[i00 + 1] * w00 + s[i01 + 1] * w01 + s[i10 + 1] * w10 + s[i11 + 1] * w11 + 0.5;
-        d[o + 2] = s[i00 + 2] * w00 + s[i01 + 2] * w01 + s[i10 + 2] * w10 + s[i11 + 2] * w11 + 0.5;
+        d[o] = s[i00] * w00 + s[i01] * w01 + s[i10] * w10 + s[i11] * w11;
+        d[o + 1] = s[i00 + 1] * w00 + s[i01 + 1] * w01 + s[i10 + 1] * w10 + s[i11 + 1] * w11;
+        d[o + 2] = s[i00 + 2] * w00 + s[i01 + 2] * w01 + s[i10 + 2] * w10 + s[i11 + 2] * w11;
         d[o + 3] = 255;
         continue;
       }
@@ -251,9 +252,9 @@ async function cpuWarp(source, m, width, height, transparent, signal) {
       const cover = alpha / 255;
       for (let c = 0; c < 3; c++) {
         const mixed = alpha > 0 ? (s[i00 + c] * b00 + s[i01 + c] * b01 + s[i10 + c] * b10 + s[i11 + c] * b11) / alpha : 0;
-        d[o + c] = transparent ? mixed + 0.5 : mixed * cover + 255 * (1 - cover) + 0.5;
+        d[o + c] = transparent ? mixed : mixed * cover + 255 * (1 - cover);
       }
-      d[o + 3] = transparent ? alpha + 0.5 : 255;
+      d[o + 3] = transparent ? alpha : 255;
     }
     if (performance.now() - started > 40) {
       await yieldNow();

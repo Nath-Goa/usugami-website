@@ -11,8 +11,12 @@ import { levelLook, levelOver, runLook, runOver, bodyOver, gapPoints, EAST_ASIAN
 
 const f = Math.fround;
 
-/** Android lays text out in whole tenths of a point: a length cut to them, as the app's `.toInt()` of units. */
-export const tenths = (points) => Math.trunc(points * 10) / 10;
+/**
+ * Android lays text out in whole tenths of a point: a length cut to them, as the app's `.toInt()` of
+ * units. Multiplied as a Float, as there: 7.2 pt read from EMU is 7.19999981 as a Float, which times
+ * ten is 72 as a Float but 71.999998 as a double, and would be cut to 7.1.
+ */
+export const tenths = (points) => Math.trunc(f(f(points) * 10)) / 10;
 
 const BLACK = 0xff000000;
 const WHITE = 0xffffffff;
