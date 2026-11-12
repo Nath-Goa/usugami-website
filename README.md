@@ -4,13 +4,15 @@ The website and web app for [Usugami](https://github.com/Nath-Goa/usugami), the 
 Android app that turns photos, Word, PowerPoint, Excel and EPUB files into PDFs and splits,
 merges, edits, signs, compresses and redacts PDFs.
 
-- **Website**: Home, Download and Privacy pages.
+- **Website**: Home, Download and Privacy pages, and a page for each tool (usugami.com/merge-pdf/
+  and so on) that says what it does and opens it in the web app.
 - **Web app** (`site/app/`): Usugami's tools in the browser, on phones and desktops, with the
   same options and wording as the Android app. Files are processed on your device and never
   uploaded.
 
 Everything is static files in `site/`, served by GitHub Pages at https://usugami.com/. There is no
-build step: the libraries are copied into `site/app/vendor/` and committed.
+build step: the libraries are copied into `site/app/vendor/` and committed, and so are the tool
+pages, which `tools/build-tool-pages.mjs` writes.
 
 
 ## What is where
@@ -20,14 +22,18 @@ site/                   the website as it is served
   index.html            Home
   download/             Download
   privacy/              Privacy
+  merge-pdf/ ...        one page per tool (19), written by tools/build-tool-pages.mjs
   404.html              page for addresses that don't exist
+  robots.txt, sitemap.xml   for search engines (the sitemap is written with the tool pages)
   assets/               the pages' CSS (tokens.css: colours, light and dark) and images
   app/                  the web app: index.html, sw.js (offline), manifest.webmanifest,
                         js/, css/, locales/ (strings), fonts/, icons/
     vendor/             libraries, copied from node_modules by npm run vendor
 tools/                  serve.mjs (preview server), check-site.mjs (site checks),
                         vendor.mjs (copies libraries), build-icons.mjs (icons),
-                        import-strings.mjs (the Android app's translations)
+                        import-strings.mjs (the Android app's translations),
+                        build-tool-pages.mjs and tool-pages.mjs (the tool pages: the script
+                        and their words)
 tests/                  harness.mjs, run.mjs (npm test), one <area>.test.mjs per area
 docs/                   ARCHITECTURE.md (how the app is built: read this first),
                         api/ (each part's functions)

@@ -19,6 +19,8 @@
 //   hash to add when an inline script changes); a CSP <meta> that comes after what it should
 //   cover or outside <head>, has no default-src, lets the page reach another host or sends
 //   reports; and with --require-csp (CI uses it), a page without one;
+// - structured data (<script type="application/ld+json">) that isn't valid JSON or lacks its
+//   schema.org @context and @type;
 // - the same id twice on a page.
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -172,6 +174,7 @@ function checkHtml(html, ctx) {
     if (name === 'script' && attrs.src === undefined) {
       const type = (attrs.type || '').toLowerCase();
       if (type === 'importmap') checkImportMap(t.content, ctx, line);
+      else if (type === 'application/ld+json') checkJsonLd(t.content, ctx, line);
       else if (!type || type === 'module' || type.includes('javascript')) {
         checkJs(t.content, ctx, { base: file, line, inHtml: true });
         if (cspDirectives) checkCspScript(t.content, cspDirectives, ctx, line);
@@ -240,6 +243,21 @@ function checkImportMap(json, ctx, line) {
   try { map = JSON.parse(json); } catch { return ctx.report(ctx.file, line, 'import map is not valid JSON'); }
   const values = [...Object.values(map.imports || {}), ...Object.values(map.scopes || {}).flatMap((s) => Object.values(s))];
   for (const v of values) checkUrl(String(v), ctx, { line, what: 'import map', resource: true, base: ctx.file });
+}
+
+/**
+ * Structured data for search engines (<script type="application/ld+json">, which browsers don't
+ * run, so the Content-Security-Policy doesn't apply): valid JSON, each item with its schema.org
+ * @context and an @type.
+ */
+function checkJsonLd(json, ctx, line) {
+  let data;
+  try { data = JSON.parse(json); } catch (e) { return ctx.report(ctx.file, line, `structured data (ld+json) is not valid JSON: ${e.message}`); }
+  for (const item of Array.isArray(data) ? data : [data]) {
+    if (!item || typeof item !== 'object' || item['@context'] !== 'https://schema.org' || typeof item['@type'] !== 'string') {
+      ctx.report(ctx.file, line, 'structured data (ld+json) needs "@context": "https://schema.org" and an "@type"');
+    }
+  }
 }
 
 // ---------- CSS ----------

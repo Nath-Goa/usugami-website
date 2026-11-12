@@ -1,4 +1,4 @@
-/* The website pages (Home, Download, Privacy, 404): layout and components.
+/* The website pages (Home, Download, Privacy, the tool pages, 404): layout and components.
    Colors, radii and spacing come from tokens.css (shared with the web app); this file adds only
    a few page-level variables. Phone first: the base styles are for 320 px and up, and wider
    screens add columns. All text lives in the HTML, none in this file, so pages can be translated
@@ -677,6 +677,17 @@ li + li { margin-block-start: 0.35em; }
 
 .feature ul strong { color: var(--on-surface); font-weight: 600; }
 
+/* A tool's name leads to its page. The whole top of the card (icon, name and summary, at least
+   48 px tall) takes the tap, and the chevron at its end shows it does. */
+.feature-top { position: relative; }
+.feature-link { color: inherit; text-decoration: none; }
+.feature-link::after { content: ""; position: absolute; inset: calc(-1 * var(--space-2)); border-radius: var(--radius-m); }
+.feature-link:focus-visible { outline: none; }
+.feature-link:focus-visible::after { outline: 3px solid var(--primary); outline-offset: 0; }
+.feature-top:hover .feature-link { color: var(--primary); text-decoration: underline; text-decoration-thickness: 2px; }
+.feature-go { margin-inline-start: auto; color: var(--on-surface-variant); }
+.feature-top:hover .feature-go { color: var(--primary); }
+
 /* The Everywhere group: smaller cards (nine, so three full rows on wide screens). */
 .feature-grid.compact .feature-top { align-items: flex-start; }
 .feature-grid.compact .feature-top p { margin-block-start: var(--space-1); }
@@ -1134,6 +1145,67 @@ li + li { margin-block-start: 0.35em; }
 
 .credits { color: var(--on-surface-variant); font-size: 0.875rem; }
 .credits h2 { font-size: 1.125rem; margin-block-end: var(--space-3); }
+
+/* ---------- Tool pages (made by tools/build-tool-pages.mjs) ---------- */
+
+.tool-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-block-end: var(--space-3);
+}
+
+.tool-title .eyebrow { margin: 0; }
+.tool-hero .lead { margin-block-end: var(--space-5); }
+/* Questions: the first one right under the heading. */
+.faq .section-head + h3 { margin-block-start: 0; }
+.faq .section-head { margin-block-end: var(--space-4); }
+
+/* What the tool can do: the dotted list of Home's feature cards, at reading size. */
+.tool-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tool-list li {
+  position: relative;
+  padding-inline-start: var(--space-5);
+}
+
+.tool-list li + li { margin-block-start: var(--space-3); }
+
+.tool-list li::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: 4px;
+  inset-block-start: 0.65em;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--primary);
+  opacity: 0.75;
+}
+
+/* Every tool, grouped as on Home: one column on phones, two from 600 px, four from 1080 px. */
+.tool-index {
+  display: grid;
+  gap: var(--space-5) var(--space-6);
+}
+
+.tool-index .group-title { margin-block-end: var(--space-1); font-size: 1.0625rem; }
+.tool-index .link-list { margin: 0; }
+.tool-index .link-list li + li { margin-block-start: 0; }
+.tool-index .link-list a { font-weight: 550; }
+.tool-index .link-list a[aria-current="page"] { color: var(--on-surface); font-weight: 650; text-decoration: none; }
+
+@media (min-width: 600px) {
+  .tool-index { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (min-width: 1080px) {
+  .tool-index { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
 
 /* ---------- 404 ---------- */
 

@@ -277,12 +277,15 @@ function markMain(root) {
   if (main && !main.id && !document.getElementById('content')) main.id = 'content';
 }
 
-/** The tab's title: the screen's name and Usugami ("Merge PDF – Usugami"); just Usugami on Home. */
+/**
+ * The tab's title: the screen's name and Usugami ("Merge PDF – Usugami"); on Home, Usugami and
+ * what it is (web_home_title, as in index.html's <title>, which search engines show).
+ */
 function setTitle(route, root) {
   let name = null;
   if (route.name === 'tool') name = t(TOOLS[route.id].title);
   else if (route.name !== 'home') name = root?.querySelector('h1')?.textContent?.trim() || null;
-  document.title = name ? t('web_page_title', name) : t('app_name');
+  document.title = name ? t('web_page_title', name) : t(route.name === 'home' ? 'web_home_title' : 'app_name');
 }
 
 function queryString(query) {

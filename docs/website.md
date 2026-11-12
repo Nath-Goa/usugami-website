@@ -1,20 +1,26 @@
 # The website pages
 
-The website is four plain HTML pages that share one stylesheet. They tell people what Usugami is,
-send them to the web app (`site/app/`) or the Android app, and hold the privacy policy. There is no
-build step and no framework. JavaScript is used for two small jobs only: following the theme
-chosen in the web app, and finding the site's root on the 404 page.
+The website is four hand-written HTML pages, plus a page for each tool made from them, all sharing
+one stylesheet. They tell people what Usugami is, send them to the web app (`site/app/`) or the
+Android app, and hold the privacy policy; the tool pages are what people find when they search for
+a task ("merge PDF", "compress PDF"). There is no framework and no build step when deploying: the
+tool pages are written by `tools/build-tool-pages.mjs` and committed. JavaScript is used for two
+small jobs only: following the theme chosen in the web app, and finding the site's root on the 404
+page.
 
 | File | What it is |
 |---|---|
 | `site/index.html` | Home: what Usugami is, the web app first and then the Android app, screenshots, every feature grouped as on the app's Home (the Usugami watermark among them), privacy highlights, the three editions in brief, source code and license |
 | `site/download/index.html` | Download: the three editions compared, GitHub, Obtainium and F-Droid, install steps, verifying the download, the source code of the app and of this website (with their third-party notices), badge credits |
 | `site/privacy/index.html` | Privacy: the Android app's policy (all of `PRIVACY.md`), then "Usugami on the web": this website, the web app, what it downloads (text recognition, fonts), everything it stores on the device, and how to delete it |
+| `site/merge-pdf/index.html` and the other tool pages | One page per tool, written by `tools/build-tool-pages.mjs` (see [The tool pages](#the-tool-pages)) |
 | `site/404.html` | Page not found, served by GitHub Pages for any unknown address |
-| `site/robots.txt` | Allows everything (read only at a domain's root, so it works once the domain is linked) |
+| `site/robots.txt` | Allows everything and names the sitemap (read only at the domain's root) |
+| `site/sitemap.xml` | Every page's address for search engines, written with the tool pages |
 | `site/assets/css/tokens.css` | Colors, radii and spacing, shared with the web app (not owned by the pages: append only) |
 | `site/assets/css/site.css` | The pages' layout and components, phone first |
 | `site/assets/img/` | Icons, screenshots, badges and the social preview image |
+| `tools/build-tool-pages.mjs`, `tools/tool-pages.mjs` | The script that writes the tool pages and the sitemap, and the tool pages' words |
 | `tools/check-site.mjs` | Checks the whole site for the rules in `ARCHITECTURE.md` (see below) |
 | `tests/site.test.mjs` | Opens every page in Chromium, Firefox and WebKit and checks it (see below) |
 
@@ -40,16 +46,20 @@ the app by picking, dropping, pasting, sharing, or opening them with the install
 
 ## How the pages are put together
 
-Every page has the same parts, in this order, written out in full in each file (there is no
-template system, so a change to a shared part is made in all four pages):
+Every page has the same parts, in this order, written out in full in each file. There is no
+template system for the four hand-written pages, so a change to a shared part is made in all four;
+then run `node tools/build-tool-pages.mjs`, which copies the head, header and footer from Download
+into the tool pages (the tests fail until you do):
 
 1. `<head>`: charset, viewport, a `Content-Security-Policy` meta (see below), a `referrer` meta
    (`no-referrer`, so links to GitHub, Obtainium or F-Droid don't tell those sites the visitor
    came from Usugami), title and description, `color-scheme`, two `theme-color` metas (light and
    dark), the theme script, favicons (`icon.svg`, `icon-32.png`, `apple-touch-icon.png`),
-   `tokens.css`, `site.css`, and the canonical and Open Graph tags: the page's absolute address on
-   `https://usugami.com/` and `og:image` `https://usugami.com/assets/img/social-preview.png`. The
-   404 page has the `referrer` meta but no canonical or Open Graph tags.
+   `tokens.css`, `site.css`, the canonical and Open Graph tags (the page's absolute address on
+   `https://usugami.com/`, its title and description again, and `og:image`
+   `https://usugami.com/assets/img/social-preview.png` with its `og:image:alt`), and structured
+   data for search results (see [Search engines](#search-engines)). The 404 page has the
+   `referrer` meta but no canonical, Open Graph or structured data, and `noindex`.
 2. A skip link ("Skip to content", to `#main`), then the header: the icon and "Usugami" (to Home),
    and the navigation (Home, Web app, Download, Privacy). The current page's link has
    `aria-current="page"`. The navigation is written twice: `.nav-wide` (a row of links, 720 px
@@ -204,7 +214,8 @@ them into a folder per language:
 1. Copy the pages: `site/index.html` to `site/fr/index.html`, `site/download/index.html` to
    `site/fr/download/index.html`, and `site/privacy/index.html` to `site/fr/privacy/index.html`.
    (Likewise `es/` and `hi/`.) The 404 page stays English only: GitHub Pages serves only the root
-   `404.html`.
+   `404.html`. The tool pages are written by `tools/build-tool-pages.mjs`, which writes English
+   only today: it would need each language's words and to copy the translated Download's parts.
 2. Make every relative path one level deeper: `assets/` becomes `../assets/`, `../assets/`
    becomes `../../assets/`, and the same for the links to `app/`, `download/` and `privacy/`
    (keep links between the translated pages inside the language folder: from `fr/index.html`,
@@ -225,6 +236,63 @@ them into a folder per language:
    language including its own and `x-default` (absolute URLs are allowed here):
    `<link rel="alternate" hreflang="fr" href="https://usugami.com/fr/">`.
 
+## The tool pages
+
+Each tool has a page of its own at the site's root, named for what people search for:
+`scan-to-pdf/`, `images-to-pdf/`, `ocr-pdf/`, `word-to-pdf/`, `powerpoint-to-pdf/`,
+`excel-to-pdf/`, `epub-to-pdf/`, `merge-pdf/`, `split-pdf/`, `reorganize-pdf/`,
+`delete-pdf-pages/`, `rotate-pdf/`, `edit-pdf/`, `sign-pdf/`, `add-page-numbers-to-pdf/`,
+`watermark-pdf/`, `compress-pdf/`, `redact-pdf/` and `flatten-pdf/`. A page says what the tool
+does in the web app and how to use it, and its first button opens the tool there
+(`../app/#/tool/<id>`; the text recognition page opens Images to PDF, where it is). On Home, each
+tool's name in its feature card links to its page (`<a class="feature-link">`; the whole top of
+the card takes the tap, with a chevron at its end).
+
+`node tools/build-tool-pages.mjs` (or `npm run tool-pages`) writes them, and `site/sitemap.xml`
+with them. Their words are in `tools/tool-pages.mjs`: per tool the address (`slug`), Home's feature
+card (`card`), the web app's tool it opens (`opens`), its name, title, description, heading, lead,
+steps, what it can do and its questions; and the parts every tool page shares (`SHARED`). Everything
+else comes from the hand-written pages: the head (Content-Security-Policy and theme script
+included), header and footer from Download, without its `aria-current`; the groups, their order
+and each tool's icon from Home's feature cards (not Everywhere); the two buttons with their notes
+and the promise pills from Home's hero. So after changing those parts of Download or Home, run the
+script again; `tests/site.test.mjs` fails while a tool page or the sitemap differs from what the
+script would write, and `node tools/build-tool-pages.mjs --check` says which. Don't edit the
+generated files by hand.
+
+A tool page is: the hero (the tool's icon and group, the `h1`, a lead, **Open <tool>** and **Get the
+Android app**, the pills), "How to ..." (numbered steps, the first one generated: open the tool
+with the button), what the tool can do (`.tool-list`), how files are handled (with a link to
+`../privacy/#on-the-web`), Questions (the tool's own, then the shared ones), and More PDF tools
+(`.tool-index`: every tool by group, the page's own marked `aria-current="page"`).
+
+Every statement on a tool page must be true of the web app as it is: take option names, labels
+and numbers from the app's strings (`site/app/locales/en/`) and code, as Home's feature cards do,
+and change the page when the tool changes. The script refuses words that would break the page or
+the site's style: straight quotes or apostrophes (write ’ “ ”), em dashes, a bare `&`, tags other
+than `<strong>`, `<em>` and `<code>`, a title over 65 characters or not ending in ": Usugami", and
+a description outside 110 to 160 characters.
+
+## Search engines
+
+- **Titles and descriptions**: each page's `<title>` (at most about 60 characters, ending in
+  ": Usugami" on the inner pages) and `<meta name="description">` (about 150 to 160 characters,
+  as much as results show), repeated in `og:title` and `og:description`.
+- **Canonical addresses**: every page but the 404 names its address on `https://usugami.com/`, the
+  web app's page (`app/index.html`) included.
+- **Structured data** (`<script type="application/ld+json">` in the `<head>`, which browsers don't
+  run, so the Content-Security-Policy doesn't block it): Home has `WebSite` (the site's name for
+  results); Download, Privacy and the tool pages have a `BreadcrumbList` from Home to the page. No
+  `SoftwareApplication`: Google wants ratings or reviews with it, and the site has none.
+- **The sitemap** (`site/sitemap.xml`) lists Home, the web app, the tool pages, Download and
+  Privacy, without dates (an old date is worse than none); `robots.txt` names it. Search
+  engines find it there; it can also be submitted in Google Search Console and Bing Webmaster
+  Tools.
+- **The web app's title**: `app/index.html`'s `<title>` and the tab's title on the app's Home
+  (`web_home_title` in `app/locales/en/common.js`, set by `core/router.js`) are the same,
+  "Usugami: free PDF tools in your browser", because search engines read the title after the
+  app has run.
+
 ## The domain
 
 usugami.com is set as the custom domain in the repository's Pages settings (there is no `CNAME`
@@ -236,8 +304,8 @@ there. The pages' canonical and Open Graph tags give their addresses on `https:/
 can't work offline, be installed or receive shared files (no service worker), and its settings and
 Recent files would be kept for the http address only. Still to do:
 
-- Add the `hreflang` alternates when there are translations.
-- Optionally add a sitemap and its absolute address to `robots.txt`.
+- Add the `hreflang` alternates when there are translations (and the translated pages to the
+  sitemap: `tools/build-tool-pages.mjs` writes it).
 
 ## Checking the site: `tools/check-site.mjs`
 
@@ -271,6 +339,8 @@ if there are any. It scans `site/**/*.html`, `.css`, `.js`, `.mjs` and `.webmani
   match an `id` there. App routes such as `#/tool/split` are skipped.
 - **Content-Security-Policy**: an inline script whose hash isn't in the page's `script-src` (the
   message gives the hash to add), and inline styles the policy would block.
+- **Structured data** (`<script type="application/ld+json">`) that isn't valid JSON, or an item
+  without `"@context": "https://schema.org"` and an `@type`.
 - **Duplicate ids** on a page.
 
 Comments in HTML, CSS and JavaScript are ignored, so commented-out examples don't count.
@@ -294,12 +364,20 @@ template literals and regular expressions kept, line breaks kept so line numbers
 node tests/site.test.mjs
 ```
 
-It runs `checkSite` on the website pages (no problems allowed), then on a small site full of
-deliberate mistakes (each must be reported, and nothing else). It then reads the pages and checks
-what they must say: every footer links to the website's source code, its third-party notices and
-the app's source code, and every page has the `no-referrer` meta; Home, Download and Privacy each
-have one canonical address on `https://usugami.com/` with matching Open Graph tags, and the 404
-page none (its noscript note links to `https://usugami.com/`); Home's hero opens the web app first, and Home names every tool, the Usugami
+It runs `checkSite` on the website pages, tool pages included (no problems allowed, and each page
+must have its Content-Security-Policy), then on a small site full of deliberate mistakes (each must
+be reported, and nothing else). It then reads the pages and checks what they must say: the tool
+pages and the sitemap are as `tools/build-tool-pages.mjs` would write them; every footer links to
+the website's source code, its third-party notices and the app's source code, and every page has
+the `no-referrer` meta; `robots.txt` allows every page and names the sitemap, which lists Home,
+the web app, the tool pages, Download and Privacy in that order; each of those has one canonical
+address on `https://usugami.com/`, Open Graph tags with the same title and description and the
+image's alt text, a title of at most 65 characters and a description of at most 160, and its
+structured data (`WebSite` on Home, a `BreadcrumbList` from Home elsewhere, none on the web app);
+the 404 page has none of it (its noscript note links to `https://usugami.com/`); each of Home's
+tool cards links to its tool page, and each tool page opens a tool the web app has as its first
+link, says files aren't uploaded, links to Download, the Privacy page's web part and every other
+tool page; Home's hero opens the web app first, and Home names every tool, the Usugami
 watermark ("Off unless you turn it on") and that files are never uploaded, and links to the web app,
 Download, Privacy and the website's source and notices, promises offline use only for the tools
 used once, and says the web app is "in English for now" exactly while `app/locales/languages.js`
@@ -316,13 +394,13 @@ comments left out) for `localStorage`, `sessionStorage`, `indexedDB`, `caches.op
 and `storage.getDirectory`, and fails if the Privacy page doesn't describe one that is used (so a
 new kind of storage needs a line on the Privacy page first), and for the `setSetting` keys: the
 Settings item must name each tool choice saved and nothing else. Then it opens Home, Download,
-Privacy and the 404 page (at `no/such/page/here`) in the `usugami-website/` sub-folder at
+Privacy, every tool page and the 404 page (at `no/such/page/here`) in the `usugami-website/` sub-folder at
 320 x 640, 412 x 915, 768 x 1024 and 1280 x 800 in Chromium, and at 360 x 740 in Firefox and
 WebKit, and checks: no page errors, console errors or outside requests; no sideways scrolling; every image
 loads and has `width`, `height` and `alt`; `lang`, title, description, viewport, theme-color and
 icon; every internal link, stylesheet and image answers 200, and every `#anchor` exists; one `h1`
 and no skipped heading levels; no cookies or storage writes; touch targets of at least 48 px on
-phones and at 1280 px; the phone menu, the skip link and the swipeable screenshots; the wide navigation and the
+phones (Home's linked card tops too) and at 1280 px; the phone menu, the skip link and the swipeable screenshots; the wide navigation and the
 lined-up edition rows; Home's feature rows each filling the width (also at 720, 900, 1079, 1080
 and 1440 px) and its screenshots shown as WebP, with under 166 KiB of images loaded on a phone;
 Download's code blocks (those that scroll sideways can be focused, in WebKit too) and the

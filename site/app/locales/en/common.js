@@ -225,6 +225,8 @@ export default {
   web_opens_elsewhere: '(opens in a new tab)',
   // The browser tab's title on a screen other than Home. {1} is the screen's name ("Merge PDF").
   web_page_title: '{1} – Usugami',
+  // The browser tab's title on Home (and in search results): the app's name and what it is.
+  web_home_title: 'Usugami: free PDF tools in your browser',
   // File sizes, as Android writes them: "619 kB", "2.4 MB".
   web_size_format: '{1} {2}',
   web_size_b: 'B',
