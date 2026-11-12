@@ -24,7 +24,7 @@ const SECONDS = {
   'images-looks.test.mjs': 42, 'images-ui.test.mjs': 225, 'kit.test.mjs': 215, 'mark.test.mjs': 115,
   'ocr.test.mjs': 125, 'office-core.test.mjs': 68, 'office-ui.test.mjs': 135, 'organize-ui-a.test.mjs': 145,
   'organize-ui-b.test.mjs': 85, 'organize.test.mjs': 15, 'pptx.test.mjs': 33, 'redact-ui.test.mjs': 70,
-  'redact.test.mjs': 65, 'shell.test.mjs': 67, 'sign.test.mjs': 62, 'site.test.mjs': 31,
+  'redact.test.mjs': 65, 'shell.test.mjs': 67, 'sign.test.mjs': 62, 'site.test.mjs': 80,
   'stamps.test.mjs': 300, 'strings.test.mjs': 2, 'text.test.mjs': 43, 'vendor.test.mjs': 12,
   'xlsx-numbers.test.mjs': 16, 'xlsx.test.mjs': 132,
 };

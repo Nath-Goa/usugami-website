@@ -1,4 +1,5 @@
-// The website pages (Home, Download, Privacy, 404) and tools/check-site.mjs.
+// The website pages (Home, Download, Privacy, the tool pages, 404), tools/check-site.mjs and
+// tools/build-tool-pages.mjs.
 //
 //   node tests/site.test.mjs
 //
@@ -11,12 +12,16 @@
 // opened through a proxy at usugami.com and github.io addresses. Before that, the checker is run
 // on the website pages and on a site with mistakes, and the pages' content is checked: the links
 // every footer must have (the website's source code and third-party notices), the canonical and
-// Open Graph tags, what Home and Download must say, and a Privacy page that describes every kind
-// of browser storage the web app's code uses and exactly the tool choices it saves.
+// Open Graph tags, the structured data, the sitemap and robots.txt, the tool pages being as
+// tools/build-tool-pages.mjs makes them (and Home linking to each), what Home and Download must
+// say, and a Privacy page that describes every kind of browser storage the web app's code uses and
+// exactly the tool choices it saves.
 import { chromium } from 'playwright';
 import { withPage, root, outputDir } from './harness.mjs';
 import { checkSite, stripJsComments } from '../tools/check-site.mjs';
 import { startServer } from '../tools/serve.mjs';
+import { buildToolPages, buttonLabel } from '../tools/build-tool-pages.mjs';
+import { TOOL_PAGES } from '../tools/tool-pages.mjs';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -24,10 +29,14 @@ import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 
+// The tool pages (usugami.com/merge-pdf/ and so on), as tools/build-tool-pages.mjs makes them.
+const TOOL_PAGE_LIST = buildToolPages().pages;
+
 const PAGES = [
   { name: 'home', path: '' },
   { name: 'download', path: 'download/' },
   { name: 'privacy', path: 'privacy/' },
+  ...TOOL_PAGE_LIST.map((t) => ({ name: t.slug, path: `${t.slug}/`, tool: true })),
   // GitHub Pages serves 404.html for unknown addresses at any depth.
   { name: '404', path: 'no/such/page/here', status: 404 },
 ];
@@ -51,9 +60,9 @@ const check = (ok, message) => { if (!ok) failures.push(message); };
 // ---------- The checker on the website pages ----------
 
 {
-  const only = ['index.html', 'download', 'privacy', '404.html', 'assets'].map((p) => join(root, 'site', p));
-  const { problems, files } = checkSite({ only });
-  check(files.length >= 6, `check-site saw only ${files.length} files`);
+  const only = ['index.html', 'download', 'privacy', '404.html', 'assets', ...TOOL_PAGE_LIST.map((t) => t.slug)].map((p) => join(root, 'site', p));
+  const { problems, files } = checkSite({ only, requireCsp: true });
+  check(files.length >= 6 + TOOL_PAGE_LIST.length, `check-site saw only ${files.length} files`);
   check(!problems.length, 'check-site found problems in the website pages:\n' + problems.map((p) => `  ${p.file}:${p.line} ${p.message}`).join('\n'));
   console.log(`check-site: ${files.length} website files, ${problems.length} problems`);
 }
@@ -409,7 +418,7 @@ async function checkLoaded(page, url, where, run) {
   }
   // On phones, the things people tap are at least 48 px tall.
   if (run.viewport.width < 600) {
-    const small = await page.evaluate(() => [...document.querySelectorAll('.btn, .nav-menu > summary, .toc a, .footer-links a, .link-list a, .brand, .disclosure > summary')]
+    const small = await page.evaluate(() => [...document.querySelectorAll('.btn, .nav-menu > summary, .toc a, .footer-links a, .link-list a, .brand, .disclosure > summary, .feature-top:has(.feature-link)')]
       .filter((e) => e.offsetParent !== null && !e.closest('[hidden]'))
       .map((e) => ({ text: e.textContent.trim().slice(0, 40), h: e.getBoundingClientRect().height }))
       .filter((e) => e.h < 47.5));
@@ -533,8 +542,16 @@ function hrefs(html) {
 /** Checks what the pages must say and link to, from their files. */
 function checkContent() {
   const read = (path) => readFileSync(join(root, 'site', path), 'utf8');
-  const pages = { home: read('index.html'), download: read('download/index.html'), privacy: read('privacy/index.html'), 404: read('404.html') };
   const part = (html, re) => html.match(re)?.[0] ?? '';
+
+  // The tool pages and the sitemap are as tools/build-tool-pages.mjs makes them: run it after
+  // changing tools/tool-pages.mjs, or the parts of Download and Home it copies.
+  {
+    const stale = [...buildToolPages().files].filter(([path, text]) => !existsSync(join(root, 'site', path)) || read(path) !== text).map(([path]) => `site/${path}`);
+    check(!stale.length, `out of date (run node tools/build-tool-pages.mjs): ${stale.join(', ')}`);
+  }
+  const pages = { home: read('index.html'), download: read('download/index.html'), privacy: read('privacy/index.html'), 404: read('404.html') };
+  for (const t of TOOL_PAGE_LIST) if (existsSync(join(root, 'site', t.slug, 'index.html'))) pages[t.slug] = read(`${t.slug}/index.html`);
 
   // Every footer links to the website's source code and its third-party notices (only site/ is
   // deployed, and some licenses ask for their notices to be reachable from it), and to the app's.
@@ -545,20 +562,48 @@ function checkContent() {
     check(/<meta name="referrer" content="no-referrer">/.test(part(html, /<head>[\s\S]*?<\/head>/)), `${name}: no <meta name="referrer" content="no-referrer"> in the head`);
   }
 
-  // The domain is linked: each page names its address on https://usugami.com/ (canonical) and
-  // gives link previews (Open Graph) the social preview image. The 404 page has none.
-  for (const [name, path] of [['home', ''], ['download', 'download/'], ['privacy', 'privacy/']]) {
-    const head = part(pages[name], /<head>[\s\S]*?<\/head>/).replace(/<!--[\s\S]*?-->/g, ' ');
+  // The domain is linked: every page the sitemap lists (all but the 404 page) names its address on
+  // https://usugami.com/ (canonical), gives link previews (Open Graph) its title, description and
+  // the social preview image with its alt text, and says what it is for search results with
+  // structured data: the site's name on Home, a breadcrumb from Home on the other pages (the web
+  // app's page has none). robots.txt allows every page and names the sitemap.
+  const robots = read('robots.txt');
+  check(/^Sitemap: https:\/\/usugami\.com\/sitemap\.xml$/m.test(robots), 'robots.txt: no "Sitemap: https://usugami.com/sitemap.xml" line');
+  check(/^User-agent: \*$/m.test(robots) && /^Disallow:\s*$/m.test(robots) && !/^Disallow:[ \t]*\S/m.test(robots), 'robots.txt: should let every page be indexed');
+  const listed = [...read('sitemap.xml').matchAll(/<loc>([^<]*)<\/loc>/g)].map((m) => m[1]);
+  const addresses = ['', 'app/', ...TOOL_PAGE_LIST.map((t) => `${t.slug}/`), 'download/', 'privacy/'].map((p) => `https://usugami.com/${p}`);
+  check(JSON.stringify(listed) === JSON.stringify(addresses), `sitemap.xml lists ${listed.join(', ')}; expected ${addresses.join(', ')}`);
+  for (const address of addresses) {
+    const path = address.slice('https://usugami.com/'.length);
+    const name = path.replace(/\/$/, '') || 'home';
+    if (!existsSync(join(root, 'site', path, 'index.html'))) { check(false, `${name}: site/${path}index.html is missing`); continue; }
+    const head = part(read(`${path}index.html`), /<head>[\s\S]*?<\/head>/).replace(/<!--[\s\S]*?-->/g, ' ');
     const canonical = [...head.matchAll(/<link rel="canonical" href="([^"]*)">/g)].map((m) => m[1]);
-    const address = `https://usugami.com/${path}`;
     check(canonical.length === 1 && canonical[0] === address, `${name}: needs one <link rel="canonical" href="${address}">, has ${canonical.join(', ') || 'none'}`);
     const og = (p) => head.match(new RegExp(`<meta property="og:${p}" content="([^"]*)">`))?.[1];
+    const title = head.match(/<title>([^<]*)<\/title>/)?.[1] ?? '';
+    const description = head.match(/<meta name="description" content="([^"]*)">/)?.[1] ?? '';
+    check(title && title.length <= 65, `${name}: the title is ${title.length} characters; search results show about 60`);
+    check(description.length >= 50 && description.length <= 160, `${name}: the description is ${description.length} characters; search results show about 160`);
     check(og('url') === address, `${name}: og:url is ${og('url')}, expected ${address}`);
-    check(og('title') === head.match(/<title>([^<]*)<\/title>/)?.[1], `${name}: og:title differs from the title`);
+    check(og('title') === title, `${name}: og:title differs from the title`);
+    check(og('description') === description, `${name}: og:description differs from the description`);
     check(og('image') === 'https://usugami.com/assets/img/social-preview.png', `${name}: og:image is ${og('image')}`);
+    check(!!og('image:alt'), `${name}: no og:image:alt`);
+    check(/<meta name="twitter:card" content="summary_large_image">/.test(head), `${name}: no twitter:card`);
+    const data = [...head.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)].map((m) => { try { return JSON.parse(m[1]); } catch { return null; } });
+    if (path === 'app/') {
+      check(!data.length, 'app: no structured data expected on the web app');
+    } else if (path === '') {
+      check(data.length === 1 && data[0]?.['@type'] === 'WebSite' && data[0].name === 'Usugami' && data[0].url === address, 'home: needs one WebSite structured data, named Usugami, with the url https://usugami.com/');
+    } else {
+      const items = data.length === 1 && data[0]?.['@type'] === 'BreadcrumbList' ? data[0].itemListElement : [];
+      check(items.length === 2 && items[0].item === 'https://usugami.com/' && items[1].item === address && items.every((it, i) => it['@type'] === 'ListItem' && it.position === i + 1 && it.name),
+        `${name}: needs one BreadcrumbList from https://usugami.com/ to ${address}`);
+    }
   }
   check(existsSync(join(root, 'site', 'assets', 'img', 'social-preview.png')), 'og:image: site/assets/img/social-preview.png is missing');
-  check(!/rel="canonical"/.test(pages[404].replace(/<!--[\s\S]*?-->/g, ' ')), '404: should have no canonical address');
+  check(!/rel="canonical"|og:url|ld\+json/.test(pages[404].replace(/<!--[\s\S]*?-->/g, ' ')), '404: should have no canonical address, Open Graph address or structured data');
   // Without JavaScript, the 404 page's note leads to the home page on the domain, over HTTPS.
   check(hrefs(part(pages[404], /<noscript>\s*<p>[\s\S]*?<\/noscript>/)).includes('https://usugami.com/'), '404: the noscript note should link to https://usugami.com/');
 
@@ -590,6 +635,29 @@ function checkContent() {
     const englishOnly = codes.length === 1;
     check(text.includes('The web app is in English for now') === englishOnly,
       `home: the Four languages card should ${englishOnly ? '' : 'no longer '}say the web app is in English for now (the web app has ${codes.join(', ')})`);
+  }
+
+  // Each tool's feature card on Home leads to its page (the name is the link), and each tool page
+  // opens a tool the web app has, first thing in its hero, and links to Download and Privacy.
+  {
+    const toolIds = new Set([...readFileSync(join(root, 'site', 'app', 'js', 'core', 'tools.js'), 'utf8').matchAll(/^\s*id: '([a-z-]+)'/gm)].map((m) => m[1]));
+    check(toolIds.has('merge') && toolIds.size >= 18, `tool pages: couldn't read the web app's tools (${[...toolIds].join(', ')})`);
+    for (const t of Object.values(TOOL_PAGES)) {
+      check(pages.home.includes(`<h4 id="f-${t.card}"><a class="feature-link" href="${t.slug}/">`), `home: the feature card f-${t.card} should link to ${t.slug}/`);
+      check(toolIds.has(t.opens), `${t.slug}: opens #/tool/${t.opens}, which the web app doesn't have`);
+      const html = pages[t.slug];
+      if (!html) continue;
+      const main = part(html, /<main[\s\S]*?<\/main>/);
+      const hero = part(main, /<section class="page-hero tool-hero"[\s\S]*?<\/section>/);
+      check(hrefs(hero)[0] === `../app/#/tool/${t.opens}`, `${t.slug}: the first link in the hero should open the tool (../app/#/tool/${t.opens}), not ${hrefs(hero)[0]}`);
+      check(pageText(hero).includes(buttonLabel(t)), `${t.slug}: the hero's button should say "${buttonLabel(t)}"`);
+      for (const l of ['../download/', '../privacy/#on-the-web']) check(hrefs(main).includes(l), `${t.slug}: no link to ${l}`);
+      check((main.match(/<h1[\s>]/g) ?? []).length === 1, `${t.slug}: needs exactly one h1`);
+      check(/never leave your device|never uploaded|nothing is uploaded/i.test(pageText(main)), `${t.slug}: should say that files aren't uploaded`);
+      for (const other of Object.values(TOOL_PAGES)) {
+        if (other !== t) check(hrefs(main).includes(`../${other.slug}/`), `${t.slug}: "More PDF tools" doesn't link to ${other.slug}`);
+      }
+    }
   }
 
   // Download: GitHub releases, Obtainium and Usugami's F-Droid repository, as in the app's README.
@@ -675,7 +743,7 @@ function checkContent() {
       check(settingsItem.includes(words) === saved, `privacy: the Settings item ${saved ? 'should' : 'shouldn’t'} name "${words}" (the web app saves ${[...settingKeys].join(', ')})`);
     }
   }
-  console.log('content: footers, Home, Download and Privacy say what they must');
+  console.log(`content: footers, Home, Download, Privacy and ${TOOL_PAGE_LIST.length} tool pages say what they must, with the sitemap`);
 }
 
 
@@ -759,6 +827,11 @@ body { background: url(/bg.png); }
 </head><body></body></html>`);
     await put('csp-body.html', `<!doctype html><html><head></head><body>
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'"></body></html>`);
+    // Structured data for search engines: valid JSON, with its schema.org @context and an @type.
+    await put('ld.html', `<!doctype html><html><head><script type="application/ld+json">{"@context": "https://schema.org", "@type": "WebSite", "name": "ok"}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "WebSite",}</script>
+<script type="application/ld+json">[{"@type": "BreadcrumbList"}]</script>
+</head><body></body></html>`);
 
     const { problems } = checkSite({ siteDir: site });
     const text = problems.map((p) => `${p.file.split('/').slice(-2).join('/')}:${p.line} ${p.message}`);
@@ -800,9 +873,11 @@ body { background: url(/bg.png); }
       [/csp-bad\.html:2 .*img-src allows "http:"/],
       [/csp-bad\.html:2 .*report-uri sends reports/],
       [/csp-body\.html:2 .*is in <body>/],
+      [/ld\.html:2 .*structured data \(ld\+json\) is not valid JSON/],
+      [/ld\.html:3 .*structured data \(ld\+json\) needs "@context"/],
     ];
     for (const [re] of expect) check(text.some((t) => re.test(t)), `check-site missed ${re} in:\n    ${text.join('\n    ')}`);
-    const wrong = [/share-target/, /commented/, /default\.example\.com/, /alternate/, /usugami\.com\/fr/, /github\.com\/Nath-Goa/, /#here" not found/, /#\/tool/, /ok\.js/, /\.\/share/, /svg-mask/, /data:image/, /"\.\/" /, /index\.html:7 /];
+    const wrong = [/share-target/, /commented/, /default\.example\.com/, /alternate/, /usugami\.com\/fr/, /github\.com\/Nath-Goa/, /#here" not found/, /#\/tool/, /ok\.js/, /\.\/share/, /svg-mask/, /data:image/, /"\.\/" /, /index\.html:7 /, /ld\.html:1 /];
     for (const re of wrong) check(!text.some((t) => re.test(t)), `check-site wrongly reported ${re}:\n    ${text.filter((t) => re.test(t)).join('\n    ')}`);
     check(text.length === expect.length, `check-site reported ${text.length} problems, expected ${expect.length}:\n    ${text.join('\n    ')}`);
     // As CI runs it (--require-csp): a page without a Content-Security-Policy <meta> is reported too.

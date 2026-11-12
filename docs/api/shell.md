@@ -131,8 +131,10 @@ launch, only with more than one language). `?a=b` after a path becomes params. U
   progress dialog) stays, and Back goes on as without it (asking about unsaved work).
 - A menu still open when the screen changes goes with the screen.
 - Each screen sets the tab's title: `web_page_title` ("{1} – Usugami") with the tool's name or the
-  screen's heading; "Usugami" on Home. Its element marked `data-main` gets `role="main"` when the
-  screen has no `<main>`, and `id="content"` (where the skip link leads) when it has no id.
+  screen's heading; on Home, `web_home_title` ("Usugami: free PDF tools in your browser", the same
+  as `index.html`'s `<title>`, which search engines show). Its element marked `data-main` gets
+  `role="main"` when the screen has no `<main>`, and `id="content"` (where the skip link leads)
+  when it has no id.
 - `replaceScreen: true` *extra* (navigate): opens the screen in place of the one showing, unless
   that is Home: the history goes back over that screen's steps and its entry is replaced, so Back
   then leads where it would have from that screen (Home). Files shared to the app open so, as the
@@ -385,7 +387,7 @@ back_to_editing start_over start_over_title not_saved_note pdf_saved_downloads m
 msg_not_saved msg_save_failed`); errors (`msg_convert_failed msg_image_unreadable
 msg_out_of_memory msg_out_of_space msg_unknown_error pdf_import_failed`). Web-only keys start with
 `web_` (`web_more_options` "More options", `web_more_options_for`, `web_try_again`, `web_page_title` "{1} –
-Usugami", `web_recent_open_failed`, `web_recent_share_ready`,
+Usugami", `web_home_title`, `web_recent_open_failed`, `web_recent_share_ready`,
 `web_opens_elsewhere`, `web_size_*`, `web_home_subtitle`, `web_tool_word_detail`,
 `web_about_notices` "Third-party notices", `web_about_notices_detail`, `web_licenses_notices`,
 `web_lic_*`...).

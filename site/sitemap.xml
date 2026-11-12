@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Every page of usugami.com for search engines, named in robots.txt. Made by tools/build-tool-pages.mjs: change that, not this file. -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://usugami.com/</loc></url>
+  <url><loc>https://usugami.com/app/</loc></url>
+  <url><loc>https://usugami.com/scan-to-pdf/</loc></url>
+  <url><loc>https://usugami.com/images-to-pdf/</loc></url>
+  <url><loc>https://usugami.com/ocr-pdf/</loc></url>
+  <url><loc>https://usugami.com/word-to-pdf/</loc></url>
+  <url><loc>https://usugami.com/powerpoint-to-pdf/</loc></url>
+  <url><loc>https://usugami.com/excel-to-pdf/</loc></url>
+  <url><loc>https://usugami.com/epub-to-pdf/</loc></url>
+  <url><loc>https://usugami.com/merge-pdf/</loc></url>
+  <url><loc>https://usugami.com/split-pdf/</loc></url>
+  <url><loc>https://usugami.com/reorganize-pdf/</loc></url>
+  <url><loc>https://usugami.com/delete-pdf-pages/</loc></url>
+  <url><loc>https://usugami.com/rotate-pdf/</loc></url>
+  <url><loc>https://usugami.com/edit-pdf/</loc></url>
+  <url><loc>https://usugami.com/sign-pdf/</loc></url>
+  <url><loc>https://usugami.com/add-page-numbers-to-pdf/</loc></url>
+  <url><loc>https://usugami.com/watermark-pdf/</loc></url>
+  <url><loc>https://usugami.com/compress-pdf/</loc></url>
+  <url><loc>https://usugami.com/redact-pdf/</loc></url>
+  <url><loc>https://usugami.com/flatten-pdf/</loc></url>
+  <url><loc>https://usugami.com/download/</loc></url>
+  <url><loc>https://usugami.com/privacy/</loc></url>
+</urlset>

@@ -2,8 +2,9 @@
 
 The site has two parts, both static files in `site/`:
 
-- **Website pages**: Home (`site/index.html`), Download (`site/download/`), Privacy (`site/privacy/`).
-  Plain HTML and CSS.
+- **Website pages**: Home (`site/index.html`), Download (`site/download/`), Privacy (`site/privacy/`),
+  and a page for each tool (`site/merge-pdf/` and so on, written by `tools/build-tool-pages.mjs`).
+  Plain HTML and CSS; see `docs/website.md`.
 - **The web app** (`site/app/`): Usugami's tools in the browser, on phones and desktops. It does
   what the Android app does (`C:\Users\Nathan\OneDrive\Desktop\pdfer`, read-only: never change
   anything there), with the same tools, options, wording and behaviour, as close as a browser

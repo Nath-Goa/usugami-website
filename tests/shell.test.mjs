@@ -1373,7 +1373,8 @@ await test('Back closes an open dialog or menu first, and answers the discard qu
   await withPage(async (page, url) => {
     await fakeTools(page);
     await openApp(page, url);
-    eq(await page.title(), 'Usugami', 'Home: the tab is titled Usugami');
+    eq(await page.title(), 'Usugami: free PDF tools in your browser', 'Home: the tab names Usugami and what it is');
+    eq(await page.title(), await page.evaluate(() => fetch('index.html').then((r) => r.text()).then((h) => new DOMParser().parseFromString(h, 'text/html').title)), 'Home: the same title as index.html\'s <title>');
     // Settings: Back while Appearance is open closes it, and Settings stays.
     await go(page, '/settings');
     await onScreen(page, 'settings');
