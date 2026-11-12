@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'sha256-jMe6rNJgQiAWDTIKU+Ry6cW9fksKi/2lF8vxcgEekyQ='; style-src 'self'; img-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
-  <title>Split PDF placeholder title: Usugami</title>
-  <meta name="description" content="Split PDF placeholder description that is long enough to pass the length check of the builder, with more words here.">
+  <title>Split PDF and extract pages, no uploads: Usugami</title>
+  <meta name="description" content="Split PDF files for free in your browser: extract selected pages, split by ranges or fixed chunks, or make one PDF per page. Nothing is uploaded.">
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#fff8f7" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#171717" media="(prefers-color-scheme: dark)">
@@ -31,8 +31,8 @@
   <link rel="canonical" href="https://usugami.com/split-pdf/">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Usugami">
-  <meta property="og:title" content="Split PDF placeholder title: Usugami">
-  <meta property="og:description" content="Split PDF placeholder description that is long enough to pass the length check of the builder, with more words here.">
+  <meta property="og:title" content="Split PDF and extract pages, no uploads: Usugami">
+  <meta property="og:description" content="Split PDF files for free in your browser: extract selected pages, split by ranges or fixed chunks, or make one PDF per page. Nothing is uploaded.">
   <meta property="og:url" content="https://usugami.com/split-pdf/">
   <meta property="og:image" content="https://usugami.com/assets/img/social-preview.png">
   <meta property="og:image:width" content="1280">
@@ -103,8 +103,8 @@
           <div class="icon-badge"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M18 4v5H6V4h12zm0-2H6c-1.1 0-2 .9-2 2v5c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 13v5H6v-5h12zm0-2H6c-1.1 0-2 .9-2 2v5c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-5c0-1.1-.9-2-2-2z"/></svg></div>
           <p class="eyebrow">Organize</p>
         </div>
-        <h1 id="page-title">Split PDF</h1>
-        <p class="lead">Placeholder lead.</p>
+        <h1 id="page-title">Split PDF and extract pages</h1>
+        <p class="lead">Split one PDF into smaller PDFs in your browser, or pull out just the pages you need. Pick pages by number or by tapping their previews.</p>
         <ul class="cta-list">
             <li>
               <a class="btn btn-filled btn-large" href="../app/#/tool/split"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19 4H5a2 2 0 0 0-2 2v12c0 1.1.9 2 2 2h3c.55 0 1-.45 1-1s-.45-1-1-1H5V8h14v10h-3c-.55 0-1 .45-1 1s.45 1 1 1h3c1.1 0 2-.9 2-2V6a2 2 0 0 0-2-2zm-7.35 6.35-2.79 2.79c-.32.32-.1.86.35.86H11v5c0 .55.45 1 1 1s1-.45 1-1v-5h1.79c.45 0 .67-.54.35-.85l-2.79-2.79c-.19-.2-.51-.2-.7-.01z"/></svg> Open Split PDF</a>
@@ -128,12 +128,14 @@
     <section class="section" aria-labelledby="how-title">
       <div class="wrap narrow">
         <div class="section-head">
-          <h2 id="how-title">How to use Split PDF</h2>
+          <h2 id="how-title">How to split a PDF</h2>
         </div>
         <ol class="steps">
-          <li><strong>Open Split PDF.</strong> Use the <strong>Open Split PDF</strong> button at the top of this page. The tool opens in your browser, on a phone, tablet or computer, with nothing to install and nothing to sign up for.</li>
-          <li><strong>Add your files.</strong> Placeholder step.</li>
-          <li><strong>Save.</strong> Placeholder step.</li>
+          <li><strong>Open Split PDF.</strong> Press the <strong>Open Split PDF</strong> button at the top of this page. The tool opens in your browser, on a phone, tablet or computer, with nothing to install and nothing to sign up for.</li>
+          <li><strong>Choose your PDF.</strong> Press <strong>Choose PDF</strong> and pick a PDF, or drop one on it. If it has a password, type it in and press <strong>Open PDF</strong>.</li>
+          <li><strong>Choose how to split.</strong> Pick <strong>Selected pages</strong>, <strong>Custom ranges</strong>, <strong>Fixed chunks</strong> or <strong>Every page</strong>.</li>
+          <li><strong>Enter the pages.</strong> Type pages such as <code>1,3,5-8</code> (or tap the page previews), ranges such as <code>1-3;5-7;9</code>, or the number of <strong>Pages per PDF</strong>. For a PDF per page or per range, turn off <strong>Combine selected pages into one PDF</strong> or <strong>Combine all ranges into one PDF</strong>.</li>
+          <li><strong>Split and save.</strong> Press <strong>Split PDF</strong>, then <strong>Save to Downloads</strong>. Several PDFs can also go into one ZIP file with <strong>Share or save as ZIP</strong>.</li>
         </ol>
       </div>
     </section>
@@ -141,12 +143,17 @@
     <section class="section section-band" aria-labelledby="features-title">
       <div class="wrap narrow">
         <div class="section-head">
-          <h2 id="features-title">What Split PDF can do</h2>
+          <h2 id="features-title">What you can do with Split PDF</h2>
         </div>
         <ul class="tool-list">
-          <li>Placeholder one.</li>
-          <li>Placeholder two.</li>
-          <li>Placeholder three.</li>
+          <li><strong>Selected pages</strong>: type pages such as <code>1,3,5-8</code>, or tap page previews to pick them. In one combined PDF, the pages keep the order you typed or tapped them in.</li>
+          <li><strong>Custom ranges</strong>: type ranges separated by semicolons, such as <code>1-3;5-7;9</code>. Each range becomes its own PDF, or all of them one PDF.</li>
+          <li><strong>Fixed chunks</strong>: set <strong>Pages per PDF</strong>, and the last PDF takes the pages left over. A 12-page PDF in chunks of 5 makes PDFs of 5, 5 and 2 pages.</li>
+          <li><strong>Every page</strong>: each page becomes a PDF of its own.</li>
+          <li>For <strong>Selected pages</strong> and <strong>Custom ranges</strong>, a switch chooses between one combined PDF and a PDF for each page or range. It starts on, making one PDF.</li>
+          <li>Each new PDF holds only its own pages: the other pages’ text and pictures don’t come along, links between its pages still work, and form fields on its pages stay fillable.</li>
+          <li>Names follow your PDF: <code>Report.pdf</code> gives <code>Report_split.pdf</code>, or <code>Report_split_1_1-5.pdf</code>, <code>Report_split_2_6-10.pdf</code> and so on when there are several. Change the first part in <strong>File name</strong>.</li>
+          <li>Save several PDFs at once with <strong>Save to Downloads</strong>, put them in one ZIP file with <strong>Share or save as ZIP</strong>, or save them one at a time.</li>
         </ul>
       </div>
     </section>
@@ -155,7 +162,7 @@
       <div class="wrap narrow">
         <div class="section-head">
           <h2 id="private-title">Your files stay on your device</h2>
-          <p>Usugami works on your files in your browser, on your device, and never uploads them. The files you pick and the PDFs it makes never leave your device.</p>
+          <p>Usugami works on your files in your browser, on your device, and nothing is uploaded: the files you pick and the PDFs it makes never leave your device.</p>
           <p>There are no ads, no tracking and no cookies, and you don’t need an account. Tools you have used once keep working offline.</p>
         </div>
         <ul class="link-list">
@@ -169,12 +176,18 @@
         <div class="section-head">
           <h2 id="faq-title">Questions</h2>
         </div>
-        <h3>Placeholder question?</h3>
-        <p>Placeholder answer.</p>
+        <h3>How do I extract pages from a PDF?</h3>
+        <p>Choose <strong>Selected pages</strong>, type the pages you want (such as <code>2,4-6</code>) or tap their previews, and leave <strong>Combine selected pages into one PDF</strong> on. <strong>Split PDF</strong> then makes one PDF with just those pages, in the order you picked them.</p>
+        <h3>How do I save every page as a separate PDF?</h3>
+        <p>Choose <strong>Every page</strong> and press <strong>Split PDF</strong>. You can then save all the PDFs with <strong>Save to Downloads</strong>, or as one ZIP file with <strong>Share or save as ZIP</strong>.</p>
+        <h3>Can I split a password-protected PDF?</h3>
+        <p>Yes. Usugami asks for the password when you choose the PDF, and the PDFs it makes have no password. PDFs locked with a certificate (digital ID) can’t be opened.</p>
         <h3>Is Usugami free?</h3>
         <p>Yes. Usugami is free and open source, with no ads, no account and nothing to buy.</p>
+        <h3>Does Usugami put its name on my PDFs?</h3>
+        <p>Only if you turn on the <strong>Usugami watermark</strong> switch on the result screen, which adds a small “Usugami” in the corner of each page. It’s off unless you turn it on.</p>
         <h3>Which browsers does it work in?</h3>
-        <p>Current Chrome, Edge, Firefox and Safari, on phones, tablets and computers. On an Android phone you can also install the Usugami app, which has the same tools.</p>
+        <p>Current Chrome, Edge, Firefox and Safari, on phones, tablets and computers. Some buttons, such as <strong>Share</strong> and <strong>Save as…</strong>, show only in browsers that support them. On an Android phone you can also install the Usugami app.</p>
       </div>
     </section>
 
