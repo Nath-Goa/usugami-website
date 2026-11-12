@@ -37,7 +37,7 @@
   <meta property="og:image" content="https://usugami.com/assets/img/social-preview.png">
   <meta property="og:image:width" content="1280">
   <meta property="og:image:height" content="640">
-  <meta property="og:image:alt" content="Usugami, 薄紙 (thin paper): PDF tools that stay on your phone. Free and open source, no ads, no permissions.">
+  <meta property="og:image:alt" content="Usugami, 薄紙 (thin paper): PDF tools that stay on your phone. Free and open source, no ads, no permissions. Android: scan, convert, edit, sign, redact.">
   <meta name="twitter:card" content="summary_large_image">
   <!-- Where the page sits in the site, for search results (structured data; see docs/website.md). -->
   <script type="application/ld+json">
@@ -131,7 +131,7 @@
           <h2 id="how-title">How to make a searchable PDF from images</h2>
         </div>
         <ol class="steps">
-          <li><strong>Open Images to PDF.</strong> Press the <strong>Open Images to PDF</strong> button at the top of this page. The tool opens in your browser, on a phone, tablet or computer, with nothing to install and nothing to sign up for.</li>
+          <li><strong>Open the tool.</strong> Press the <strong>Open Images to PDF</strong> button at the top of this page. The tool opens in your browser, on a phone, tablet or computer, with nothing to install and nothing to sign up for.</li>
           <li><strong>Add images of your pages.</strong> Press <strong>Photos</strong>, <strong>Files</strong> or <strong>Take photo</strong> and add the pages you want to read.</li>
           <li><strong>Open Create PDF.</strong> Put the pages in order, then press <strong>Convert to PDF</strong>.</li>
           <li><strong>Turn on text recognition.</strong> Turn on <strong>Make text searchable (OCR)</strong> and pick a <strong>Text language</strong>: <strong>English</strong>, <strong>French</strong>, <strong>Spanish</strong> or <strong>Hindi</strong>.</li>
@@ -152,7 +152,7 @@
           <li>Text is read from your original images, not from the compressed copies in the PDF, so the <strong>Compression</strong> level you pick doesn’t change what is read.</li>
           <li>When a page reads poorly, Usugami also tries it turned, so a page photographed sideways or upside down can still be read.</li>
           <li>Recognition runs in your browser with Tesseract, so your images and the recognized text stay on your device.</li>
-          <li>The first time you use a language, the engine and that language’s data are downloaded from this website (about 5 to 8 MB, depending on the language). Your browser keeps them for next time.</li>
+          <li>The first time you use text recognition, its engine (about 4 MB) is downloaded from this website, and the first time you use each language, that language’s data (from under 1 MB for French to about 4 MB for Hindi with English). Your browser keeps them for next time.</li>
           <li>If no text is found, the PDF is still made, without a text layer, and Usugami tells you.</li>
           <li>Works in Scan document too, on the pages you photograph and crop.</li>
         </ul>
@@ -163,8 +163,8 @@
       <div class="wrap narrow">
         <div class="section-head">
           <h2 id="private-title">Your files stay on your device</h2>
-          <p>Usugami works on your files in your browser, on your device, and nothing is uploaded: the files you pick and the PDFs it makes never leave your device.</p>
-          <p>There are no ads, no tracking and no cookies, and you don’t need an account. Tools you have used once keep working offline.</p>
+          <p>Usugami works on your files right in your browser. Nothing is uploaded: the files you pick and the PDFs it makes never leave your device.</p>
+          <p>There are no ads, no tracking and no cookies, and you don’t need an account. Tools you have used once keep working offline while your browser keeps their files; a text-recognition language or font used for the first time needs the internet.</p>
         </div>
         <ul class="link-list">
           <li><a href="../privacy/#on-the-web">How the web app handles your files <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9.29 6.71a.996.996 0 0 0 0 1.41L13.17 12l-3.88 3.88a.996.996 0 1 0 1.41 1.41l4.59-4.59a.996.996 0 0 0 0-1.41L10.7 6.7c-.38-.38-1.02-.38-1.41.01z"/></svg></a></li>
@@ -178,17 +178,17 @@
           <h2 id="faq-title">Questions</h2>
         </div>
         <h3>Can I make an existing PDF searchable?</h3>
-        <p>Not in the web app. Text recognition reads images as you turn them into a PDF with Images to PDF or Scan document.</p>
+        <p>No. Text recognition reads images as you turn them into a PDF with Images to PDF or Scan document, so it can’t read a PDF you already have.</p>
         <h3>Which languages can it read?</h3>
-        <p><strong>English</strong>, <strong>French</strong>, <strong>Spanish</strong> and <strong>Hindi</strong>. Hindi also reads English, so English words on a Hindi page are read too.</p>
+        <p><strong>English</strong>, <strong>French</strong>, <strong>Spanish</strong> and <strong>Hindi</strong>. For a page with both Hindi and English, pick <strong>Hindi</strong>: it reads both.</p>
         <h3>Does text recognition work offline?</h3>
         <p>After you have used a language once, it can: the web app keeps the engine and that language’s data in your browser. If your browser clears them, they are downloaded again the next time you use that language, which needs an internet connection.</p>
         <h3>Does OCR change how the pages look?</h3>
-        <p>No. The recognized text is added as an invisible layer over each page, so the pages look the same, and you can search, select and copy the words.</p>
+        <p>No. The text goes in as an invisible layer, so every page looks just as it would without it.</p>
         <h3>Is Usugami free?</h3>
         <p>Yes. Usugami is free and open source, with no ads, no account and nothing to buy.</p>
         <h3>Does Usugami put its name on my PDFs?</h3>
-        <p>Only if you turn on the <strong>Usugami watermark</strong> switch on the result screen, which adds a small “Usugami” in the corner of each page. It’s off unless you turn it on.</p>
+        <p>Not on its pages, unless you turn on the <strong>Usugami watermark</strong> switch on the result screen, which adds a small “Usugami” in the corner of each page. Once on, it stays on for the PDFs you make next until you turn it off. The PDF’s document properties do name Usugami as the program that made it.</p>
         <h3>Which browsers does it work in?</h3>
         <p>Current Chrome, Edge, Firefox and Safari, on phones, tablets and computers. Some buttons, such as <strong>Share</strong> and <strong>Save as…</strong>, show only in browsers that support them. On an Android phone you can also install the Usugami app.</p>
       </div>
@@ -198,7 +198,7 @@
       <div class="wrap">
         <div class="section-head">
           <h2 id="tools-title">More PDF tools</h2>
-          <p>Every tool, grouped as on Usugami’s Home screen.</p>
+          <p>A page for each tool, grouped as on this website’s Home page.</p>
         </div>
         <div class="tool-index">
           <div class="tool-index-group">

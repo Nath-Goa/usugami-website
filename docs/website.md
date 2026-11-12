@@ -250,7 +250,8 @@ the card takes the tap, with a chevron at its end).
 
 `node tools/build-tool-pages.mjs` (or `npm run tool-pages`) writes them, and `site/sitemap.xml`
 with them. Their words are in `tools/tool-pages.mjs`: per tool the address (`slug`), Home's feature
-card (`card`), the web app's tool it opens (`opens`), its name, title, description, heading, lead,
+card (`card`), the web app's tool it opens (`opens`) and, where "Open <tool>" would read badly, the
+button's own text (`button`, such as "Watermark a PDF"), its name, title, description, heading, lead,
 steps, what it can do and its questions; and the parts every tool page shares (`SHARED`). Everything
 else comes from the hand-written pages: the head (Content-Security-Policy and theme script
 included), header and footer from Download, without its `aria-current`; the groups, their order

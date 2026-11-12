@@ -37,7 +37,7 @@
   <meta property="og:image" content="https://usugami.com/assets/img/social-preview.png">
   <meta property="og:image:width" content="1280">
   <meta property="og:image:height" content="640">
-  <meta property="og:image:alt" content="Usugami, 薄紙 (thin paper): PDF tools that stay on your phone. Free and open source, no ads, no permissions.">
+  <meta property="og:image:alt" content="Usugami, 薄紙 (thin paper): PDF tools that stay on your phone. Free and open source, no ads, no permissions. Android: scan, convert, edit, sign, redact.">
   <meta name="twitter:card" content="summary_large_image">
   <!-- Where the page sits in the site, for search results (structured data; see docs/website.md). -->
   <script type="application/ld+json">
@@ -131,10 +131,10 @@
           <h2 id="how-title">How to redact a PDF</h2>
         </div>
         <ol class="steps">
-          <li><strong>Open Redact PDF.</strong> Press the <strong>Open Redact PDF</strong> button at the top of this page. The tool opens in your browser, on a phone, tablet or computer, with nothing to install and nothing to sign up for.</li>
+          <li><strong>Open the tool.</strong> Press the <strong>Open Redact PDF</strong> button at the top of this page. The tool opens in your browser, on a phone, tablet or computer, with nothing to install and nothing to sign up for.</li>
           <li><strong>Choose your PDF.</strong> Press <strong>Choose PDF</strong> and pick the file, or drop it there on a computer. If the PDF has a password, type it and press <strong>Open PDF</strong>.</li>
           <li><strong>Box what to hide.</strong> Drag on the page under <strong>Mark what to hide</strong> to draw a box. To box a word or phrase on every page, type it in <strong>Find text</strong> and press Enter.</li>
-          <li><strong>Check every page.</strong> If the PDF has two or more pages, pick each one under <strong>Page</strong>; a dot marks those with boxes. To change a box, drag it to move it, or tap it and drag its corner to resize it, or press <strong>Delete box</strong> to remove it.</li>
+          <li><strong>Check every page.</strong> If the PDF has two or more pages, pick each one under <strong>Page</strong>; a dot marks those with boxes. To change a box, drag it to move it, or tap it, then drag its corner to resize it or press <strong>Delete box</strong> to remove it.</li>
           <li><strong>Name it and redact.</strong> Change the <strong>File name</strong> if you like (it starts as your file’s name with <code>_redacted</code> added), then press <strong>Redact PDF</strong>.</li>
           <li><strong>Save the new PDF.</strong> When “Your PDF is ready” shows, press <strong>Save to Downloads</strong>, or <strong>Open</strong> the new PDF first to check it.</li>
         </ol>
@@ -148,11 +148,11 @@
         </div>
         <ul class="tool-list">
           <li><strong>Find text</strong> boxes every match of a word or phrase on every page. Capitals and accents don’t matter, and a phrase is found even where it runs across a line break.</li>
-          <li><strong>Find text</strong> also looks at what comments say, where links lead and what form fields hold, and boxes their page so they are removed with it.</li>
-          <li>Each page with a box is drawn as a picture at 200 dpi (less for very large pages) with the boxes painted solid black, and the picture takes the page’s place. What was under the boxes is no longer in the file at all.</li>
+          <li><strong>Find text</strong> also looks at what comments say, where links lead and what form fields hold, and puts a box on their page, so that page becomes a picture and they are removed.</li>
+          <li>Each page with a box is drawn as a picture at 200 dpi (less for very large pages) with the boxes painted solid black, and the picture takes the page’s place. What was under the boxes is gone from the file, unless another page shows it too.</li>
           <li>The page you mark is drawn as the redacted picture will show it, filled-in fields and comments included, with see-through boxes so you can check what they cover.</li>
-          <li>Also removes the document’s details (title, author and the rest), its XMP metadata, bookmarks, tags, attached files and scripts. On redacted pages, comments and form fields are removed (what they showed stays in the picture) and links stop working.</li>
-          <li>A digital signature no longer matches a redacted file, so what it says about the signer (name, reason, place, certificate) is removed and its field is left unsigned.</li>
+          <li>Also removes the document’s details (title, author and the rest), its XMP metadata, bookmarks, tags, attached files and the scripts that belong to the whole document. On redacted pages, comments and form fields are removed (what they showed stays in the picture) and links stop working.</li>
+          <li>A digital signature no longer matches a redacted file, so the signature data (the signer’s name, reason, place and certificate) is removed and its field is left unsigned. What a signature shows on a page without boxes stays on that page.</li>
           <li>Drag a box to move it, drag the chosen box’s corner to resize it, or use the buttons that move and size it a step at a time. With a keyboard, the arrow keys move the chosen box, Shift and the arrow keys resize it, and Delete removes it.</li>
           <li>Opens password-protected PDFs once you type the password. The redacted PDF has no password.</li>
         </ul>
@@ -163,8 +163,8 @@
       <div class="wrap narrow">
         <div class="section-head">
           <h2 id="private-title">Your files stay on your device</h2>
-          <p>Usugami works on your files in your browser, on your device, and nothing is uploaded: the files you pick and the PDFs it makes never leave your device.</p>
-          <p>There are no ads, no tracking and no cookies, and you don’t need an account. Tools you have used once keep working offline.</p>
+          <p>Usugami works on your files right in your browser. Nothing is uploaded: the files you pick and the PDFs it makes never leave your device.</p>
+          <p>There are no ads, no tracking and no cookies, and you don’t need an account. Tools you have used once keep working offline while your browser keeps their files; a text-recognition language or font used for the first time needs the internet.</p>
         </div>
         <ul class="link-list">
           <li><a href="../privacy/#on-the-web">How the web app handles your files <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9.29 6.71a.996.996 0 0 0 0 1.41L13.17 12l-3.88 3.88a.996.996 0 1 0 1.41 1.41l4.59-4.59a.996.996 0 0 0 0-1.41L10.7 6.7c-.38-.38-1.02-.38-1.41.01z"/></svg></a></li>
@@ -178,17 +178,17 @@
           <h2 id="faq-title">Questions</h2>
         </div>
         <h3>Is redacted text really removed, or just covered?</h3>
-        <p>It is removed. Each page with a box is replaced by a picture of itself with the boxes painted solid black, so the text, images and drawings under a box are no longer in the file. The rest of the text on that page can no longer be selected either.</p>
+        <p>It is removed. Each page with a box becomes a picture of itself, so nothing under a box can be uncovered, copied or searched, unless another page shows it too. The rest of the text on that page can no longer be selected either.</p>
         <h3>How do I black out every place a name appears?</h3>
         <p>Type the name in <strong>Find text</strong> and press Enter: every match on every page gets a box for you to check before saving. Text in scans and pictures can’t be searched, so draw boxes over it instead.</p>
         <h3>What happens to pages without boxes?</h3>
         <p>They keep their text. A page without boxes is saved as a picture too only when it holds, out of sight, part of what a box hides, for example when two pages each show half of one scanned image.</p>
         <h3>Does Redact PDF remove metadata?</h3>
-        <p>Yes. The document’s details, such as its title and author, and its XMP metadata are removed, along with bookmarks, tags, attached files and scripts. Comments and form fields on redacted pages are removed too; what they showed stays in the picture.</p>
+        <p>Yes. The title, author and the document’s other details are removed, and so is its XMP metadata, along with bookmarks, tags, attached files and the scripts that belong to the whole document.</p>
         <h3>Is Usugami free?</h3>
         <p>Yes. Usugami is free and open source, with no ads, no account and nothing to buy.</p>
         <h3>Does Usugami put its name on my PDFs?</h3>
-        <p>Only if you turn on the <strong>Usugami watermark</strong> switch on the result screen, which adds a small “Usugami” in the corner of each page. It’s off unless you turn it on.</p>
+        <p>Not on its pages, unless you turn on the <strong>Usugami watermark</strong> switch on the result screen, which adds a small “Usugami” in the corner of each page. Once on, it stays on for the PDFs you make next until you turn it off. The PDF’s document properties do name Usugami as the program that made it.</p>
         <h3>Which browsers does it work in?</h3>
         <p>Current Chrome, Edge, Firefox and Safari, on phones, tablets and computers. Some buttons, such as <strong>Share</strong> and <strong>Save as…</strong>, show only in browsers that support them. On an Android phone you can also install the Usugami app.</p>
       </div>
@@ -198,7 +198,7 @@
       <div class="wrap">
         <div class="section-head">
           <h2 id="tools-title">More PDF tools</h2>
-          <p>Every tool, grouped as on Usugami’s Home screen.</p>
+          <p>A page for each tool, grouped as on this website’s Home page.</p>
         </div>
         <div class="tool-index">
           <div class="tool-index-group">

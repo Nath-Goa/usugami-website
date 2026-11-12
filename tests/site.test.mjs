@@ -20,7 +20,7 @@ import { chromium } from 'playwright';
 import { withPage, root, outputDir } from './harness.mjs';
 import { checkSite, stripJsComments } from '../tools/check-site.mjs';
 import { startServer } from '../tools/serve.mjs';
-import { buildToolPages } from '../tools/build-tool-pages.mjs';
+import { buildToolPages, buttonLabel } from '../tools/build-tool-pages.mjs';
 import { TOOL_PAGES } from '../tools/tool-pages.mjs';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
@@ -650,7 +650,7 @@ function checkContent() {
       const main = part(html, /<main[\s\S]*?<\/main>/);
       const hero = part(main, /<section class="page-hero tool-hero"[\s\S]*?<\/section>/);
       check(hrefs(hero)[0] === `../app/#/tool/${t.opens}`, `${t.slug}: the first link in the hero should open the tool (../app/#/tool/${t.opens}), not ${hrefs(hero)[0]}`);
-      check(pageText(hero).includes(`Open ${TOOL_PAGES[t.opens].name}`), `${t.slug}: the hero should say "Open ${TOOL_PAGES[t.opens].name}"`);
+      check(pageText(hero).includes(buttonLabel(t)), `${t.slug}: the hero's button should say "${buttonLabel(t)}"`);
       for (const l of ['../download/', '../privacy/#on-the-web']) check(hrefs(main).includes(l), `${t.slug}: no link to ${l}`);
       check((main.match(/<h1[\s>]/g) ?? []).length === 1, `${t.slug}: needs exactly one h1`);
       check(/never leave your device|never uploaded|nothing is uploaded/i.test(pageText(main)), `${t.slug}: should say that files aren't uploaded`);

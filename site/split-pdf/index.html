@@ -37,7 +37,7 @@
   <meta property="og:image" content="https://usugami.com/assets/img/social-preview.png">
   <meta property="og:image:width" content="1280">
   <meta property="og:image:height" content="640">
-  <meta property="og:image:alt" content="Usugami, 薄紙 (thin paper): PDF tools that stay on your phone. Free and open source, no ads, no permissions.">
+  <meta property="og:image:alt" content="Usugami, 薄紙 (thin paper): PDF tools that stay on your phone. Free and open source, no ads, no permissions. Android: scan, convert, edit, sign, redact.">
   <meta name="twitter:card" content="summary_large_image">
   <!-- Where the page sits in the site, for search results (structured data; see docs/website.md). -->
   <script type="application/ld+json">
@@ -131,7 +131,7 @@
           <h2 id="how-title">How to split a PDF</h2>
         </div>
         <ol class="steps">
-          <li><strong>Open Split PDF.</strong> Press the <strong>Open Split PDF</strong> button at the top of this page. The tool opens in your browser, on a phone, tablet or computer, with nothing to install and nothing to sign up for.</li>
+          <li><strong>Open the tool.</strong> Press the <strong>Open Split PDF</strong> button at the top of this page. The tool opens in your browser, on a phone, tablet or computer, with nothing to install and nothing to sign up for.</li>
           <li><strong>Choose your PDF.</strong> Press <strong>Choose PDF</strong> and pick a PDF, or drop one on it. If it has a password, type it in and press <strong>Open PDF</strong>.</li>
           <li><strong>Choose how to split.</strong> Pick <strong>Selected pages</strong>, <strong>Custom ranges</strong>, <strong>Fixed chunks</strong> or <strong>Every page</strong>.</li>
           <li><strong>Enter the pages.</strong> Type pages such as <code>1,3,5-8</code> (or tap the page previews), ranges such as <code>1-3;5-7;9</code>, or the number of <strong>Pages per PDF</strong>. For a PDF per page or per range, turn off <strong>Combine selected pages into one PDF</strong> or <strong>Combine all ranges into one PDF</strong>.</li>
@@ -147,12 +147,12 @@
         </div>
         <ul class="tool-list">
           <li><strong>Selected pages</strong>: type pages such as <code>1,3,5-8</code>, or tap page previews to pick them. In one combined PDF, the pages keep the order you typed or tapped them in.</li>
-          <li><strong>Custom ranges</strong>: type ranges separated by semicolons, such as <code>1-3;5-7;9</code>. Each range becomes its own PDF, or all of them one PDF.</li>
+          <li><strong>Custom ranges</strong>: type ranges separated by semicolons, such as <code>1-3;5-7;9</code>. Each range becomes its own PDF, or all the ranges go into one PDF.</li>
           <li><strong>Fixed chunks</strong>: set <strong>Pages per PDF</strong>, and the last PDF takes the pages left over. A 12-page PDF in chunks of 5 makes PDFs of 5, 5 and 2 pages.</li>
           <li><strong>Every page</strong>: each page becomes a PDF of its own.</li>
           <li>For <strong>Selected pages</strong> and <strong>Custom ranges</strong>, a switch chooses between one combined PDF and a PDF for each page or range. It starts on, making one PDF.</li>
           <li>Each new PDF holds only its own pages: the other pages’ text and pictures don’t come along, links between its pages still work, and form fields on its pages stay fillable.</li>
-          <li>Names follow your PDF: <code>Report.pdf</code> gives <code>Report_split.pdf</code>, or <code>Report_split_1_1-5.pdf</code>, <code>Report_split_2_6-10.pdf</code> and so on when there are several. Change the first part in <strong>File name</strong>.</li>
+          <li>Names follow your PDF: <code>Report.pdf</code> gives <code>Report_split.pdf</code>, or <code>Report_split_1_1-5.pdf</code>, <code>Report_split_2_6-10.pdf</code> and so on when there are several. Type another name in <strong>File name</strong> to replace <code>Report_split</code>; the part numbers and pages are still added after it.</li>
           <li>Save several PDFs at once with <strong>Save to Downloads</strong>, put them in one ZIP file with <strong>Share or save as ZIP</strong>, or save them one at a time.</li>
         </ul>
       </div>
@@ -162,8 +162,8 @@
       <div class="wrap narrow">
         <div class="section-head">
           <h2 id="private-title">Your files stay on your device</h2>
-          <p>Usugami works on your files in your browser, on your device, and nothing is uploaded: the files you pick and the PDFs it makes never leave your device.</p>
-          <p>There are no ads, no tracking and no cookies, and you don’t need an account. Tools you have used once keep working offline.</p>
+          <p>Usugami works on your files right in your browser. Nothing is uploaded: the files you pick and the PDFs it makes never leave your device.</p>
+          <p>There are no ads, no tracking and no cookies, and you don’t need an account. Tools you have used once keep working offline while your browser keeps their files; a text-recognition language or font used for the first time needs the internet.</p>
         </div>
         <ul class="link-list">
           <li><a href="../privacy/#on-the-web">How the web app handles your files <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9.29 6.71a.996.996 0 0 0 0 1.41L13.17 12l-3.88 3.88a.996.996 0 1 0 1.41 1.41l4.59-4.59a.996.996 0 0 0 0-1.41L10.7 6.7c-.38-.38-1.02-.38-1.41.01z"/></svg></a></li>
@@ -185,7 +185,7 @@
         <h3>Is Usugami free?</h3>
         <p>Yes. Usugami is free and open source, with no ads, no account and nothing to buy.</p>
         <h3>Does Usugami put its name on my PDFs?</h3>
-        <p>Only if you turn on the <strong>Usugami watermark</strong> switch on the result screen, which adds a small “Usugami” in the corner of each page. It’s off unless you turn it on.</p>
+        <p>Not on its pages, unless you turn on the <strong>Usugami watermark</strong> switch on the result screen, which adds a small “Usugami” in the corner of each page. Once on, it stays on for the PDFs you make next until you turn it off. The PDF’s document properties do name Usugami as the program that made it.</p>
         <h3>Which browsers does it work in?</h3>
         <p>Current Chrome, Edge, Firefox and Safari, on phones, tablets and computers. Some buttons, such as <strong>Share</strong> and <strong>Save as…</strong>, show only in browsers that support them. On an Android phone you can also install the Usugami app.</p>
       </div>
@@ -195,7 +195,7 @@
       <div class="wrap">
         <div class="section-head">
           <h2 id="tools-title">More PDF tools</h2>
-          <p>Every tool, grouped as on Usugami’s Home screen.</p>
+          <p>A page for each tool, grouped as on this website’s Home page.</p>
         </div>
         <div class="tool-index">
           <div class="tool-index-group">

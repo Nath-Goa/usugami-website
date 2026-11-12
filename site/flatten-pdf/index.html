@@ -37,7 +37,7 @@
   <meta property="og:image" content="https://usugami.com/assets/img/social-preview.png">
   <meta property="og:image:width" content="1280">
   <meta property="og:image:height" content="640">
-  <meta property="og:image:alt" content="Usugami, 薄紙 (thin paper): PDF tools that stay on your phone. Free and open source, no ads, no permissions.">
+  <meta property="og:image:alt" content="Usugami, 薄紙 (thin paper): PDF tools that stay on your phone. Free and open source, no ads, no permissions. Android: scan, convert, edit, sign, redact.">
   <meta name="twitter:card" content="summary_large_image">
   <!-- Where the page sits in the site, for search results (structured data; see docs/website.md). -->
   <script type="application/ld+json">
@@ -131,7 +131,7 @@
           <h2 id="how-title">How to flatten a PDF</h2>
         </div>
         <ol class="steps">
-          <li><strong>Open Flatten PDF.</strong> Press the <strong>Open Flatten PDF</strong> button at the top of this page. The tool opens in your browser, on a phone, tablet or computer, with nothing to install and nothing to sign up for.</li>
+          <li><strong>Open the tool.</strong> Press the <strong>Open Flatten PDF</strong> button at the top of this page. The tool opens in your browser, on a phone, tablet or computer, with nothing to install and nothing to sign up for.</li>
           <li><strong>Choose your PDFs.</strong> Press <strong>Choose PDFs</strong> and pick one PDF or several at once. On a computer you can also drop PDFs onto it, and <strong>Add PDFs</strong> adds more later.</li>
           <li><strong>Check the file name.</strong> Each new PDF is named after its original with <code>_flattened</code> added, such as <code>form_flattened.pdf</code>. Type another name in <strong>File name</strong> if you like.</li>
           <li><strong>Flatten.</strong> Press <strong>Flatten PDF</strong> (with three PDFs it reads <strong>Flatten 3 PDFs</strong>). A PDF with no form fields or comments to flatten is left out, and Usugami tells you so.</li>
@@ -148,9 +148,7 @@
         <ul class="tool-list">
           <li>Form fields, such as text boxes, check boxes, radio buttons and drop-down lists, are drawn into the page as they look and taken off the form, so they can’t be filled in anymore.</li>
           <li>Comments, highlights, drawings and stamps become part of the page too. Links stay and keep working.</li>
-          <li>If Usugami would have to draw a field’s text and the form’s font can’t show it (for example Hindi typed into a form made for English), the field is left fillable so its text isn’t lost, and Usugami tells you.</li>
-          <li>A PDF with nothing to flatten gets no new copy. Usugami says “This PDF has no form fields or comments to flatten.”, and with several PDFs those are left out and named.</li>
-          <li>A PDF whose only form is a dynamic XFA form can’t be flattened. If it also has ordinary form fields or comments, the XFA form is removed, the rest is flattened, and Usugami tells you.</li>
+          <li>A dynamic XFA form can’t be flattened. If a PDF has nothing else to flatten, Usugami says so; if it also has ordinary form fields or comments, the XFA form is removed, the rest is flattened, and Usugami tells you.</li>
           <li>Flatten several PDFs at once, each into a PDF of its own with its own <strong>File name</strong>. If one can’t be flattened, the others are still made.</li>
           <li>Password-protected PDFs open once you type the password, and the flattened PDF has no password.</li>
         </ul>
@@ -161,8 +159,8 @@
       <div class="wrap narrow">
         <div class="section-head">
           <h2 id="private-title">Your files stay on your device</h2>
-          <p>Usugami works on your files in your browser, on your device, and nothing is uploaded: the files you pick and the PDFs it makes never leave your device.</p>
-          <p>There are no ads, no tracking and no cookies, and you don’t need an account. Tools you have used once keep working offline.</p>
+          <p>Usugami works on your files right in your browser. Nothing is uploaded: the files you pick and the PDFs it makes never leave your device.</p>
+          <p>There are no ads, no tracking and no cookies, and you don’t need an account. Tools you have used once keep working offline while your browser keeps their files; a text-recognition language or font used for the first time needs the internet.</p>
         </div>
         <ul class="link-list">
           <li><a href="../privacy/#on-the-web">How the web app handles your files <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9.29 6.71a.996.996 0 0 0 0 1.41L13.17 12l-3.88 3.88a.996.996 0 1 0 1.41 1.41l4.59-4.59a.996.996 0 0 0 0-1.41L10.7 6.7c-.38-.38-1.02-.38-1.41.01z"/></svg></a></li>
@@ -176,17 +174,17 @@
           <h2 id="faq-title">Questions</h2>
         </div>
         <h3>What does flattening a PDF do?</h3>
-        <p>It draws form fields, comments, highlights, drawings and stamps into the page as they look, so they can’t be changed or filled in anymore. Links keep working.</p>
+        <p>Form fields and comments sit on top of a PDF’s pages, where they can be filled in, moved or deleted. Flattening draws them into the pages themselves, just as they look now, so they can’t be changed anymore. Links stay as links.</p>
         <h3>Can I edit the form after flattening it?</h3>
         <p>No, the flattened fields are part of the page. The flattened PDF is a new file (<code>form_flattened.pdf</code> for <code>form.pdf</code>, unless you rename it), and the PDF you picked isn’t changed, so keep it if you may need to edit the form again.</p>
         <h3>Why is a field still fillable after flattening?</h3>
         <p>If Usugami would have to draw a field’s text and the form’s font can’t show it, for example Hindi typed into a form made for English, it leaves that field fillable so the text isn’t lost, and tells you so.</p>
         <h3>Can Usugami flatten XFA forms?</h3>
-        <p>Not dynamic XFA forms. If that is a PDF’s only form, Usugami says it can’t flatten it; if the PDF also has ordinary form fields or comments, the XFA form is removed and the rest is flattened.</p>
+        <p>Not dynamic XFA forms. If a PDF has nothing else to flatten, Usugami says it can’t flatten it; if it also has ordinary form fields or comments, the XFA form is removed and the rest is flattened.</p>
         <h3>Is Usugami free?</h3>
         <p>Yes. Usugami is free and open source, with no ads, no account and nothing to buy.</p>
         <h3>Does Usugami put its name on my PDFs?</h3>
-        <p>Only if you turn on the <strong>Usugami watermark</strong> switch on the result screen, which adds a small “Usugami” in the corner of each page. It’s off unless you turn it on.</p>
+        <p>Not on its pages, unless you turn on the <strong>Usugami watermark</strong> switch on the result screen, which adds a small “Usugami” in the corner of each page. Once on, it stays on for the PDFs you make next until you turn it off. The PDF’s document properties do name Usugami as the program that made it.</p>
         <h3>Which browsers does it work in?</h3>
         <p>Current Chrome, Edge, Firefox and Safari, on phones, tablets and computers. Some buttons, such as <strong>Share</strong> and <strong>Save as…</strong>, show only in browsers that support them. On an Android phone you can also install the Usugami app.</p>
       </div>
@@ -196,7 +194,7 @@
       <div class="wrap">
         <div class="section-head">
           <h2 id="tools-title">More PDF tools</h2>
-          <p>Every tool, grouped as on Usugami’s Home screen.</p>
+          <p>A page for each tool, grouped as on this website’s Home page.</p>
         </div>
         <div class="tool-index">
           <div class="tool-index-group">

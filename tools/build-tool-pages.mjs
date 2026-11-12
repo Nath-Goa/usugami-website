@@ -136,10 +136,15 @@ function cardIcon(home, card) {
 
 const ICON_CHEVRON = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9.29 6.71a.996.996 0 0 0 0 1.41L13.17 12l-3.88 3.88a.996.996 0 1 0 1.41 1.41l4.59-4.59a.996.996 0 0 0 0-1.41L10.7 6.7c-.38-.38-1.02-.38-1.41.01z"/></svg>';
 
+/** The text of a tool page's button, which opens its tool in the web app. */
+export function buttonLabel(t) {
+  return t.button ?? `Open ${TOOL_PAGES[t.opens].name}`;
+}
+
 function toolPage(t, group, groups, shared, home) {
   const url = `${ORIGIN}${t.slug}/`;
   const opens = TOOL_PAGES[t.opens];
-  const open = `Open ${opens.name}`;
+  const open = buttonLabel(t);
   const route = `../app/#/tool/${opens.id}`;
   const from = `site/index.html hero, for ${t.slug}`;
   let cta = replaceCount(shared.ctaList, 'href="app/"', `href="${route}"`, 1, from);
@@ -197,7 +202,7 @@ ${shared.header}
           <h2 id="how-title">${esc(t.howToHeading)}</h2>
         </div>
         <ol class="steps">
-          <li><strong>Open ${esc(opens.name)}.</strong> ${SHARED.openStep.replace('{open}', esc(open))}</li>
+          <li><strong>Open the tool.</strong> ${SHARED.openStep.replace('{open}', esc(open))}</li>
 ${t.steps.map((s) => `          <li><strong>${s.title}.</strong> ${s.html}</li>`).join('\n')}
         </ol>
       </div>
@@ -286,6 +291,7 @@ function validate(t) {
   for (const key of ['id', 'slug', 'card', 'opens', ...TEXT_FIELDS, ...HTML_FIELDS]) {
     if (typeof t[key] !== 'string' || !t[key].trim()) throw new Error(`${where}: ${key} is missing`);
   }
+  if (t.button !== undefined) checkText(`${where} button`, t.button, false);
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(t.slug)) throw new Error(`${where}: slug "${t.slug}" should be lower case words with hyphens`);
   if (!t.title.endsWith(': Usugami') || t.title.length > 65) throw new Error(`${where}: the title should end with ": Usugami" and be at most 65 characters (${t.title.length})`);
   if (t.description.length < 110 || t.description.length > 160) throw new Error(`${where}: the description should be 110 to 160 characters (${t.description.length})`);

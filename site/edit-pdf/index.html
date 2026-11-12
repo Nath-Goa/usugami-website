@@ -37,7 +37,7 @@
   <meta property="og:image" content="https://usugami.com/assets/img/social-preview.png">
   <meta property="og:image:width" content="1280">
   <meta property="og:image:height" content="640">
-  <meta property="og:image:alt" content="Usugami, 薄紙 (thin paper): PDF tools that stay on your phone. Free and open source, no ads, no permissions.">
+  <meta property="og:image:alt" content="Usugami, 薄紙 (thin paper): PDF tools that stay on your phone. Free and open source, no ads, no permissions. Android: scan, convert, edit, sign, redact.">
   <meta name="twitter:card" content="summary_large_image">
   <!-- Where the page sits in the site, for search results (structured data; see docs/website.md). -->
   <script type="application/ld+json">
@@ -131,10 +131,10 @@
           <h2 id="how-title">How to edit a PDF</h2>
         </div>
         <ol class="steps">
-          <li><strong>Open Edit PDF.</strong> Press the <strong>Open Edit PDF</strong> button at the top of this page. The tool opens in your browser, on a phone, tablet or computer, with nothing to install and nothing to sign up for.</li>
+          <li><strong>Open the tool.</strong> Press the <strong>Open Edit PDF</strong> button at the top of this page. The tool opens in your browser, on a phone, tablet or computer, with nothing to install and nothing to sign up for.</li>
           <li><strong>Choose your PDF.</strong> Press <strong>Choose PDF</strong> and pick the PDF, or drop it there on a computer. If it’s protected with a password, Usugami asks for it first.</li>
           <li><strong>Add something to the page.</strong> Press <strong>Text</strong>, <strong>Draw</strong>, <strong>Highlight</strong>, <strong>Shape</strong> or <strong>Picture</strong>. For text, type it in the box that opens and press <strong>Done</strong>.</li>
-          <li><strong>Move it and change it.</strong> Drag what you added into place, or tap it to choose it and use its controls, such as <strong>Size</strong> and the colors. <strong>Undo</strong> takes back a change, and in a PDF with more than one page, the page previews take you to another page.</li>
+          <li><strong>Move it and change it.</strong> Drag what you added into place, or tap it to choose it and use its controls, such as <strong>Size</strong> and the colors. While <strong>Draw</strong> or <strong>Highlight</strong> is on, dragging draws, so press it again to stop drawing first. In a PDF with more than one page, the page previews take you to another page.</li>
           <li><strong>Save the new PDF.</strong> Check the <strong>File name</strong> and press <strong>Save PDF</strong>, then <strong>Save to Downloads</strong>. Where your browser can share files, <strong>Share</strong> sends it to another app.</li>
         </ol>
       </div>
@@ -153,7 +153,7 @@
           <li>Drag what you added to move it and use its handles to resize it, or use the move buttons and the <strong>Size</strong> slider. On a computer, the arrow keys move it (with Shift, 1 pt at a time).</li>
           <li><strong>Undo</strong> takes back up to 50 changes, turning to the page each one was on, and <strong>Redo</strong> brings them back.</li>
           <li>Text you add stays real text that you can search and select. Drawings and shapes are saved as lines and curves, not pixels, so they stay sharp when you zoom in.</li>
-          <li>Pages you add nothing to stay exactly as they were. A filled shape only covers what’s under it, which stays in the file. To remove something for good, use Redact PDF.</li>
+          <li>Pages you add nothing to stay exactly as they were. On the pages you add to, form fields and comments under what you add become part of the page, so your additions sit on top of them as in the preview. A filled shape only covers what’s under it, which stays in the file. To remove something for good, use Redact PDF.</li>
         </ul>
       </div>
     </section>
@@ -162,8 +162,8 @@
       <div class="wrap narrow">
         <div class="section-head">
           <h2 id="private-title">Your files stay on your device</h2>
-          <p>Usugami works on your files in your browser, on your device, and nothing is uploaded: the files you pick and the PDFs it makes never leave your device.</p>
-          <p>There are no ads, no tracking and no cookies, and you don’t need an account. Tools you have used once keep working offline.</p>
+          <p>Usugami works on your files right in your browser. Nothing is uploaded: the files you pick and the PDFs it makes never leave your device.</p>
+          <p>There are no ads, no tracking and no cookies, and you don’t need an account. Tools you have used once keep working offline while your browser keeps their files; a text-recognition language or font used for the first time needs the internet.</p>
         </div>
         <ul class="link-list">
           <li><a href="../privacy/#on-the-web">How the web app handles your files <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9.29 6.71a.996.996 0 0 0 0 1.41L13.17 12l-3.88 3.88a.996.996 0 1 0 1.41 1.41l4.59-4.59a.996.996 0 0 0 0-1.41L10.7 6.7c-.38-.38-1.02-.38-1.41.01z"/></svg></a></li>
@@ -179,7 +179,7 @@
         <h3>Can I change the text that’s already in my PDF?</h3>
         <p>No. Edit PDF adds new text, drawings, shapes and pictures on top of a page, and what is already on the page stays in the file. A filled shape can cover something, but to remove it for good, use Redact PDF.</p>
         <h3>Is the text I add searchable?</h3>
-        <p>Yes. It’s saved as real text in the Noto Sans fonts that come with Usugami, so you can search and select it, and Hindi works too. Characters those fonts don’t have, such as Chinese or emoji, are drawn by your browser as a picture, with the text kept invisibly over it so it can still be found.</p>
+        <p>Yes. It’s saved as real text in the Noto Sans fonts that come with Usugami, so you can search and select it, and Hindi works too. Characters those fonts don’t have, such as Chinese or emoji, are drawn by your browser as a picture, with the text kept invisibly over it so it can still be found. If your device has no font for some characters, Usugami asks you to try different text.</p>
         <h3>How do I add an image to a PDF?</h3>
         <p>Press <strong>Picture</strong> and choose an image, or on a computer drop or paste one onto the page. It appears on the page ready to drag into place, and its handles or the <strong>Size</strong> slider change its size.</p>
         <h3>Can I add things to more than one page?</h3>
@@ -187,7 +187,7 @@
         <h3>Is Usugami free?</h3>
         <p>Yes. Usugami is free and open source, with no ads, no account and nothing to buy.</p>
         <h3>Does Usugami put its name on my PDFs?</h3>
-        <p>Only if you turn on the <strong>Usugami watermark</strong> switch on the result screen, which adds a small “Usugami” in the corner of each page. It’s off unless you turn it on.</p>
+        <p>Not on its pages, unless you turn on the <strong>Usugami watermark</strong> switch on the result screen, which adds a small “Usugami” in the corner of each page. Once on, it stays on for the PDFs you make next until you turn it off. The PDF’s document properties do name Usugami as the program that made it.</p>
         <h3>Which browsers does it work in?</h3>
         <p>Current Chrome, Edge, Firefox and Safari, on phones, tablets and computers. Some buttons, such as <strong>Share</strong> and <strong>Save as…</strong>, show only in browsers that support them. On an Android phone you can also install the Usugami app.</p>
       </div>
@@ -197,7 +197,7 @@
       <div class="wrap">
         <div class="section-head">
           <h2 id="tools-title">More PDF tools</h2>
-          <p>Every tool, grouped as on Usugami’s Home screen.</p>
+          <p>A page for each tool, grouped as on this website’s Home page.</p>
         </div>
         <div class="tool-index">
           <div class="tool-index-group">
