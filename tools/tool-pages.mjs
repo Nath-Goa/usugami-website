@@ -10,8 +10,13 @@
 //   id          a key of its own (the web app's tool id where there is one)
 //   slug        the page's address: usugami.com/<slug>/
 //   card        Home's feature card, id="f-<card>" (its name links here; its icon is used)
+//   variantOf   instead of card, on a page about one kind of file a tool takes (JPG to PDF, for
+//               Images to PDF): the id of that tool's page. The page takes its icon and group and
+//               follows it in More PDF tools and the sitemap; Home has no card for it. It says
+//               what the tool does with that kind of file, not the tool's page over again
 //   opens       the tool (id) the page's button opens in the web app: ../app/#/tool/<id>
-//   name        the tool's name, as the web app and Home show it
+//   name        the tool's name, as the web app and Home show it (for a variant, what it
+//               converts: JPG to PDF)
 //   button      the button's text when "Open <the opened tool's name>" would read badly (a name
 //               that starts with a verb, such as Add watermark); never a label the tool itself shows
 //   title       <title> and og:title, ending in ": Usugami" (at most 65 characters)
@@ -92,6 +97,113 @@ const PAGES = [
       { q: 'Can I make a separate PDF for each image?', a: 'Yes. With two or more images, turn off <strong>Merge all images into one PDF</strong> in <strong>Create PDF</strong>, and each image becomes its own PDF, named after it. <strong>Save to Downloads</strong> saves them all at once.' },
       { q: 'What page size does the PDF use?', a: '<strong>A4</strong>, <strong>Portrait</strong>, with <strong>No margin</strong>, until you change it. <strong>Fit (same as image)</strong> makes each page the size of its image, and <strong>Auto</strong> orientation gives a wide image a landscape page.' },
       { q: 'How much are the images compressed?', a: 'With <strong>Less</strong>, <strong>Recommended</strong> or <strong>Extreme</strong>, each image is shrunk to 200, 150 or 100 dpi for the space it fills on its page, or with <strong>Fit (same as image)</strong>, as if it filled an A4 page. Images are never enlarged, and a JPEG photo left on <strong>Original</strong>, with no brightness or contrast change, can go in as it is, without its metadata, when that is smaller than the shrunk copy.' },
+    ],
+  },
+  {
+    id: 'jpg',
+    slug: 'jpg-to-pdf',
+    variantOf: 'images',
+    opens: 'images',
+    name: 'JPG to PDF',
+    title: 'JPG to PDF in your browser, no uploads: Usugami',
+    description: 'Convert JPG to PDF for free in your browser: put your photos in order, pick a page size and margin, and get one PDF. Nothing is uploaded.',
+    h1: 'Convert JPG to PDF',
+    lead: 'Images to PDF turns JPG (JPEG) photos into a PDF in your browser. Add one photo or many and put them in order: each becomes a page, the right way up and without the location it was taken at.',
+    howToHeading: 'How to convert JPG to PDF',
+    steps: [
+      { title: 'Add your JPG photos', html: 'Press <strong>Photos</strong> or <strong>Files</strong> and pick one photo or many. You can also drop JPG files onto the page, or paste them.' },
+      { title: 'Put the photos in order', html: 'Each photo is one page of the PDF. Drag a page to move it (on a touch screen, long-press it first), or press <strong>Sort</strong> to order the pages by name.' },
+      { title: 'Choose the page layout', html: 'Set <strong>Page size</strong> to a paper size such as <strong>A4</strong> or <strong>US Letter</strong>, then <strong>Orientation</strong> and <strong>Margin</strong>. Each page shows as it will look in the PDF.' },
+      { title: 'Create the PDF', html: 'Press <strong>Convert to PDF</strong> and check the <strong>File name</strong> and <strong>Compression</strong>. With several photos, leave <strong>Merge all images into one PDF</strong> on to get one PDF. Then press <strong>Create PDF</strong>.' },
+      { title: 'Save your PDF', html: 'Press <strong>Save to Downloads</strong> to keep the PDF.' },
+    ],
+    featuresHeading: 'What Images to PDF does with JPG photos',
+    features: [
+      'One photo or many: every JPG becomes a page. <strong>Merge all images into one PDF</strong> puts the pages in one PDF; turn it off and each photo becomes a separate PDF, named after it.',
+      'Photos come out the right way up: Usugami follows the turn the camera recorded in each JPG.',
+      'The location, the camera’s details and the other hidden metadata of your photos are left out of the PDF.',
+      'Three <strong>Compression</strong> levels: <strong>Less</strong> (200 dpi), <strong>Recommended</strong> (150 dpi) and <strong>Extreme</strong> (100 dpi). Each photo is shrunk to that resolution for the space it fills on its page, and never enlarged.',
+      'A JPG left on the <strong>Original</strong> look, with no brightness or contrast change, can go into the PDF as it is, without its metadata, when that is smaller than the shrunk copy.',
+      'Paper sizes <strong>A4</strong>, <strong>US Letter</strong>, <strong>US Legal</strong>, <strong>A3</strong> and <strong>A5</strong>, with <strong>No margin</strong>, a <strong>Small</strong> one or a <strong>Big</strong> one, or <strong>Fit (same as image)</strong> for pages the size of each photo.',
+      'With <strong>Orientation</strong> on <strong>Auto</strong>, a wide photo gets a landscape page and a tall one a portrait page.',
+      'JPG photos can share a PDF with PNG, HEIC, WebP, BMP and GIF images.',
+    ],
+    faq: [
+      { q: 'How do I combine several JPGs into one PDF?', a: 'Add them all, put them in order and press <strong>Convert to PDF</strong>. <strong>Merge all images into one PDF</strong> is on until you turn it off, so <strong>Create PDF</strong> makes one PDF with a page for each photo.' },
+      { q: 'Is JPEG the same as JPG?', a: 'Yes. They are two names for the same kind of file, and Usugami takes both. It tells what kind of image a file is by what is in it, not by its name.' },
+      { q: 'Will my photos lose quality?', a: 'Photos are always compressed, to keep the PDF small. <strong>Less</strong> keeps the best quality (200 dpi), <strong>Recommended</strong> gives good quality in a much smaller file (150 dpi), and <strong>Extreme</strong> makes the smallest file at a lower quality (100 dpi).' },
+      { q: 'What is the PDF called?', a: 'A PDF made from one photo is named after it, so <code>IMG_2041.jpg</code> becomes <code>IMG_2041.pdf</code>. A PDF of several photos is named <code>Usugami</code> with the date and time. You can type another <strong>File name</strong> before you create it.' },
+    ],
+  },
+  {
+    id: 'png',
+    slug: 'png-to-pdf',
+    variantOf: 'images',
+    opens: 'images',
+    name: 'PNG to PDF',
+    title: 'PNG to PDF in your browser, no uploads: Usugami',
+    description: 'Convert PNG to PDF for free in your browser: screenshots and drawings become PDF pages, and transparent parts turn white. Nothing is uploaded.',
+    h1: 'Convert PNG to PDF',
+    lead: 'Images to PDF turns PNG images, such as screenshots and drawings, into a PDF in your browser. Transparent parts become white, and each page can be a paper size or the size of its image.',
+    howToHeading: 'How to convert PNG to PDF',
+    steps: [
+      { title: 'Add your PNG images', html: 'Press <strong>Photos</strong> or <strong>Files</strong> and pick one or more PNG images. You can also drop them onto the page, or paste an image you have copied.' },
+      { title: 'Put the pages in order', html: 'Drag a page to move it (on a touch screen, long-press it first). Or press <strong>Sort</strong> and pick <strong>Name (A to Z)</strong>: numbers in names count as numbers, so Screenshot_2 comes before Screenshot_10.' },
+      { title: 'Choose the page size', html: 'For screenshots, set <strong>Page size</strong> to <strong>Fit (same as image)</strong>, which makes each page the size of its image. To print, pick a paper size such as <strong>A4</strong> and a <strong>Margin</strong>.' },
+      { title: 'Create the PDF', html: 'Press <strong>Convert to PDF</strong>, check the <strong>File name</strong> and <strong>Compression</strong>, then press <strong>Create PDF</strong>.' },
+      { title: 'Save your PDF', html: 'Press <strong>Save to Downloads</strong>. If you made a PDF for each image, <strong>Share or save as ZIP</strong> puts them all in one ZIP file.' },
+    ],
+    featuresHeading: 'What Images to PDF does with PNG images',
+    features: [
+      'Transparent parts of a PNG become white in the PDF, and half-transparent parts are blended with white, as if the picture were printed on paper.',
+      'A PNG left on the <strong>Original</strong> look that needs no shrinking for its page, such as a small screenshot or a diagram in plain colours, is stored without loss when the PNG file is no bigger than a JPEG copy would be. Other PNGs are stored as JPEG at the <strong>Compression</strong> level you pick.',
+      '<strong>Fit (same as image)</strong> makes each page the size of its image, so with <strong>No margin</strong> a screenshot fills its page.',
+      'A long screenshot keeps its text readable: on a <strong>Fit (same as image)</strong> page it is shrunk only when its shorter side has more pixels than an A4 page’s at the level’s resolution (about 1,240 at <strong>Recommended</strong>).',
+      'Paper sizes <strong>A4</strong>, <strong>US Letter</strong>, <strong>US Legal</strong>, <strong>A3</strong> and <strong>A5</strong> for printing, with <strong>No margin</strong>, a <strong>Small</strong> one or a <strong>Big</strong> one.',
+      'One PDF with a page for each image, or a separate PDF for each image, named after it.',
+      'Text notes and other hidden metadata saved in a PNG are left out of the PDF.',
+      'PNG images can share a PDF with JPG, HEIC, WebP, BMP and GIF images.',
+    ],
+    faq: [
+      { q: 'What happens to a transparent background?', a: 'It becomes white. Usugami fills the see-through parts of a PNG with white, as paper would show through them in print.' },
+      { q: 'How do I put several screenshots in one PDF?', a: 'Add them all, then press <strong>Sort</strong> and pick <strong>Name (A to Z)</strong> if their names are numbered. Press <strong>Convert to PDF</strong>: with <strong>Merge all images into one PDF</strong> on, <strong>Create PDF</strong> makes one PDF with a page for each screenshot.' },
+      { q: 'Is a PNG converted without losing quality?', a: 'Sometimes. A PNG that isn’t shrunk for its page and is no bigger than a JPEG copy would be is stored without loss. Any other PNG is stored as JPEG, at 200, 150 or 100 dpi for the space it fills on its page; pick <strong>Less</strong> for the best quality.' },
+      { q: 'Can I search the text of a screenshot in the PDF?', a: 'Yes. Turn on <strong>Make text searchable (OCR)</strong> in <strong>Create PDF</strong> and pick the <strong>Text language</strong>: English, French, Spanish or Hindi. Usugami reads the words in your images and adds them to the PDF as text you can search, select and copy.' },
+    ],
+  },
+  {
+    id: 'heic',
+    slug: 'heic-to-pdf',
+    variantOf: 'images',
+    opens: 'images',
+    name: 'HEIC to PDF',
+    title: 'HEIC to PDF in your browser, no uploads: Usugami',
+    description: 'Convert HEIC to PDF for free in your browser: iPhone photos become PDF pages, even in a browser that can’t open HEIC. Nothing is uploaded.',
+    h1: 'Convert HEIC to PDF',
+    lead: 'Images to PDF turns HEIC photos, such as those an iPhone takes, into a PDF in your browser. Usugami reads them on your device, even in a browser that can’t open HEIC itself, so there is no need to convert them to JPG first.',
+    howToHeading: 'How to convert HEIC to PDF',
+    steps: [
+      { title: 'Add your HEIC photos', html: 'Press <strong>Photos</strong> or <strong>Files</strong> and pick your HEIC photos, or drop them onto the page. In a browser that can’t open HEIC itself, the first photo takes a little longer while Usugami’s HEIC decoder (about 2 MB) is downloaded from this website.' },
+      { title: 'Put the photos in order', html: 'Drag a page to move it (on a touch screen, long-press it first). Each page has buttons to turn it, remove it or crop it.' },
+      { title: 'Choose the page layout', html: 'Set <strong>Page size</strong>, <strong>Orientation</strong> and <strong>Margin</strong>. On a paper size, <strong>Auto</strong> orientation gives a wide photo a landscape page.' },
+      { title: 'Create the PDF', html: 'Press <strong>Convert to PDF</strong>, pick a <strong>Compression</strong> level and press <strong>Create PDF</strong>.' },
+      { title: 'Save your PDF', html: 'Press <strong>Save to Downloads</strong>. Your HEIC photos themselves are not changed.' },
+    ],
+    featuresHeading: 'What Images to PDF does with HEIC photos',
+    features: [
+      'Reads HEIC and other HEIF photos, told apart by what is in the file rather than by its name.',
+      'When your browser can’t open a HEIC photo itself, Usugami decodes it with its own decoder, on your device.',
+      'The decoder (about 2 MB) is downloaded from this website only when a HEIC photo needs it. Your browser keeps it for next time.',
+      'Photos come out the right way up, turned as the HEIC file says.',
+      'Each photo is shrunk for its page at the <strong>Compression</strong> level you pick: <strong>Less</strong> (200 dpi), <strong>Recommended</strong> (150 dpi) or <strong>Extreme</strong> (100 dpi).',
+      'One PDF with a page for each photo, or a separate PDF for each photo, named after it.',
+      'HEIC photos can share a PDF with JPG, PNG, WebP, BMP and GIF images.',
+    ],
+    faq: [
+      { q: 'Do I have to convert HEIC to JPG first?', a: 'No. Add your HEIC photos as they are, with <strong>Photos</strong> or <strong>Files</strong>, and Usugami makes the PDF from them.' },
+      { q: 'Can I convert HEIC to PDF on Windows or Android?', a: 'Yes. Usugami brings its own HEIC decoder, so it doesn’t matter whether your device or browser can open HEIC photos. It works in current Chrome, Edge, Firefox and Safari.' },
+      { q: 'Why does the first HEIC photo take longer?', a: 'In a browser that can’t open HEIC itself, Usugami’s HEIC decoder, about 2 MB, is downloaded from this website the first time a HEIC photo needs it, which needs an internet connection. Your photos aren’t sent anywhere: the decoder works on your device.' },
+      { q: 'Does the PDF say where my photos were taken?', a: 'No. The location, the camera’s details and the other hidden metadata of a HEIC photo are left out of the PDF.' },
     ],
   },
   {
@@ -680,6 +792,7 @@ const PAGES = [
 ];
 
 export const TOOL_PAGES = Object.fromEntries(PAGES.map((t) => [t.id, t]));
+if (Object.keys(TOOL_PAGES).length !== PAGES.length) throw new Error('tool-pages.mjs: two pages have the same id');
 
 /** The parts every tool page shares. */
 export const SHARED = {

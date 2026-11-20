@@ -13,9 +13,10 @@
 // on the website pages and on a site with mistakes, and the pages' content is checked: the links
 // every footer must have (the website's source code and third-party notices), the canonical and
 // Open Graph tags, the structured data, the sitemap and robots.txt, the tool pages being as
-// tools/build-tool-pages.mjs makes them (and Home linking to each), what Home and Download must
-// say, and a Privacy page that describes every kind of browser storage the web app's code uses and
-// exactly the tool choices it saves.
+// tools/build-tool-pages.mjs makes them (Home linking to each tool's, and a page about one kind of
+// file following its tool's), the mistakes in tools/tool-pages.mjs the script refuses, what Home
+// and Download must say, and a Privacy page that describes every kind of browser storage the web
+// app's code uses and exactly the tool choices it saves.
 import { chromium } from 'playwright';
 import { withPage, root, outputDir } from './harness.mjs';
 import { checkSite, stripJsComments } from '../tools/check-site.mjs';
@@ -74,6 +75,10 @@ await testChecker();
 // ---------- What the pages must say ----------
 
 checkContent();
+
+// ---------- The tool pages' rules ----------
+
+checkToolPageRules();
 
 // ---------- The pages in browsers ----------
 
@@ -573,6 +578,13 @@ function checkContent() {
   const listed = [...read('sitemap.xml').matchAll(/<loc>([^<]*)<\/loc>/g)].map((m) => m[1]);
   const addresses = ['', 'app/', ...TOOL_PAGE_LIST.map((t) => `${t.slug}/`), 'download/', 'privacy/'].map((p) => `https://usugami.com/${p}`);
   check(JSON.stringify(listed) === JSON.stringify(addresses), `sitemap.xml lists ${listed.join(', ')}; expected ${addresses.join(', ')}`);
+  // No two pages share a title, a description or a main heading: search results would show them as one.
+  const said = { title: new Map(), description: new Map(), h1: new Map() };
+  const sayOnce = (kind, text, name) => {
+    if (!text) return;
+    check(!said[kind].has(text), `${name}: has the same ${kind} as ${said[kind].get(text)}: "${text}"`);
+    said[kind].set(text, name);
+  };
   for (const address of addresses) {
     const path = address.slice('https://usugami.com/'.length);
     const name = path.replace(/\/$/, '') || 'home';
@@ -584,6 +596,9 @@ function checkContent() {
     const title = head.match(/<title>([^<]*)<\/title>/)?.[1] ?? '';
     const description = head.match(/<meta name="description" content="([^"]*)">/)?.[1] ?? '';
     check(title && title.length <= 65, `${name}: the title is ${title.length} characters; search results show about 60`);
+    sayOnce('title', title, name);
+    sayOnce('description', description, name);
+    sayOnce('h1', pageText(part(read(`${path}index.html`), /<h1[\s>][\s\S]*?<\/h1>/)).trim(), name);
     check(description.length >= 50 && description.length <= 160, `${name}: the description is ${description.length} characters; search results show about 160`);
     check(og('url') === address, `${name}: og:url is ${og('url')}, expected ${address}`);
     check(og('title') === title, `${name}: og:title differs from the title`);
@@ -638,12 +653,23 @@ function checkContent() {
   }
 
   // Each tool's feature card on Home leads to its page (the name is the link), and each tool page
-  // opens a tool the web app has, first thing in its hero, and links to Download and Privacy.
+  // opens a tool the web app has, first thing in its hero, and links to Download and Privacy. A
+  // page about one kind of file a tool takes (variantOf: JPG to PDF, of Images to PDF) has no card
+  // on Home: it opens the tool that tool's page opens, and every tool page links to it.
   {
     const toolIds = new Set([...readFileSync(join(root, 'site', 'app', 'js', 'core', 'tools.js'), 'utf8').matchAll(/^\s*id: '([a-z-]+)'/gm)].map((m) => m[1]));
     check(toolIds.has('merge') && toolIds.size >= 18, `tool pages: couldn't read the web app's tools (${[...toolIds].join(', ')})`);
     for (const t of Object.values(TOOL_PAGES)) {
-      check(pages.home.includes(`<h4 id="f-${t.card}"><a class="feature-link" href="${t.slug}/">`), `home: the feature card f-${t.card} should link to ${t.slug}/`);
+      if (t.variantOf === undefined) {
+        check(pages.home.includes(`<h4 id="f-${t.card}"><a class="feature-link" href="${t.slug}/">`), `home: the feature card f-${t.card} should link to ${t.slug}/`);
+      } else {
+        const of = TOOL_PAGES[t.variantOf];
+        check(!!of && of.variantOf === undefined, `${t.slug}: is a variant of "${t.variantOf}", which isn't a tool's page`);
+        check(of?.opens === t.opens, `${t.slug}: should open the tool that ${of?.slug} opens (#/tool/${of?.opens}), not #/tool/${t.opens}`);
+        const at = TOOL_PAGE_LIST.findIndex((p) => p.id === t.id);
+        const before = TOOL_PAGE_LIST.slice(0, at).reverse().find((p) => p.variantOf === null);
+        check(before?.id === t.variantOf, `${t.slug}: should follow ${of?.slug} in the sitemap and More PDF tools, not ${before?.slug}`);
+      }
       check(toolIds.has(t.opens), `${t.slug}: opens #/tool/${t.opens}, which the web app doesn't have`);
       const html = pages[t.slug];
       if (!html) continue;
@@ -744,6 +770,77 @@ function checkContent() {
     }
   }
   console.log(`content: footers, Home, Download, Privacy and ${TOOL_PAGE_LIST.length} tool pages say what they must, with the sitemap`);
+}
+
+/**
+ * What tools/build-tool-pages.mjs does with a page about one kind of file (variantOf), and the
+ * mistakes in tools/tool-pages.mjs it refuses, tried on copies of the real pages.
+ */
+function checkToolPageRules() {
+  const copy = () => Object.fromEntries(Object.entries(TOOL_PAGES).map(([id, t]) => [id, { ...t }]));
+  const variantOf = (id, extra = {}) => {
+    const { card, ...rest } = TOOL_PAGES[id];
+    return { ...rest, id: 'try', slug: 'try-to-pdf', name: 'Try to PDF', variantOf: id, ...extra };
+  };
+  const cards = Object.values(TOOL_PAGES).filter((t) => t.variantOf === undefined);
+  const [first, second] = cards;
+
+  // The pages as they are, given by hand, come out the same.
+  const real = buildToolPages();
+  const again = buildToolPages({ toolPages: copy() });
+  check(JSON.stringify([...again.files]) === JSON.stringify([...real.files]), 'tool pages: the pages differ when tools/tool-pages.mjs is passed in');
+
+  // A variant of a tool that has none yet: right after its tool in the pages, the sitemap and More
+  // PDF tools, under its tool's icon and group, with a button that opens its tool, and no card.
+  {
+    const lone = real.pages.findLast((p) => p.variantOf === null && !real.pages.some((v) => v.variantOf === p.id));
+    const tool = TOOL_PAGES[lone.id];
+    // Listed first, to show that the order comes from Home's cards and not from the list.
+    const built = buildToolPages({ toolPages: { try: variantOf(tool.id), ...copy() } });
+    const order = built.pages.map((p) => p.id);
+    const at = order.indexOf('try');
+    check(at > 0 && order[at - 1] === tool.id, `tool pages: a variant should follow its tool (${tool.id}), not ${order[at - 1]}`);
+    check(JSON.stringify(order.filter((id) => id !== 'try')) === JSON.stringify(real.pages.map((p) => p.id)), 'tool pages: a variant shouldn\'t move the other pages');
+    check(built.pages[at].variantOf === tool.id && built.pages[at - 1].variantOf === null, 'tool pages: the pages should say which tool they are a variant of');
+    const locs = [...built.files.get('sitemap.xml').matchAll(/<loc>([^<]*)<\/loc>/g)].map((m) => m[1]);
+    const expected = ['', 'app/', ...built.pages.map((p) => `${p.slug}/`), 'download/', 'privacy/'].map((path) => `https://usugami.com/${path}`);
+    check(JSON.stringify(locs) === JSON.stringify(expected), `tool pages: the sitemap should list a variant after its tool: ${locs.join(', ')}`);
+    const html = built.files.get('try-to-pdf/index.html') ?? '';
+    const parent = built.files.get(`${tool.slug}/index.html`);
+    const hero = (page) => page.match(/<section class="page-hero tool-hero"[\s\S]*?<\/section>/)?.[0] ?? '';
+    const badge = (page) => hero(page).match(/<div class="tool-title">[\s\S]*?<p class="eyebrow">[^<]*<\/p>/)?.[0];
+    check(!!badge(html) && badge(html) === badge(parent), 'tool pages: a variant should show its tool\'s icon and group');
+    check(hrefs(hero(html))[0] === `../app/#/tool/${tool.opens}` && pageText(hero(html)).includes(buttonLabel(tool)), 'tool pages: a variant\'s button should open its tool');
+    check(html.includes('<link rel="canonical" href="https://usugami.com/try-to-pdf/">'), 'tool pages: a variant should have a canonical address of its own');
+    check(html.includes('<li><a href="./" aria-current="page">Try to PDF</a></li>'), 'tool pages: a variant should be marked as the current page in More PDF tools');
+    const index = [...parent.matchAll(/<li><a href="(?:\.\.\/([a-z0-9-]+)\/|\.\/)"/g)].map((m) => m[1] ?? tool.slug);
+    check(index[index.indexOf(tool.slug) + 1] === 'try-to-pdf', `tool pages: More PDF tools should list a variant after its tool: ${index.join(', ')}`);
+    check(built.files.size === real.files.size + 1, `tool pages: one more file expected with a variant, got ${built.files.size - real.files.size}`);
+  }
+
+  // What the script refuses, each with a message that says what is wrong.
+  const refuses = (what, pages, message) => {
+    let said = null;
+    try { buildToolPages({ toolPages: pages }); } catch (e) { said = e.message; }
+    check(said !== null && message.test(said), `tool pages: ${what} should be refused with ${message}${said === null ? ', but the pages were built' : `, not "${said}"`}`);
+  };
+  refuses('a variant of a page there isn\'t', { ...copy(), try: variantOf(first.id, { variantOf: 'nothing' }) }, /variant of "nothing"/);
+  refuses('a variant of a variant', { ...copy(), try: variantOf(first.id), again: variantOf(first.id, { id: 'again', slug: 'again-to-pdf', variantOf: 'try' }) }, /variant of "try"/);
+  refuses('a page with a card and variantOf', { ...copy(), try: variantOf(first.id, { card: first.card }) }, /card or variantOf, not both/);
+  refuses('a page with neither a card nor variantOf', { ...copy(), try: variantOf(first.id, { variantOf: undefined }) }, /try: card is missing/);
+  refuses('a variant with an empty variantOf', { ...copy(), try: variantOf(first.id, { variantOf: '' }) }, /try: variantOf is missing/);
+  refuses('two pages at one address', { ...copy(), try: variantOf(first.id, { slug: second.slug }) }, /same slug/);
+  refuses('a page listed under another id', { ...copy(), other: variantOf(first.id) }, /listed as "other" has the id "try"/);
+  refuses('two pages for one card', { ...copy(), try: { ...first, id: 'try', slug: 'try-to-pdf' } }, /same card/);
+  refuses('a page that opens a tool without a page', { ...copy(), try: variantOf(first.id, { opens: 'nothing' }) }, /opens "nothing"/);
+  refuses('a card Home doesn\'t have', { ...copy(), try: { ...first, id: 'try', slug: 'try-to-pdf', card: 'nothing' } }, /isn't in one of Home's feature groups/);
+  {
+    const pages = copy();
+    delete pages[first.id];
+    for (const [id, t] of Object.entries(pages)) if (t.variantOf === first.id || t.opens === first.id) delete pages[id];
+    refuses('a card on Home without a page', pages, /has no tool page/);
+  }
+  console.log('tool pages: a variant follows its tool, and the script refuses 11 kinds of mistake');
 }
 
 
