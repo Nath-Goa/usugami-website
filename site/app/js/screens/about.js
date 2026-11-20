@@ -25,7 +25,7 @@ export async function mount(ctx) {
   const site = (path) => new URL(path, new URL('../../', import.meta.url)).href;
   const header = h('div', { class: 'about-header' },
     appIcon(),
-    h('p', { class: 'about-name' }, t('home_title')),
+    h('p', { class: 'about-name' }, t('about_edition_name_standard')),
     h('p', { class: 'about-line' }, t('about_version', APP_VERSION)),
     h('p', { class: 'about-line' }, t('web_about_edition')));
   const privacy = h('div', { class: 'about-privacy' },

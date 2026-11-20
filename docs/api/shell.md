@@ -329,7 +329,9 @@ Each exports `mount(ctx)`. Also exported, for reuse:
   row opening a new tab, `rel="noopener noreferrer"`, with the open_in_new icon), `APPEARANCES`, `currentAppearance()`,
   `WEBSITE_SOURCE_URL` (https://github.com/Nath-Goa/usugami-website), `WEBSITE_NOTICES_URL`
   *extra* (its THIRD_PARTY_NOTICES.md on GitHub).
-- `about.js`: `APP_VERSION` (`'1.0.0'`), `ANDROID_SOURCE_URL`, `appIcon()`. About links the
+- `about.js`: `APP_VERSION` (`'1.0.0'`), `ANDROID_SOURCE_URL`, `appIcon()`. The name under the
+  icon is `about_edition_name_standard` ("Usugami™"), the one place in the app where the name
+  carries the trademark sign, as on the Android app's About screen. About links the
   website's source code and its third-party notices as ordinary links (new tab), as the
   MIT/BSD/IJG/Leptonica licenses of code inside the libraries want their notices reachable.
 - `language.js`: after the choice, goes on to `ctx.params.next` (the address the app was opened

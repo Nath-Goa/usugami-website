@@ -60,8 +60,10 @@ into the tool pages (the tests fail until you do):
    `https://usugami.com/assets/img/social-preview.png` with its `og:image:alt`), and structured
    data for search results (see [Search engines](#search-engines)). The 404 page has the
    `referrer` meta but no canonical, Open Graph or structured data, and `noindex`.
-2. A skip link ("Skip to content", to `#main`), then the header: the icon and "Usugami" (to Home),
-   and the navigation (Home, Web app, Download, Privacy). The current page's link has
+2. A skip link ("Skip to content", to `#main`), then the header: the icon and "Usugami™" (to Home),
+   and the navigation (Home, Web app, Download, Privacy). The trademark sign is written in one
+   place on a page: after the name in the header, as `<span class="tm">™</span>`. Everywhere else
+   (titles, Home's `h1`, descriptions, the text, the footer) the name stands without it. The current page's link has
    `aria-current="page"`. The navigation is written twice: `.nav-wide` (a row of links, 720 px
    and wider) and `.nav-menu`, a `<details>` menu for phones that opens without JavaScript. Only
    one is displayed at a time, so screen readers meet it once.
@@ -104,8 +106,9 @@ CSS subgrid), `.source-grid`, `.source-pair` (two cards side by side from 840 px
 `.prose`, `.doc-toc` (the policy's sticky section list from 1080 px), `.nowrap` (a file name kept
 on one line), `.link-note` (a note inside a `.link-list` link, after its text, such as "(the main
 edition)": not underlined and kept whole, so on phones it moves under the link's text),
-`.source-action` (a button in a card's text, such as "Add to F-Droid") and the footer's
-`.footer-nav`, `.footer-group` and `.footer-label`.
+`.source-action` (a button in a card's text, such as "Add to F-Droid"), the footer's
+`.footer-nav`, `.footer-group` and `.footer-label`, and `.tm` (the trademark sign after the name
+in the header).
 
 Everything people tap is at least 48 px tall at every width (a tablet held sideways is wide but
 touched), except the policy's section list, which is 40 px with a mouse and 48 px under

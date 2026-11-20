@@ -221,6 +221,14 @@ li + li { margin-block-start: 0.35em; }
 
 .brand img, .brand svg { width: 36px; height: 36px; }
 
+/* The ™ after the name in the header, the one place on a page where the name carries it. The sign
+   is drawn small and raised in the font already, so only its weight and spacing are set. */
+.tm {
+  font-weight: 400;
+  letter-spacing: 0;
+  margin-inline-start: 0.04em;
+}
+
 .nav-list {
   display: flex;
   gap: var(--space-1);

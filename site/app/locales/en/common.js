@@ -123,6 +123,8 @@ export default {
   about: 'About Usugami',
   about_title: 'About',
   about_version: 'Version {1}',
+  // The name at the top of About, the one place in the app where it carries the trademark sign.
+  about_edition_name_standard: 'Usugami™',
   about_privacy_policy: 'Privacy policy',
   about_licenses: 'Open-source licenses',
   about_licenses_detail: 'The libraries and fonts Usugami is built with',
