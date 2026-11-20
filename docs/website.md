@@ -251,9 +251,19 @@ does in the web app and how to use it, and its first button opens the tool there
 tool's name in its feature card links to its page (`<a class="feature-link">`; the whole top of
 the card takes the tap, with a chevron at its end).
 
+Three more pages are each about one kind of file Images to PDF takes, as people search for them:
+`jpg-to-pdf/`, `png-to-pdf/` and `heic-to-pdf/`. Such a page (`variantOf: 'images'` in
+`tools/tool-pages.mjs`, in place of `card`) has no feature card on Home: it takes its tool page's
+icon and group, opens the same tool, and follows that page in More PDF tools and the sitemap, which
+is how it is reached. It must say what the tool does with that kind of file (a JPG's turn and
+location, a PNG's transparency, the HEIC decoder), not the tool's page over again: search engines
+drop pages that only repeat another, and the tests fail if two pages share a title, a description
+or an `h1`. Add one only for a kind of file with something of its own to say.
+
 `node tools/build-tool-pages.mjs` (or `npm run tool-pages`) writes them, and `site/sitemap.xml`
 with them. Their words are in `tools/tool-pages.mjs`: per tool the address (`slug`), Home's feature
-card (`card`), the web app's tool it opens (`opens`) and, where "Open <tool>" would read badly, the
+card (`card`; or `variantOf`, the id of the tool page it goes with, for a page about one kind of
+file), the web app's tool it opens (`opens`) and, where "Open <tool>" would read badly, the
 button's own text (`button`, such as "Watermark a PDF"), its name, title, description, heading, lead,
 steps, what it can do and its questions; and the parts every tool page shares (`SHARED`). Everything
 else comes from the hand-written pages: the head (Content-Security-Policy and theme script
@@ -275,7 +285,9 @@ and numbers from the app's strings (`site/app/locales/en/`) and code, as Home's 
 and change the page when the tool changes. The script refuses words that would break the page or
 the site's style: straight quotes or apostrophes (write ’ “ ”), em dashes, a bare `&`, tags other
 than `<strong>`, `<em>` and `<code>`, a title over 65 characters or not ending in ": Usugami", and
-a description outside 110 to 160 characters.
+a description outside 110 to 160 characters. It also refuses two pages with one id, address or
+card, a page with both `card` and `variantOf` or neither, and a `variantOf` that doesn't name a
+tool page with a card.
 
 ## Search engines
 
@@ -378,10 +390,13 @@ the web app, the tool pages, Download and Privacy in that order; each of those h
 address on `https://usugami.com/`, Open Graph tags with the same title and description and the
 image's alt text, a title of at most 65 characters and a description of at most 160, and its
 structured data (`WebSite` on Home, a `BreadcrumbList` from Home elsewhere, none on the web app);
-the 404 page has none of it (its noscript note links to `https://usugami.com/`); each of Home's
+the 404 page has none of it (its noscript note links to `https://usugami.com/`); no two pages
+share a title, a description or an `h1`; each of Home's
 tool cards links to its tool page, and each tool page opens a tool the web app has as its first
 link, says files aren't uploaded, links to Download, the Privacy page's web part and every other
-tool page; Home's hero opens the web app first, and Home names every tool, the Usugami
+tool page; a page about one kind of file (`variantOf`) opens the tool its tool page opens and
+follows that page; the script puts a made-up variant after its tool, under its icon and group,
+and refuses each mistake in `tools/tool-pages.mjs` it should; Home's hero opens the web app first, and Home names every tool, the Usugami
 watermark ("Off unless you turn it on") and that files are never uploaded, and links to the web app,
 Download, Privacy and the website's source and notices, promises offline use only for the tools
 used once, and says the web app is "in English for now" exactly while `app/locales/languages.js`

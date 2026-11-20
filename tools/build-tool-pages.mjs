@@ -14,7 +14,9 @@
 //   in the hidden language switcher;
 // - from site/index.html: the groups and their order (Home's feature groups, but not Everywhere),
 //   each tool's icon (its feature card, id="f-<card>"), the two buttons with their notes and the
-//   promise pills (the hero).
+//   promise pills (the hero). A page for one kind of file (variantOf, such as JPG to PDF of Images
+//   to PDF) has no feature card of its own: it takes its tool page's icon and group, and follows
+//   that page in More PDF tools and the sitemap.
 // Run it again after changing tools/tool-pages.mjs, or those parts of Download or Home (the test
 // fails until you do). Don't edit the generated files by hand.
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
@@ -31,11 +33,12 @@ const LAST_PAGES = ['download/', 'privacy/'];
 
 /**
  * Every file the tool pages are made of, as they should be on disk.
- * @param {{ siteDir?: string }} [opts] siteDir: the site folder (default site/)
- * @returns {{ files: Map<string, string>, pages: { slug: string, url: string, id: string }[] }}
+ * @param {{ siteDir?: string, toolPages?: Record<string, object> }} [opts] siteDir: the site folder
+ *   (default site/); toolPages: the pages' words (default tools/tool-pages.mjs's, as the tests vary them)
+ * @returns {{ files: Map<string, string>, pages: { slug: string, url: string, id: string, variantOf: string|null }[] }}
  *   files: path relative to siteDir (with /) → contents; pages: the tool pages in order
  */
-export function buildToolPages({ siteDir = join(repoRoot, 'site') } = {}) {
+export function buildToolPages({ siteDir = join(repoRoot, 'site'), toolPages = TOOL_PAGES } = {}) {
   const read = (path) => readFileSync(join(siteDir, path), 'utf8');
   const home = read('index.html');
   const download = read('download/index.html');
@@ -43,29 +46,46 @@ export function buildToolPages({ siteDir = join(repoRoot, 'site') } = {}) {
   const groups = homeGroups(home);
 
   validateShared();
-  const byCard = new Map(Object.values(TOOL_PAGES).map((t) => [t.card, t]));
-  for (const t of Object.values(TOOL_PAGES)) {
+  const all = Object.values(toolPages);
+  for (const t of all) {
     validate(t);
-    if (!TOOL_PAGES[t.opens]) throw new Error(`tool-pages.mjs: ${t.id} opens "${t.opens}", which has no page`);
+    if (!toolPages[t.opens]) throw new Error(`tool-pages.mjs: ${t.id} opens "${t.opens}", which has no page`);
+    if (t.variantOf !== undefined) {
+      const of = toolPages[t.variantOf];
+      if (!of || of.variantOf !== undefined) throw new Error(`tool-pages.mjs: ${t.id} is a variant of "${t.variantOf}", which isn't a tool page with a feature card`);
+    }
+  }
+  // Each page under its own id, at an address of its own.
+  const slugs = new Map();
+  for (const [key, t] of Object.entries(toolPages)) {
+    if (t.id !== key) throw new Error(`tool-pages.mjs: the page listed as "${key}" has the id "${t.id}"`);
+    if (slugs.has(t.slug)) throw new Error(`tool-pages.mjs: ${slugs.get(t.slug)} and ${t.id} have the same slug "${t.slug}"`);
+    slugs.set(t.slug, t.id);
+  }
+  const withCard = all.filter((t) => t.variantOf === undefined);
+  const byCard = new Map();
+  for (const t of withCard) {
+    if (byCard.has(t.card)) throw new Error(`tool-pages.mjs: ${byCard.get(t.card).id} and ${t.id} have the same card f-${t.card}`);
+    byCard.set(t.card, t);
   }
   const ordered = [];
   for (const g of groups) {
-    g.tools = g.cards.map((card) => {
+    g.tools = g.cards.flatMap((card) => {
       const t = byCard.get(card);
       if (!t) throw new Error(`Home's feature card f-${card} (${g.name}) has no tool page in tools/tool-pages.mjs`);
-      ordered.push(t);
-      return t;
+      return [t, ...all.filter((v) => v.variantOf === t.id)];
     });
+    ordered.push(...g.tools);
   }
-  for (const t of Object.values(TOOL_PAGES)) {
+  for (const t of withCard) {
     if (!ordered.includes(t)) throw new Error(`tool-pages.mjs: ${t.id} (card f-${t.card}) isn't in one of Home's feature groups`);
   }
 
   const files = new Map();
   for (const g of groups) {
-    for (const t of g.tools) files.set(`${t.slug}/index.html`, toolPage(t, g, groups, shared, home));
+    for (const t of g.tools) files.set(`${t.slug}/index.html`, toolPage(t, g, groups, shared, home, toolPages));
   }
-  const pages = ordered.map((t) => ({ slug: t.slug, url: `${ORIGIN}${t.slug}/`, id: t.id }));
+  const pages = ordered.map((t) => ({ slug: t.slug, url: `${ORIGIN}${t.slug}/`, id: t.id, variantOf: t.variantOf ?? null }));
   files.set('sitemap.xml', sitemap([...OTHER_PAGES, ...ordered.map((t) => `${t.slug}/`), ...LAST_PAGES]));
   return { files, pages };
 }
@@ -137,14 +157,14 @@ function cardIcon(home, card) {
 const ICON_CHEVRON = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9.29 6.71a.996.996 0 0 0 0 1.41L13.17 12l-3.88 3.88a.996.996 0 1 0 1.41 1.41l4.59-4.59a.996.996 0 0 0 0-1.41L10.7 6.7c-.38-.38-1.02-.38-1.41.01z"/></svg>';
 
 /** The text of a tool page's button, which opens its tool in the web app. */
-export function buttonLabel(t) {
-  return t.button ?? `Open ${TOOL_PAGES[t.opens].name}`;
+export function buttonLabel(t, toolPages = TOOL_PAGES) {
+  return t.button ?? `Open ${toolPages[t.opens].name}`;
 }
 
-function toolPage(t, group, groups, shared, home) {
+function toolPage(t, group, groups, shared, home, toolPages) {
   const url = `${ORIGIN}${t.slug}/`;
-  const opens = TOOL_PAGES[t.opens];
-  const open = buttonLabel(t);
+  const opens = toolPages[t.opens];
+  const open = buttonLabel(t, toolPages);
   const route = `../app/#/tool/${opens.id}`;
   const from = `site/index.html hero, for ${t.slug}`;
   let cta = replaceCount(shared.ctaList, 'href="app/"', `href="${route}"`, 1, from);
@@ -186,7 +206,7 @@ ${shared.header}
     <section class="page-hero tool-hero" aria-labelledby="page-title">
       <div class="wrap narrow">
         <div class="tool-title">
-          <div class="icon-badge">${cardIcon(home, t.card)}</div>
+          <div class="icon-badge">${cardIcon(home, t.card ?? toolPages[t.variantOf].card)}</div>
           <p class="eyebrow">${esc(group.name)}</p>
         </div>
         <h1 id="page-title">${esc(t.h1)}</h1>
@@ -288,7 +308,10 @@ const HTML_FIELDS = ['lead'];
 /** Catches what would break the page or the site's style before it is written. */
 function validate(t) {
   const where = `tool-pages.mjs ${t.id}`;
-  for (const key of ['id', 'slug', 'card', 'opens', ...TEXT_FIELDS, ...HTML_FIELDS]) {
+  // A page has a feature card on Home of its own, or is a variant of a page that has one.
+  const linkKey = t.variantOf === undefined ? 'card' : 'variantOf';
+  if (t.card !== undefined && t.variantOf !== undefined) throw new Error(`${where}: give card or variantOf, not both`);
+  for (const key of ['id', 'slug', linkKey, 'opens', ...TEXT_FIELDS, ...HTML_FIELDS]) {
     if (typeof t[key] !== 'string' || !t[key].trim()) throw new Error(`${where}: ${key} is missing`);
   }
   if (t.button !== undefined) checkText(`${where} button`, t.button, false);
