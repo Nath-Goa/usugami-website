@@ -28,7 +28,8 @@ The content comes from the Android app's repository: `README.md` (features, edit
 verify, Obtainium), `PRIVACY.md` and `fastlane/metadata/android/en-US/`. When those change (a new
 size, a new edition, a new install note, a policy update), change the pages to match. Things that
 date: the editions' sizes, the "developer verification" answer ("As of October 2026"), and the
-policies' effective date (9 November 2026).
+policies' effective dates (the Android app's policy and the top of the page: 21 November 2026;
+"Usugami on the web": 9 November 2026).
 
 The Privacy page's web part ("Usugami on the web") comes from the web app itself instead: what it
 keeps in `localStorage` (`app/js/core/settings.js`: language, appearance, the tools' last choices,

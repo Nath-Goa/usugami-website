@@ -98,7 +98,7 @@
   <main id="main">
     <section class="page-hero" aria-labelledby="page-title">
       <div class="wrap">
-        <p class="eyebrow">Effective 9 November 2026</p>
+        <p class="eyebrow">Effective 21 November 2026</p>
         <h1 id="page-title">Privacy</h1>
         <p class="lead">Usugami does not collect, share or sell any data about you. Below is the privacy policy of the Android app, followed by how this website and the web app handle your data.</p>
         <nav aria-label="On this page">
@@ -134,10 +134,11 @@
         <article class="prose" aria-labelledby="android-app">
           <p class="eyebrow">The Android app’s policy</p>
           <h2 id="android-app" class="anchor-heading">Usugami Privacy Policy</h2>
-          <p class="meta">Effective date: 9 November 2026. This is the privacy policy of the Android app, as published in <a href="https://github.com/Nath-Goa/usugami/blob/main/PRIVACY.md">PRIVACY.md</a> in Usugami’s repository. It is also inside the app.</p>
+          <p class="meta">Effective date: 21 November 2026. This is the privacy policy of the Android app, as published in <a href="https://github.com/Nath-Goa/usugami/blob/main/PRIVACY.md">PRIVACY.md</a> in Usugami’s repository. It is also inside the app.</p>
 
           <p>Usugami is an Android app that turns images, Word documents, PowerPoint presentations, Excel workbooks and EPUB e-books into PDFs, and splits, merges, reorganizes, compresses, edits, signs and redacts PDFs. It works on your phone. It has no ads, no analytics, no tracking, no accounts and no in-app purchases, and it does not collect, share or sell any data about you.</p>
           <p>This policy covers all three editions of Usugami: “Usugami” (the main edition), “Usugami Lite” and “Usugami OCR”. The only difference that matters for privacy is text recognition (OCR), explained below.</p>
+          <p>Which edition you have depends on where you got it. Usugami.apk from GitHub is the main edition. Usugami from F-Droid and the version for Google Play are Usugami OCR, under the name “Usugami”: their text recognition is open source and built into the app, and they contain no Google ML Kit or other Google code. About in the app shows which edition you have.</p>
 
           <h3 id="who-is-responsible" class="anchor-heading">Who is responsible</h3>
           <p>Usugami is made by Nathan Kumtakar, an independent developer. It is free and open-source software: <a href="https://github.com/Nath-Goa/usugami">https://github.com/Nath-Goa/usugami</a></p>
@@ -168,6 +169,7 @@
 
           <h4 id="ocr-usugami" class="anchor-heading">Usugami (the main edition)</h4>
           <ul>
+            <li>This is Usugami.apk from GitHub. Usugami from F-Droid and the version for Google Play are not this edition: they are Usugami OCR (below), which doesn’t use Google ML Kit.</li>
             <li>Text recognition uses Google ML Kit, a library made by Google, and runs through Google Play services, a separate app from Google that is installed on most Android phones.</li>
             <li>The first time you use a text language, Google Play services downloads Google’s text-recognition model for it (one model covers English, French and Spanish; Hindi has its own). This needs an internet connection at that time. Google Play services then keeps the model for later use; if it removes a model, it downloads it again the next time you use that language. Google Play services does these downloads, not Usugami, and Google’s Privacy Policy applies to them: <a href="https://policies.google.com/privacy">https://policies.google.com/privacy</a></li>
             <li>To download and run text recognition, Google’s libraries inside Usugami talk to Google Play services on your phone. Google Play services may report to Google how these Google APIs were used (for example, whether a call succeeded).</li>
@@ -179,6 +181,7 @@
 
           <h4 id="ocr-usugami-ocr" class="anchor-heading">Usugami OCR</h4>
           <ul>
+            <li>This is Usugami-ocr.apk from GitHub, Usugami from F-Droid and the version for Google Play.</li>
             <li>Text recognition is open source and built into the app, models included: PaddleOCR’s PP-OCRv5 models, run on your phone’s processor by Tencent’s ncnn. It works with no internet connection and doesn’t need Google Play services.</li>
             <li>The page images are read in the app’s memory and only the recognized text is kept, as the PDF’s invisible text layer. Nothing is sent anywhere or stored anywhere else.</li>
             <li>Usugami OCR contains no Google libraries and makes no network connections at all.</li>
