@@ -101,14 +101,17 @@ export function assert(condition, message) {
 
 /**
  * Presses Enter on `selector` (focused first), or else on what has the focus, and returns the file
- * chooser that opens. On GitHub's Linux runners Chromium now and then opens none for an Enter, so
- * after 10 s it says where the focus was and presses Enter once more on the same element.
+ * chooser that opens. Should none open within 10 s, it says where the focus was and presses Enter
+ * once more on the same element.
  */
 export async function chooserFromKeyboard(page, selector = null) {
   if (selector) await page.focus(selector);
   const target = await page.evaluateHandle(() => document.activeElement);
   for (let attempt = 1; ; attempt++) {
     const chooser = page.waitForEvent('filechooser', { timeout: attempt === 1 ? 10000 : 30000 });
+    // Playwright asks the browser to hand file choosers over without waiting for the answer: one
+    // round trip to the page first, or Chromium can get the key before that and cancel the chooser.
+    await page.evaluate(() => 0);
     await page.keyboard.press('Enter');
     try {
       return await chooser;

@@ -33,7 +33,7 @@ function cardName(id) {
 
 function cardMore(id) {
   const tool = TOOLS[id];
-  return `${tWeb(tool.detail)} ${t(tool.keywords)}${tool.batch ? ' ' + t('search_keywords_batch') : ''}`;
+  return `${tWeb(tool.detail)} ${tWeb(tool.keywords)}${tool.batch ? ' ' + t('search_keywords_batch') : ''}`;
 }
 
 /** Renders Home. */

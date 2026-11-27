@@ -52,8 +52,8 @@ then run `node tools/build-tool-pages.mjs`, which copies the head, header and fo
 into the tool pages (the tests fail until you do):
 
 1. `<head>`: charset, viewport, a `Content-Security-Policy` meta (see below), a `referrer` meta
-   (`no-referrer`, so links to GitHub, Obtainium or F-Droid don't tell those sites the visitor
-   came from Usugami), title and description, `color-scheme`, two `theme-color` metas (light and
+   (`no-referrer`, so links to GitHub, Obtainium, F-Droid or Buy Me a Coffee don't tell those
+   sites the visitor came from Usugami), title and description, `color-scheme`, two `theme-color` metas (light and
    dark), the theme script, favicons (`icon.svg`, `icon-32.png`, `apple-touch-icon.png`),
    `tokens.css`, `site.css`, the canonical and Open Graph tags (the page's absolute address on
    `https://usugami.com/`, its title and description again, and `og:image`
@@ -77,10 +77,35 @@ into the tool pages (the tests fail until you do):
    is deployed, and some of the bundled libraries' and fonts' licenses ask for their notices to be
    reachable, so every page must keep the two links to the website's repository (the tests check
    it, and the Download page's Source code section has them too).
+5. Last in the footer, the "Buy me a coffee" button (`<a class="coffee-float">`, see below).
 
 Links are always relative (`download/`, `../privacy/#on-the-web`), never starting with `/`, so the
 site works at the root of usugami.com and in the `usugami-website/` sub-folder on github.io. Links
-to other sites (GitHub, Obtainium, F-Droid) are ordinary `https://` links.
+to other sites (GitHub, Obtainium, F-Droid, Buy Me a Coffee) are ordinary `https://` links.
+
+### The "Buy me a coffee" button
+
+Every page ends its footer with a link to `https://buymeacoffee.com/usugami` that `site.css` keeps
+at the bottom corner of the window (`.coffee-float`: `position: fixed`, 16 px from the bottom and
+from the end side, so the left side in a right-to-left language). It is Buy Me a Coffee's button
+drawn by the site itself: its yellow with black words (`--coffee` and `--on-coffee` in
+`tokens.css`, the same in both themes) and the Material `coffee` icon. **Never paste Buy Me a
+Coffee's own button or widget code**: it is a `<script>` from their site, which the pages'
+Content-Security-Policy blocks and `tools/check-site.mjs` refuses, and it would break the
+no-outside-requests promise on the Privacy page. Like the pages' other links to other sites it
+opens in the same tab, with no `Referer`.
+
+Under 600 px wide, and in windows under 480 px high (a phone held sideways, a laptop zoomed to
+200%), it is a round 56 px button with the cup alone, because its words would cover the page
+there; the words stay in the markup (a `<span>`, hidden as `.visually-hidden` is) and are its name
+for screen readers. In larger windows it shows them. The footer has 56 px more padding
+under its last line, so nothing ends up under the button at the end of a page; `html` has a
+`scroll-padding` that keeps a link reached with Tab clear of it; it isn't printed. It sits in the
+`<footer>` so it is inside a landmark and last in the Tab order; the footer must not get a
+`transform`, `filter` or `contain` (the button would then be placed inside the footer instead of
+the window, as it would be in the header, which has a `backdrop-filter`). In a translated copy,
+translate its words. The web app draws the same button on its own screens (`docs/api/shell.md`,
+core/coffee.js) and explains both ways to donate in Settings → Donate.
 
 Icons are inline SVG paths from Material Symbols Rounded (`@material-design-icons/svg/round`,
 Apache-2.0), the same set as the web app: `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"
@@ -103,18 +128,20 @@ from 840 px), `.feature-grid` and `.feature` (`.compact` for the Everywhere grou
 `.editions` (`.compare` on Download: on wide screens the rows of the three cards line up with
 CSS subgrid), `.source-grid`, `.source-pair` (two cards side by side from 840 px), `.link-list`,
 `.steps` (numbered install steps), `.disclosure` (`<details>` blocks), `.note`, `.kv`, `.toc`,
-`.prose`, `.doc-toc` (the policy's sticky section list from 1080 px), `.nowrap` (a file name kept
+`.prose`, `.doc-toc` (the policy's sticky section list from 1080 px, in windows at least 620 px
+high, 692 px with a touch screen, so its last entries never lie under the Buy me a coffee button),
+`.nowrap` (a file name kept
 on one line), `.link-note` (a note inside a `.link-list` link, after its text, such as "(the main
 edition)": not underlined and kept whole, so on phones it moves under the link's text),
 `.source-action` (a button in a card's text, such as "Add to F-Droid"), the footer's
-`.footer-nav`, `.footer-group` and `.footer-label`, and `.tm` (the trademark sign after the name
-in the header).
+`.footer-nav`, `.footer-group` and `.footer-label`, `.tm` (the trademark sign after the name
+in the header) and `.coffee-float` (the "Buy me a coffee" button, above).
 
 Everything people tap is at least 48 px tall at every width (a tablet held sideways is wide but
 touched), except the policy's section list, which is 40 px with a mouse and 48 px under
 `(pointer: coarse)`.
 
-Home's feature groups (Create PDF 7 cards, Organize 5, Edit and sign 4, Optimize and protect 3,
+Home's feature groups (Create PDF 7 cards, Organize 3, Edit and sign 4, Optimize and protect 3,
 Everywhere 9) never leave a row part filled, whatever their number of cards: one card to a row on
 phones; two from 720 px, where a last card on its own takes the whole row (with its list beside
 its name); three from 1080 px, on a six-column grid, where the cards after the last full row of
@@ -174,11 +201,11 @@ styles and links.
 
 | File | Source |
 |---|---|
-| `img/icon.svg` | `pdfer/docs/icon.svg`, the launcher icon (lavender circle, purple pages) |
+| `img/icon.svg` | `pdfer/docs/icon.svg`, the launcher icon (a lilac circle; on it a deep-purple disc partly covered by a tilted sheet of thin paper that it shows through). The same file is `app/icons/icon.svg`, and `404.html` has it written inline, twice: change all of them together |
 | `img/icon-32.png`, `icon-192.png`, `icon-512.png` | Rendered from `icon.svg` with Playwright, transparent corners |
-| `img/apple-touch-icon.png` (180 px), `icon-maskable-512.png` | The pages on a full lavender square (`#E8DEF8`), for iOS and for a maskable web app icon (the pages sit inside the safe zone) |
+| `img/apple-touch-icon.png` (180 px), `icon-maskable-512.png` | The artwork on a full lilac square (`#E8DEF8`), for iOS and for a maskable web app icon (the artwork sits inside the safe zone) |
 | `img/screenshots/*.png` | `pdfer/docs/screenshots/` (540 x 1200), alt text from the README |
-| `img/screenshots/*.webp` | The same screenshots encoded by Chromium as WebP at quality 0.85 (`canvas.toDataURL('image/webp', 0.85)`): 145 KiB for the four instead of 227 KiB, with text as sharp. Pages show them through `<picture>` with the PNG as the fallback. |
+| `img/screenshots/*.webp` | The same screenshots encoded by Chromium as WebP at quality 0.85 (`canvas.toDataURL('image/webp', 0.85)`): 142 KiB for the four instead of 605 KiB, with text as sharp. Pages show them through `<picture>` with the PNG as the fallback. |
 | `img/badges/*.png` | `pdfer/docs/badges/`: "Get it on GitHub" (Kunzisoft/Github-badge, CC BY-SA 3.0, based on the F-Droid badge by flocke) and the Obtainium badge (GPL-3.0). Their credits are on the Download page and must stay there. |
 | `img/social-preview.png` | `pdfer/docs/social-preview.png` (1280 x 640), the pages' `og:image` |
 
@@ -199,7 +226,12 @@ await browser.close();
 ```
 
 For the full-square versions, draw `<rect width="108" height="108" fill="#E8DEF8"/>` behind the
-pages' `<g>` with `viewBox="18 18 72 72"` (Apple) or `viewBox="0 0 108 108"` (maskable).
+artwork's `<g>` with `viewBox="18 18 72 72"` (Apple) or `viewBox="0 0 108 108"` (maskable).
+Rendered this way, each file comes out byte for byte the same on the same Chromium, and
+`icon-32.png`, `icon-192.png`, `icon-512.png` and `icon-maskable-512.png` are the very files
+`node tools/build-icons.mjs --png` writes to `app/icons/` (there `favicon-32.png`); run that for
+the web app's icons after replacing `app/icons/icon.svg`. The icon is expected to keep its shape:
+one `<circle ... fill="#rrggbb">` for the ground and one `<g>` holding the artwork.
 
 Every `<img>` has `width` and `height` (no layout shift) and `alt` (empty when the image only
 decorates). Images below the fold have `loading="lazy"`; the hero's fanned screenshots are lazy
@@ -243,9 +275,9 @@ them into a folder per language:
 
 Each tool has a page of its own at the site's root, named for what people search for:
 `scan-to-pdf/`, `images-to-pdf/`, `ocr-pdf/`, `word-to-pdf/`, `powerpoint-to-pdf/`,
-`excel-to-pdf/`, `epub-to-pdf/`, `merge-pdf/`, `split-pdf/`, `reorganize-pdf/`,
-`delete-pdf-pages/`, `rotate-pdf/`, `edit-pdf/`, `sign-pdf/`, `add-page-numbers-to-pdf/`,
-`watermark-pdf/`, `compress-pdf/`, `redact-pdf/` and `flatten-pdf/`. A page says what the tool
+`excel-to-pdf/`, `epub-to-pdf/`, `merge-pdf/`, `split-pdf/`, `reorganize-pdf/`, `edit-pdf/`,
+`sign-pdf/`, `add-page-numbers-to-pdf/`, `watermark-pdf/`, `compress-pdf/`, `redact-pdf/` and
+`flatten-pdf/`. A page says what the tool
 does in the web app and how to use it, and its first button opens the tool there
 (`../app/#/tool/<id>`; the text recognition page opens Images to PDF, where it is). On Home, each
 tool's name in its feature card links to its page (`<a class="feature-link">`; the whole top of
@@ -260,10 +292,18 @@ location, a PNG's transparency, the HEIC decoder), not the tool's page over agai
 drop pages that only repeat another, and the tests fail if two pages share a title, a description
 or an `h1`. Add one only for a kind of file with something of its own to say.
 
+Two more are each about one job of Reorganize PDF: `rotate-pdf/` and `delete-pdf-pages/`
+(`variantOf: 'reorganize'`). Rotate PDF and Delete pages were tools of their own until Reorganize
+PDF took over their work, as in the Android app; their pages had been in the sitemap since
+12 November 2026, so the addresses stay, open Reorganize PDF, and say how that job is done there
+(select the pages, then turn or remove them). In the web app, the old tools' addresses
+(`#/tool/rotate`, `#/tool/delete-pages`) lead to Reorganize PDF too (`MOVED_TOOLS` in
+`app/js/core/tools.js`).
+
 `node tools/build-tool-pages.mjs` (or `npm run tool-pages`) writes them, and `site/sitemap.xml`
 with them. Their words are in `tools/tool-pages.mjs`: per tool the address (`slug`), Home's feature
 card (`card`; or `variantOf`, the id of the tool page it goes with, for a page about one kind of
-file), the web app's tool it opens (`opens`) and, where "Open <tool>" would read badly, the
+file or one job of a tool), the web app's tool it opens (`opens`) and, where "Open <tool>" would read badly, the
 button's own text (`button`, such as "Watermark a PDF"), its name, title, description, heading, lead,
 steps, what it can do and its questions; and the parts every tool page shares (`SHARED`). Everything
 else comes from the hand-written pages: the head (Content-Security-Policy and theme script
@@ -385,7 +425,8 @@ must have its Content-Security-Policy), then on a small site full of deliberate 
 be reported, and nothing else). It then reads the pages and checks what they must say: the tool
 pages and the sitemap are as `tools/build-tool-pages.mjs` would write them; every footer links to
 the website's source code, its third-party notices and the app's source code, and every page has
-the `no-referrer` meta; `robots.txt` allows every page and names the sitemap, which lists Home,
+the `no-referrer` meta and exactly one link to `https://buymeacoffee.com/usugami` (the "Buy me a coffee"
+button); `robots.txt` allows every page and names the sitemap, which lists Home,
 the web app, the tool pages, Download and Privacy in that order; each of those has one canonical
 address on `https://usugami.com/`, Open Graph tags with the same title and description and the
 image's alt text, a title of at most 65 characters and a description of at most 160, and its
@@ -419,7 +460,11 @@ WebKit, and checks: no page errors, console errors or outside requests; no sidew
 loads and has `width`, `height` and `alt`; `lang`, title, description, viewport, theme-color and
 icon; every internal link, stylesheet and image answers 200, and every `#anchor` exists; one `h1`
 and no skipped heading levels; no cookies or storage writes; touch targets of at least 48 px on
-phones (Home's linked card tops too) and at 1280 px; the phone menu, the skip link and the swipeable screenshots; the wide navigation and the
+phones (Home's linked card tops too) and at 1280 px; the "Buy me a coffee" button on every page (a plain link in the footer,
+black on its yellow, fixed 16 px from the bottom corner at the top and at the end of the page,
+round without its words under 600 px wide or 480 px high and with them in larger windows, nothing over it, and the footer's
+last line clear of it; in the dark theme too; and in short windows, round, with no entry of the Privacy page's section list
+under it); the phone menu, the skip link and the swipeable screenshots; the wide navigation and the
 lined-up edition rows; Home's feature rows each filling the width (also at 720, 900, 1079, 1080
 and 1440 px) and its screenshots shown as WebP, with under 166 KiB of images loaded on a phone;
 Download's code blocks (those that scroll sideways can be focused, in WebKit too) and the

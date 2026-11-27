@@ -1,8 +1,8 @@
-// The screen Split PDF, Delete pages and Rotate PDF share: the app's PdfToolScreen for a tool that
-// works on one PDF. Its top bar, the "Choose PDF" card, the chosen PDF's card, the tool's own
-// options, the file name, the main button at the bottom, the progress while the PDF is made, and
-// the result screen. Each tool gives its options and its work through `spec.build` (see
-// docs/api/organize-ui-a.md).
+// The screen around Split PDF's options: the app's PdfToolScreen for a tool that works on one PDF.
+// Its top bar, the "Choose PDF" card, the chosen PDF's card, the tool's own options, the file
+// name, the main button at the bottom, the progress while the PDF is made, and the result screen.
+// The tool gives its options and its work through `spec.build` (see docs/api/organize-ui-a.md):
+// the screen was written for several tools on one PDF, and Split PDF is the one that still uses it.
 import { h, ensureCss, prefersReducedMotion } from '../../core/dom.js';
 import { t, tp, loadStrings, formatSize } from '../../core/i18n.js';
 import {
@@ -104,7 +104,7 @@ export function problemText(error, fallback) {
  * Mounts the screen of a tool that works on one PDF.
  * @param {object} ctx  the router's mount context
  * @param {{
- *   id: 'split' | 'delete-pages' | 'rotate',
+ *   id: 'split',
  *   namespace: string,
  *   action: string,
  *   css?: URL,
@@ -157,6 +157,8 @@ export async function mountPdfTool(ctx, spec) {
     if (card) for (const b of card.querySelectorAll('.onepdf-another')) setOff(b, importing || processing);
   };
 
+  // Split PDF's options are never work to lose (its `unsaved` is always false), so nothing below
+  // asks "Discard your changes?" today: the questions are for a tool whose options are.
   const hasChanges = () => !!(src && tool?.unsaved?.());
 
   const confirmDiscard = () => alertDialog({

@@ -56,11 +56,7 @@ export default {
   tool_split: 'Split PDF',
   tool_split_detail: 'Extract pages or split into smaller files',
   tool_reorganize: 'Reorganize PDF',
-  tool_reorganize_detail: 'Move, turn, remove and add pages',
-  tool_delete_pages: 'Delete pages',
-  tool_delete_pages_detail: "Remove the pages you don't need",
-  tool_rotate: 'Rotate PDF',
-  tool_rotate_detail: 'Turn pages the right way up',
+  tool_reorganize_detail: 'Move, turn, delete and add pages',
   tool_edit: 'Edit PDF',
   tool_edit_detail: 'Add text, drawings, shapes and pictures',
   tool_sign: 'Sign PDF',
@@ -78,21 +74,19 @@ export default {
 
   // Hidden words that also find a tool in Home's search, separated by commas.
   search_keywords_images: 'photo, picture, JPEG, JPG, PNG, HEIC, WebP, scan, scanner, camera, gallery, document, black and white, OCR',
-  search_keywords_scan: 'scan, scanner, CamScanner, camera, photo, document, paper, receipt, crop, enhance, filter, brightness, contrast, black and white',
+  search_keywords_scan: "scan, scanner, CamScanner, camera, photo, document, paper, receipt, crop, enhance, filter, brightness, contrast, black and white, ID card, identity card, passport, driving licence, driver's license",
   search_keywords_word: 'doc, docx, document, Office, convert',
   search_keywords_powerpoint: 'ppt, pptx, slides, presentation, Office, convert',
   search_keywords_excel: 'xls, xlsx, spreadsheet, sheet, table, workbook, cells, Office, Google Sheets, convert',
   search_keywords_epub: 'epub, ebook, e-book, book, novel',
   search_keywords_merge: 'join, combine, append, put together',
   search_keywords_split: 'separate, cut, divide, extract, break up',
-  search_keywords_reorganize: 'reorder, rearrange, order, sort, move, insert, blank page',
-  search_keywords_delete_pages: 'remove, erase, discard, get rid of',
-  search_keywords_rotate: 'turn, flip, sideways, upside down, landscape, portrait, orientation',
+  search_keywords_reorganize: 'reorder, rearrange, order, sort, move, insert, blank page, rotate, turn, flip, sideways, upside down, landscape, portrait, orientation, delete, remove, erase, discard, get rid of',
   search_keywords_edit: 'annotate, write, type, pen, draw, highlight, markup, arrow, photo',
   search_keywords_sign: 'signature, initials, autograph, e-sign',
   search_keywords_page_numbers: 'numbering, paginate, pagination, footer, header',
   search_keywords_watermark: 'stamp, confidential, draft, copyright, overlay',
-  search_keywords_compress: 'shrink, reduce size, smaller, optimize, file size, email',
+  search_keywords_compress: 'shrink, reduce size, smaller, optimize, file size, email, black and white, grayscale, gray, grey, monochrome',
   search_keywords_redact: 'redact, black out, hide, censor, conceal, private, sensitive',
   search_keywords_flatten: 'form, fields, annotations, comments, lock, fillable',
   search_keywords_batch: 'batch, many, several, multiple, bulk, at once, all at once',
@@ -117,7 +111,26 @@ export default {
   appearance_light: 'Light',
   appearance_dark: 'Dark',
   settings_github: 'Source code on GitHub',
+  settings_donate: 'Donate',
+  settings_donate_detail: 'Buy Me a Coffee',
   settings_about_detail: 'Version, privacy policy and licenses',
+
+  // Donate: through Buy Me a Coffee, or (on a page of its own) GitHub Sponsors
+  donate_intro: 'Usugami is free and has no ads. If you find it useful, you can support it through Buy Me a Coffee:',
+  donate_coffee_step_open: "Go to Usugami's page on Buy Me a Coffee:",
+  donate_coffee_detail: 'buymeacoffee.com/usugami',
+  donate_coffee_step_amount: 'Choose how many coffees to buy.',
+  donate_coffee_step_message: 'Add your name and a message, if you like.',
+  donate_coffee_step_pay: 'Tap Support, then pay.',
+  donate_thanks: 'Thank you!',
+  donate_github_instead: 'Donate with GitHub Sponsors instead',
+  donate_github_title: 'GitHub Sponsors',
+  donate_github_intro: 'Usugami is free and has no ads. If you find it useful, you can support it through GitHub Sponsors:',
+  donate_github_step_open: "Go to Usugami's page on GitHub:",
+  donate_open_github: 'Open GitHub',
+  donate_github_step_sponsor: 'Tap Sponsor, then Sponsor next to Nath-Goa.',
+  donate_github_step_amount: 'Choose Monthly or One-time, and your amount.',
+  donate_github_step_pay: 'Sign in to GitHub if it asks, then pay.',
 
   // About
   about: 'About Usugami',
@@ -241,6 +254,9 @@ export default {
   // Home, and the tools' lines where the app says "phone"
   web_home_subtitle: 'Your files stay on this device. No ads, account, or uploads.',
   web_tool_word_detail: 'Documents (.docx), converted on this device',
+  // Compress PDF's search words without the Android app's "black and white" ones: the web app's
+  // Compress PDF has no Black and white switch yet (drop this line when it gets one).
+  web_search_keywords_compress: 'shrink, reduce size, smaller, optimize, file size, email',
 
   // A tool whose screen couldn't be opened. {1} is the tool's name.
   web_tool_unavailable: "{1} isn't available in the web app yet.",
@@ -268,6 +284,9 @@ export default {
   web_about_get_android_detail: 'Free, for Android 8.0 or newer',
   web_about_notices: 'Third-party notices',
   web_about_notices_detail: 'The copyright and license of each part made by others',
+
+  // Donate: the words on Buy Me a Coffee's own button, which opens Usugami's page there
+  web_donate_coffee: 'Buy me a coffee',
 
   // Open-source licenses
   web_licenses_intro: 'Usugami is built with these libraries, fonts and data, made by other people. Each comes with its own license.',

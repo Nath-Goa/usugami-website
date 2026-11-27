@@ -11,7 +11,6 @@ const PROBLEM_KEYS = {
   OUT_OF_RANGE: 'pdf_pages_range',
   REVERSED: 'pdf_pages_reversed',
   CHUNK_SIZE: 'pdf_pages_chunk',
-  ALL_PAGES: 'pdf_need_page',
 };
 
 /** The problems whose message names the page count ("Pages must be between 1 and 6."). */
@@ -19,7 +18,7 @@ const NAMES_COUNT = new Set(['OUT_OF_RANGE', 'CHUNK_SIZE']);
 
 /**
  * Page input the screens can't use. `problem` says why ('FORMAT', 'RANGES_FORMAT', 'OUT_OF_RANGE',
- * 'REVERSED', 'CHUNK_SIZE' or 'ALL_PAGES'); as a UserError, its key and args are the message to show.
+ * 'REVERSED' or 'CHUNK_SIZE'); as a UserError, its key and args are the message to show.
  */
 export class PageSelectionError extends UserError {
   constructor(problem, pageCount) {
@@ -100,19 +99,6 @@ export function parseRanges(text, pageCount) {
 }
 
 /**
- * The pages to delete, typed like "2,5-7": zero-based, in order, each once. Throws
- * PageSelectionError with 'ALL_PAGES' when it names every page: a PDF keeps at least one.
- * @param {string} text
- * @param {number} pageCount
- * @returns {number[]}
- */
-export function pagesToDelete(text, pageCount) {
-  const pages = parsePageSelection(text, pageCount).sort((a, b) => a - b);
-  if (pages.length === pageCount) throw new PageSelectionError('ALL_PAGES', pageCount);
-  return pages;
-}
-
-/**
  * The pages in chunks of `pagesPerFile` (Split's "Fixed chunks"), the last one shorter if need be:
  * 5 pages by 2 are [[0, 1], [2, 3], [4]]. `pagesPerFile` may be the text typed ("5"); anything but a
  * whole number from 1 to `pageCount` throws PageSelectionError with 'CHUNK_SIZE'.
@@ -156,7 +142,8 @@ function writeRuns(pages) {
 
 /**
  * Zero-based `pages` written the way people type them, sorted, each once, runs as ranges: pages
- * 1, 4, 5 and 6 become "2,5-7". Blank for no pages. Delete pages' field shows the pages tapped so.
+ * 1, 4, 5 and 6 become "2,5-7". Blank for no pages. Reorganize's "Selected pages" field shows the
+ * pages tapped so.
  * @param {Iterable<number>} pages
  * @returns {string}
  */
@@ -175,9 +162,9 @@ export function formatPagesInOrder(pages) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// The names Split, Merge, Reorganize, Delete pages and Rotate give their PDFs (the view model's
-// defaultName). Here rather than in organize.js so a screen can show the name before that engine,
-// with pdf-lib, has loaded; organize.js exports them too.
+// The names Split, Merge and Reorganize give their PDFs (the view model's defaultName). Here rather
+// than in organize.js so a screen can show the name before that engine, with pdf-lib, has loaded;
+// organize.js exports them too.
 
 /**
  * What Split adds to the name of part `index` (zero-based), which holds `pages`: its number and
@@ -189,22 +176,19 @@ export function partSuffix(index, pages) {
 
 /**
  * The name the tool's PDF gets unless another is typed (no extension), after `input`, the (first)
- * PDF: { name, pageCount? }. tool: 'split', 'merge', 'reorganize', 'delete-pages' or 'rotate'.
- * Report.pdf gives "Report_split", "Merged_PDF", "Report_reorganized", "Report_pages_deleted" and
- * "Report_rotated". Split leaves room for the part endings a PDF of this many pages can get.
+ * PDF: { name, pageCount? }. tool: 'split', 'merge' or 'reorganize'. Report.pdf gives
+ * "Report_split", "Merged_PDF" and "Report_reorganized". Split leaves room for the part endings a
+ * PDF of this many pages can get.
  */
 export function defaultName(tool, input) {
   const base = input?.name ? baseName(input.name) : 'Usugami';
-  const named = (suffix) => withSuffix(base, suffix, 'Usugami');
   switch (tool) {
     case 'split': {
       const last = Math.max(1, input?.pageCount ?? 1) - 1;
       return withSuffix(base, '_split', 'Usugami', partSuffix(last, [last]).length);
     }
     case 'merge': return 'Merged_PDF';
-    case 'rotate': return named('_rotated');
-    case 'delete-pages': return named('_pages_deleted');
-    case 'reorganize': return named('_reorganized');
+    case 'reorganize': return withSuffix(base, '_reorganized', 'Usugami');
     default: throw new Error(`Unknown tool ${tool}`);
   }
 }

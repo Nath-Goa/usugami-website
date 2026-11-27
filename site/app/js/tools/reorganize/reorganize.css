@@ -1,5 +1,6 @@
-/* Reorganize PDF: the page count and Undo, the bar for the chosen page, the grid and Add pages
-   (PageGrids.kt). The tool's frame and the result screen are merge.css's. */
+/* Reorganize PDF: the page count with Select all and Undo, the Selected pages field, the bar for
+   the selected pages, the grid, its hint and Add pages (PageGrids.kt). The tool's frame and the
+   result screen are merge.css's. */
 
 /* The column the main button ends at on wide screens (the kit reads it): the whole .page's content. */
 .reorganize-view {
@@ -32,20 +33,59 @@
   letter-spacing: 0.009em;
 }
 
-.reorganize-hint {
-  margin: 0;
-  color: var(--on-surface-variant);
-  font-size: 0.75rem;
-  line-height: 1rem;
-  letter-spacing: 0.025em;
+.reorganize-head .ui-btn {
+  flex: none;
 }
 
-/* The chosen page's bar: a rounded surface, tinted once a page is chosen. */
+/* ---- The Selected pages field ---- */
+
+.reorganize-select {
+  position: relative;
+  margin-top: var(--space-1);
+}
+
+/* Its support line and the room kept for it share one place, so the line is as tall as the tallest
+   text it can show (the hint, or what is wrong): the grid under it stays where it is when they
+   swap. */
+.reorganize-pages-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.reorganize-pages-field > .ui-field-support {
+  grid-area: 2 / 1;
+}
+
+.reorganize-room {
+  display: grid;
+  visibility: hidden;
+}
+
+.reorganize-room > span {
+  grid-area: 1 / 1;
+}
+
+/* The cross at the field's end: inside its outline, 48 px to tap. */
+.reorganize-clear {
+  position: absolute;
+  top: var(--space-1);
+  inset-inline-end: var(--space-1);
+}
+
+/* The text stops before the cross. */
+.reorganize-select.has-clear .ui-field-input {
+  padding-inline-end: 36px;
+}
+
+/* ---- The bar ---- */
+
+/* The selected pages' bar: a rounded surface, tinted once a page is selected. As tall with two
+   lines of text as with its buttons, so it never grows and pushes the grid down. */
 .reorganize-bar {
   display: flex;
   align-items: center;
-  min-height: 48px;
-  margin-top: var(--space-3);
+  min-height: max(48px, calc(2.5rem + 2 * var(--space-1)));
+  margin-top: var(--space-2);
   padding-inline: var(--space-4) var(--space-1);
   border-radius: var(--radius-l);
   background: var(--surface-high);
@@ -58,16 +98,18 @@
   color: var(--on-secondary-container);
 }
 
-/* labelLarge */
+/* labelLarge; on a second line rather than cut short beside the buttons ("Selected: 12 of 24"). */
 .reorganize-bar-label {
+  display: -webkit-box;
   flex: 1;
   min-width: 0;
   overflow: hidden;
   font-size: 0.875rem;
   font-weight: 500;
   line-height: 1.25rem;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 
 .reorganize-bar-buttons {
@@ -83,14 +125,15 @@
   opacity: 0.38;
 }
 
-/* Too narrow for "Page 12" beside five 48 px buttons (a 320 px phone): the chosen page's name is
-   left to screen readers (its frame in the grid shows which it is), and the buttons spread out. */
+/* Too narrow for "Page 12" beside the five 48 px buttons one selected page has (a 320 px phone):
+   its name is left to screen readers (its frame and check mark in the grid show which it is), and
+   the buttons spread out. With several pages selected there are three buttons, and the text stays. */
 .reorganize-pages {
   container-type: inline-size;
 }
 
 @container (max-width: 319px) {
-  .reorganize-bar.is-chosen .reorganize-bar-label {
+  .reorganize-bar.is-one .reorganize-bar-label {
     position: absolute;
     width: 1px;
     height: 1px;
@@ -99,15 +142,17 @@
     white-space: nowrap;
   }
 
-  .reorganize-bar.is-chosen .reorganize-bar-buttons {
+  .reorganize-bar.is-one .reorganize-bar-buttons {
     flex: 1;
     justify-content: space-between;
   }
 
-  .reorganize-bar.is-chosen {
+  .reorganize-bar.is-one {
     padding-inline-start: var(--space-1);
   }
 }
+
+/* ---- The grid ---- */
 
 /* The grid scrolls inside the screen past this height, so the file name stays near. */
 .reorganize-grid {
@@ -116,6 +161,49 @@
   padding: 3px;
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+
+/* A page the keyboard focus goes to is scrolled clear of the grid's edge by the room its focus
+   outline takes (2 px, 2 px off the tile): the grid would cut the outline otherwise. */
+.reorganize-grid .ui-page {
+  scroll-margin-block: 4px;
+}
+
+/* A selected page's check mark, in the picture's top corner at the end of the line: it fades in
+   and grows as the page is selected (at once with reduced motion, which makes --ui-short nothing). */
+.reorganize-grid .ui-page-badge {
+  top: 6px;
+  inset-inline: auto 6px;
+}
+
+/* Ringed in the colour of its check: pages are white in both themes, and in dark mode the mark is
+   a light colour, which a white page would swallow without the ring. */
+.reorganize-check {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-full);
+  background: var(--primary);
+  box-shadow: 0 0 0 1px var(--on-primary);
+  color: var(--on-primary);
+  opacity: 0;
+  transform: scale(0.6);
+  transition: opacity var(--ui-short) linear, transform var(--ui-short) var(--ease);
+}
+
+.ui-page-tile.is-selected .reorganize-check {
+  opacity: 1;
+  transform: none;
+}
+
+/* Also off the pages cut at the grid's foot while it scrolls inside itself. */
+.reorganize-hint {
+  margin: var(--space-2) 0 0;
+  color: var(--on-surface-variant);
+  font-size: 0.75rem;
+  line-height: 1rem;
+  letter-spacing: 0.025em;
 }
 
 .reorganize-actions {
@@ -127,12 +215,13 @@
 }
 
 
-/* Wider screens: the PDF, its count, Add pages and the file name beside the bar and the grid,
-   which takes the rest of the screen's height. */
+/* Wider screens: the PDF, its count, the Selected pages field, Add pages and the file name beside
+   the bar, the grid and its hint, which take the rest of the screen's height. */
 @media (min-width: 840px) {
   .reorganize-page .merge-content {
     display: grid;
     grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+    /* The card, the count's row, the field, Add pages and the file name; the pages beside them all. */
     grid-template-rows: auto auto auto auto 1fr;
     align-items: start;
     column-gap: var(--space-6);
@@ -152,8 +241,9 @@
     grid-area: 2 / 1;
   }
 
-  .reorganize-hint {
+  .reorganize-select {
     grid-area: 3 / 1;
+    margin-top: var(--space-2);
   }
 
   .reorganize-actions {
@@ -176,8 +266,9 @@
     margin-top: 0;
   }
 
+  /* The screen's height less the bars, the bar above the grid and the hint under it (two lines). */
   .reorganize-grid {
-    max-height: max(360px, calc(100vh - 240px));
-    max-height: max(360px, calc(100dvh - 240px));
+    max-height: max(360px, calc(100vh - 280px));
+    max-height: max(360px, calc(100dvh - 280px));
   }
 }

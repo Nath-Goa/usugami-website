@@ -1131,7 +1131,7 @@ async function testKitMore(page, { wide, timing = false }) {
   check('refresh(indexes) redraws only those pages', r.some.join() === '2,5' && r.one.join() === '7' && r.all === 20, JSON.stringify(r));
   check('a redraw with nothing new touches nothing', r.changes === 0, JSON.stringify(r));
 
-  // Delete pages' sign is made once per page and kept.
+  // The 'delete' look's sign is made once per page and kept.
   r = await page.evaluate(() => {
     window.marked = new Set([1]);
     window.dg = kit.pagegrid.pageGrid({ count: 6, thumbnail: () => new Promise(() => {}), selectable: true, selected: marked, selectedStyle: 'delete', onToggle: (i) => (marked.has(i) ? marked.delete(i) : marked.add(i)) });
@@ -1146,7 +1146,7 @@ async function testKitMore(page, { wide, timing = false }) {
     dg.destroy();
     return { n: before.length, same: before.length === after.length && before.every((s, i) => s === after[i]), checked };
   });
-  check('Delete pages\' signs are kept, not made anew', r.n === 6 && r.same && r.checked === 'false,true,false,true,true,false', JSON.stringify(r));
+  check('the delete look\'s signs are kept, not made anew', r.n === 6 && r.same && r.checked === 'false,true,false,true,true,false', JSON.stringify(r));
 
   // Thousands of pages: a redraw where little changes is quick.
   r = await page.evaluate(() => {
@@ -1167,7 +1167,7 @@ async function testKitMore(page, { wide, timing = false }) {
   console.log(`    3000 pages: redraw ${r.same} ms unchanged, ${r.every} ms all chosen, ${r.two} ms two pages`);
   if (timing) check('redrawing 3000 pages with nothing new is quick', r.same < 100 && r.two < 10, JSON.stringify(r));
 
-  // One page chosen at a time (Reorganize): a listbox of options, keyboard-usable.
+  // One page chosen at a time: a listbox of options, keyboard-usable.
   await page.evaluate(() => {
     window.log = [];
     window.one = new Set([0]);
@@ -1347,7 +1347,7 @@ async function testPageGrid(page, { wide }) {
   r = { model: await modelOrder(page), dom: await domOrder(page), log: await page.evaluate(() => log.slice()) };
   check('dragging with a mouse moves the page', lifted && r.model.slice(0, 5).join() === '1,2,3,0,4' && r.dom.slice(0, 5).join() === '1,2,3,0,4', JSON.stringify({ lifted, ...r, model: r.model.slice(0, 6), dom: r.dom.slice(0, 6) }));
   check('one drag start and end', r.log[0] === 'start' && r.log[r.log.length - 1] === 'end:0>3' && !r.log.some((l) => l.startsWith('toggle')), JSON.stringify(r.log));
-  // Delete pages' look: a page marked fades behind a delete sign, framed in the error colour.
+  // The 'delete' look: a page marked fades behind a delete sign, framed in the error colour.
   await page.evaluate(() => {
     window.marked = new Set([1]);
     window.dgrid = kit.pagegrid.pageGrid({ count: 6, thumbnail: (i, w, o) => gridSrc.thumbnail(i, w, o), selectable: true, selected: marked, selectedStyle: 'delete', onToggle: (i) => (marked.has(i) ? marked.delete(i) : marked.add(i)) });
@@ -1359,7 +1359,7 @@ async function testPageGrid(page, { wide }) {
     const sign = (t) => getComputedStyle(t.querySelector('.ui-page-delete-sign')).opacity;
     return { marked: sign(tiles[1]), kept: sign(tiles[0]), faded: getComputedStyle(tiles[1].querySelector('.ui-page-picture')).opacity, checked: tiles[1].querySelector('.ui-page').getAttribute('aria-checked') };
   });
-  check('Delete pages look', r.marked === '1' && r.kept === '0' && r.faded === '0.4' && r.checked === 'true', JSON.stringify(r));
+  check('the delete look', r.marked === '1' && r.kept === '0' && r.faded === '0.4' && r.checked === 'true', JSON.stringify(r));
   await page.screenshot({ path: join(shots, `grid-delete-${wide ? 'desktop' : 'phone'}.png`) });
   await page.evaluate(() => mount(grid));
   check('no page stays lifted', await page.evaluate(() => !grid.querySelector('.is-dragging') && [...grid.querySelectorAll('.ui-page-tile')].every((t) => !t.style.transform || t.style.transform === 'none' || t.style.transform === '')));

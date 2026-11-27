@@ -10,8 +10,10 @@ export default {
   pdf_page_mode_hint: 'Arrange, rotate, or remove individual pages.',
   pdf_sort_az: 'Sort A to Z',
   pdf_sort_za: 'Sort Z to A',
-  // A page in the page list: its place in the merged PDF, the PDF it is from, and its page number there.
-  merge_page_line: '{1}. {2}, page {3}',
+  // A page in the page list: its place in the merged PDF, the PDF it is from, and its page number
+  // there. A no-break space (\u00a0) keeps the word "page" and its number together when a long
+  // file name wraps.
+  merge_page_line: '{1}. {2}, page\u00a0{3}',
   pdf_merge_action: 'Merge PDFs',
 
   // Errors (engine/organize.js' mergePdfs).

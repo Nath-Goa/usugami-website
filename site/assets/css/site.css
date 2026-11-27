@@ -45,7 +45,8 @@
 html {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
-  scroll-padding-block-start: 80px;
+  /* A link reached with Tab stops clear of the header, and of the button at the bottom corner. */
+  scroll-padding-block: 80px 88px;
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -702,7 +703,7 @@ li + li { margin-block-start: 0.35em; }
 .feature-grid.compact .icon-badge { width: 40px; height: 40px; }
 .feature-grid.compact .icon-badge .icon { width: 22px; height: 22px; }
 
-/* Every row of cards is full, whatever a group's number of cards (7, 5, 4, 3 and 9 today). */
+/* Every row of cards is full, whatever a group's number of cards (7, 3, 4, 3 and 9 today). */
 @media (min-width: 720px) {
   .feature-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); }
   .feature { padding: var(--space-5); }
@@ -951,6 +952,15 @@ li + li { margin-block-start: 0.35em; }
 /* A tablet held sideways is wide but touched: full-size targets there. */
 @media (min-width: 1080px) and (pointer: coarse) {
   .doc-toc a { min-height: var(--touch); }
+}
+
+/* A window too short to hold the whole list above the button at the bottom corner (.coffee-float):
+   the list scrolls away with the page, as its last entries would lie under the button. (The list
+   ends 533 px down the window, lower with touch-sized entries, and the button takes the lowest
+   64 px: more entries need these heights raised.) */
+@media (min-width: 1080px) and (max-height: 619.98px),
+       (min-width: 1080px) and (pointer: coarse) and (max-height: 691.98px) {
+  .doc-toc { position: static; }
 }
 
 .note {
@@ -1238,7 +1248,8 @@ li + li { margin-block-start: 0.35em; }
 /* ---------- Footer ---------- */
 
 .site-footer {
-  padding-block: var(--space-6) var(--space-7);
+  /* Room under the last line for the button at the bottom corner (.coffee-float). */
+  padding-block: var(--space-6) calc(var(--space-7) + 56px);
   border-block-start: 1px solid var(--outline-variant);
   background: var(--page-band);
   color: var(--on-surface-variant);
@@ -1322,10 +1333,70 @@ li + li { margin-block-start: 0.35em; }
   .lang-switch { grid-column: 1 / -1; }
 }
 
+/* ---------- Buy me a coffee ---------- */
+
+/* Buy Me a Coffee's own button, drawn here (nothing is loaded from its site): its yellow, black
+   words and a cup, the same in both themes, staying at the bottom corner of the window on every
+   page. On phones, and in windows too short for it to pass under the text (a phone held sideways,
+   a laptop zoomed to 200%), it is round, with the cup alone: its words stay its name for screen
+   readers. */
+.coffee-float {
+  position: fixed;
+  inset-block-end: calc(var(--space-4) + env(safe-area-inset-bottom, 0px));
+  inset-inline-end: calc(var(--space-4) + max(env(safe-area-inset-left, 0px), env(safe-area-inset-right, 0px)));
+  z-index: 40;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  width: 56px;
+  height: 56px;
+  /* Shows in Windows' contrast themes, which drop the fill. */
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: var(--coffee);
+  color: var(--on-coffee);
+  box-shadow: var(--shadow-high);
+  font-size: 1.0625rem;
+  font-weight: 600;
+  line-height: 1.25;
+  text-decoration: none;
+  transition: box-shadow var(--duration) var(--ease);
+}
+
+.coffee-float:hover { box-shadow: var(--shadow-high), 0 0 0 4px color-mix(in srgb, var(--coffee) 35%, transparent); }
+
+.coffee-float span {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (min-width: 600px) and (min-height: 480px) {
+  .coffee-float {
+    width: auto;
+    height: auto;
+    min-height: var(--touch);
+    padding: var(--space-2) var(--space-5);
+    border-radius: var(--radius-m);
+  }
+  .coffee-float .icon { margin-inline-start: calc(-1 * var(--space-1)); }
+  .coffee-float span {
+    position: static;
+    width: auto; height: auto;
+    margin: 0;
+    overflow: visible;
+    clip-path: none;
+  }
+}
+
 /* ---------- Print ---------- */
 
 @media print {
-  .site-header, .nav-menu, .skip-link, .hero-art { display: none !important; }
+  .site-header, .nav-menu, .skip-link, .hero-art, .coffee-float { display: none !important; }
   .disclosure > div { display: block; }
   body { background: #fff; color: #000; }
 }

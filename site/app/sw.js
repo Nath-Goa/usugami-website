@@ -11,7 +11,8 @@
 //
 // Code belongs to one version of the site: the shell and the code kept as it is used (modules,
 // styles, strings, libraries) are kept per version, and a new version fetches again the code the
-// last one had kept, so offline the app never mixes files of two versions. Fonts and text
+// last one had kept, with what that code now imports, so offline the app never mixes files of two
+// versions and a tool used before still opens. Fonts and text
 // recognition's language data don't change between versions and stay.
 
 // The deploy workflow replaces 'dev' with the commit being published.
@@ -44,6 +45,7 @@ const SHELL = [
   'js/core/settings.js',
   'js/core/router.js',
   'js/core/icons.js',
+  'js/core/coffee.js',
   'js/core/recent.js',
   'js/core/names.js',
   'js/core/search.js',
@@ -65,6 +67,8 @@ const SHELL = [
   'js/screens/settings.js',
   'js/screens/about.js',
   'js/screens/licenses.js',
+  'js/screens/donate.js',
+  'js/screens/sponsors.js',
   'js/screens/choose.js',
   'js/screens/language.js',
   'js/lib/fflate.js',
@@ -112,6 +116,54 @@ async function keepAll(cache, urls) {
   await Promise.all(Array.from({ length: 6 }, one));
 }
 
+/**
+ * Tools another tool took over (core/tools.js's MOVED_TOOLS), with the files of the tool that took
+ * each over: a visitor who used the old tool gets those kept in its place, so its old address
+ * still opens offline. The modules and style sheets they load follow from them (keepWithImports).
+ */
+const TAKEN_OVER = Object.fromEntries(['js/tools/rotate/index.js', 'js/tools/delete-pages/index.js'].map((old) =>
+  [old, ['js/tools/reorganize/index.js', ...LANGUAGES.map((code) => `locales/${code}/reorganize.js`)]]));
+
+/**
+ * What the module `text` (at `url`) imports, and the style sheets it loads, read as
+ * tests/shell.test.mjs reads them: the static imports of this site's modules and
+ * ensureCss(new URL('….css', import.meta.url)).
+ */
+function linksOf(text, url) {
+  const links = [];
+  for (const m of text.matchAll(/^\s*(?:import|export)\s[^'"]*?from\s*['"](\.[^'"]+)['"]|^\s*import\s*['"](\.[^'"]+)['"]/gm)) links.push(m[1] ?? m[2]);
+  for (const m of text.matchAll(/^(?!\s*(?:\*|\/\/)).*ensureCss\(new URL\('([^']+\.css)', import\.meta\.url\)\)/gm)) links.push(m[1]);
+  return links.map((path) => new URL(path, url).href);
+}
+
+/**
+ * Fetches `urls` into `cache`, then what they import and load that is not in `skip` (the shell)
+ * nor fetched already, and so on. A tool used before can import a module new in this version, or
+ * have been taken over by another tool (TAKEN_OVER): without those it wouldn't open offline.
+ */
+async function keepWithImports(cache, urls, skip) {
+  const base = scope();
+  const seen = new Set([...skip, ...urls]);
+  for (let batch = urls; batch.length;) {
+    await keepAll(cache, batch);
+    const next = [];
+    const add = (url) => {
+      if (url.startsWith(base) && !seen.has(url)) {
+        seen.add(url);
+        next.push(url);
+      }
+    };
+    for (const url of batch) {
+      const path = url.slice(base.length);
+      for (const other of TAKEN_OVER[path] ?? []) add(new URL(other, base).href);
+      if (!/\.m?js$/.test(path)) continue;
+      const response = await cache.match(url);
+      if (response) for (const link of linksOf(await response.text(), url)) add(link);
+    }
+    batch = next;
+  }
+}
+
 /** The code earlier versions kept as it was used: fetched again for this version. */
 async function earlierCode() {
   const urls = new Set();
@@ -132,9 +184,10 @@ self.addEventListener('install', (event) => {
     // One by one: a file missing from the site doesn't stop the others being kept. 'no-cache'
     // checks each with the server, so a file the page has just loaded isn't downloaded again.
     await keepAll(shell, SHELL.map((path) => new URL(path, scope()).href));
-    // The tools used before still open offline after an update, in this version.
+    // The tools used before still open offline after an update, in this version, with any module
+    // they import that is new in it.
     const shellUrls = new Set((await shell.keys()).map((r) => r.url));
-    await keepAll(await caches.open(CODE_CACHE), (await earlierCode()).filter((url) => !shellUrls.has(url)));
+    await keepWithImports(await caches.open(CODE_CACHE), (await earlierCode()).filter((url) => !shellUrls.has(url)), shellUrls);
     await self.skipWaiting();
   })());
 });

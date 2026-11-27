@@ -39,12 +39,12 @@ function iconCopy(name, size) {
  * @param {(i: number) => string} [o.label]    under each page (default: its number)
  * @param {(i: number) => string} [o.tileLabel] what a screen reader calls it (default "Page 3")
  * @param {boolean|'single'} [o.selectable]  pages are chosen by tapping them: true, any number
- *   (each a checkbox); 'single', one at a time (a listbox of options, as Reorganize's page)
+ *   (each a checkbox); 'single', one at a time (a listbox of options; no tool asks for it today)
  * @param {Set<number>} [o.selected] the pages chosen, read on each refresh
  * @param {(i: number) => void} [o.onToggle]   a page was tapped; the grid then redraws it
  * @param {(i: number) => void} [o.onActivate] a page was tapped, in a grid that isn't selectable
  * @param {'primary'|'delete'} [o.selectedStyle] chosen pages framed in the accent colour (default),
- *   or in the error colour, faded behind a delete sign, as Delete pages marks them
+ *   or in the error colour, faded behind a delete sign (no tool asks for it today)
  * @param {boolean} [o.reorderable] pages can be moved
  * @param {(from: number, to: number) => (void|false)} [o.onMove] a page moved; false refuses it
  * @param {() => void} [o.onMoveStart]   a drag starts (for one undo step for the whole drag)
@@ -145,7 +145,7 @@ export function pageGrid(o) {
         this.badgeEl.hidden = !b;
       }
       let ov = opts.overlay?.(i) ?? null;
-      // Delete pages' sign, made once per tile: CSS shows it on the pages marked.
+      // The 'delete' look's sign, made once per tile: CSS shows it on the pages marked.
       if (!ov && opts.selectedStyle === 'delete') ov = this.deleteSign ??= h('span', { class: 'ui-page-delete-sign' }, iconCopy('delete', 24));
       if (ov !== s.overlay) {
         s.overlay = ov;

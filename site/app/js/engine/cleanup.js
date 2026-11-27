@@ -6,8 +6,9 @@
 // links. Pictures only removed pages drew are emptied, since pages that stay may still list them
 // (pages often share one list of resources), and the tags of what was on removed pages go.
 //
-// It also holds what the organize tools share: reading the page tree as viewers do, laying pages
-// out again, and copying objects from one PDF into another without what must stay behind.
+// It also holds what the organize tools share: reading the page tree as viewers do, taking pages
+// out of it or laying them out again, and copying objects from one PDF into another without what
+// must stay behind.
 import {
   PDFArray, PDFDict, PDFName, PDFNull, PDFNumber, PDFRef, PDFStream, PDFRawStream,
   PDFString, PDFHexString, PDFPageLeaf, decodePDFRawStream,
@@ -288,6 +289,46 @@ export function setPages(doc, pages) {
   }
   root.set(nm('Kids'), kids);
   root.set(nm('Count'), PDFNumber.of(pages.length));
+}
+
+/**
+ * Takes `removed` (page dictionaries) out of the document's page tree where they stand: each leaves
+ * the /Kids that lists it, and every part of the tree above it counts that many pages fewer (what
+ * PDFBox's removePage does for the app). Nothing else changes: the tree keeps its nesting, and the
+ * pages left keep what they inherit from it, which setPages would write into each of them. A part
+ * of the tree left without pages stays, empty. For a sound tree (see repairPageTree) that lists
+ * each page once; `dropRemovedPages` then cuts what still leads to the pages taken out.
+ */
+export function removePages(doc, removed) {
+  const gone = new Set(removed);
+  if (!gone.size) return;
+  const ctx = doc.context;
+  const root = dictOf(ctx, catalogOf(doc).get(nm('Pages')));
+  if (!root) throw new UserError('pdf_import_failed');
+  takeOut(ctx, root, gone, new Set([root]), 0);
+}
+
+/** Takes the pages in `gone` out of the part of the tree at `node`; returns how many it lost. */
+function takeOut(ctx, node, gone, seen, depth) {
+  // As walkPageTree: only a crafted file nests its page tree this deep.
+  if (depth > 512) throw new UserError('pdf_import_failed');
+  const kids = arrayOf(ctx, node.get(nm('Kids')));
+  let lost = 0;
+  // From the end, so taking one out doesn't move those still to be looked at.
+  for (let i = (kids ? kids.size() : 0) - 1; i >= 0; i--) {
+    const kid = dictOf(ctx, kids.get(i));
+    if (!kid) continue;
+    if (gone.has(kid)) {
+      kids.remove(i);
+      lost++;
+    } else if (kid.has(nm('Kids')) && !seen.has(kid)) {
+      seen.add(kid);
+      lost += takeOut(ctx, kid, gone, seen, depth + 1);
+    }
+  }
+  // A part of the tree that lost no page is left exactly as it was.
+  if (lost) node.set(nm('Count'), PDFNumber.of(Math.max(0, (numberOf(ctx, node.get(nm('Count'))) ?? lost) - lost)));
+  return lost;
 }
 
 function inheritedHolder(ctx, page, key) {

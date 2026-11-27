@@ -2,7 +2,8 @@
 
 The shell starts the web app, moves between screens, holds the shared strings, settings, icons,
 Recent files and file names, receives files shared to the installed app, and draws Home, Recent
-files, Settings (Language, Appearance), About, Open-source licenses and Choose a tool. It
+files, Settings (Language, Appearance), Donate and GitHub Sponsors, About, Open-source licenses and
+Choose a tool, and the "Buy me a coffee" button at the bottom corner of its own screens. It
 implements what `docs/api/core-contract.md` gives it, plus the extras below (marked *extra*).
 
 The shell throws no `UserError`s. It defines `pdf_import_failed` (thrown by
@@ -14,10 +15,10 @@ The shell throws no `UserError`s. It defines `pdf_import_failed` (thrown by
 | File | What it is |
 |---|---|
 | `index.html` | The page: a Content-Security-Policy `<meta>` first (only this site, `blob:`/`data:` for images, fonts, workers and fetches, `'wasm-unsafe-eval'` for pdf.js, libheif and Tesseract, `'unsafe-inline'` styles for the kit's style attributes, the inline script by its hash: `node tools/check-site.mjs` prints the new hash when it changes), `referrer` `no-referrer`, tokens.css, css/app.css, css/components.css, a `modulepreload` for every module Home starts with (tests/shell.test.mjs checks the list against the imports), js/main.js; theme and language set before the first paint from `localStorage['usugami.settings']`, and plain-http `usugami.com` sent to https; manifest, icons, theme colours, a noscript message. |
-| `js/main.js` | Boot: appearance, `initI18n()` + the `kit` and `mark` strings, skip link, router, share inbox, service worker; installed (`display-mode: standalone`, or on `appinstalled`) it asks for `navigator.storage.persist()`, so the service worker that keeps shared files on the device isn't cleared away. With more than one language and none chosen, the first launch shows `#/language?next=<the address opened>`. Sets `<html data-ready="true">` once started (tests wait for it). |
-| `js/core/{dom,i18n,settings,router,icons,recent,names,search,share-inbox}.js` | Below. |
+| `js/main.js` | Boot: appearance, `initI18n()` + the `kit` and `mark` strings, skip link, the floating "Buy me a coffee" button (`core/coffee.js`, added after `#app`), router, share inbox, service worker; installed (`display-mode: standalone`, or on `appinstalled`) it asks for `navigator.storage.persist()`, so the service worker that keeps shared files on the device isn't cleared away. With more than one language and none chosen, the first launch shows `#/language?next=<the address opened>`. Sets `<html data-ready="true">` once started (tests wait for it). |
+| `js/core/{dom,i18n,settings,router,icons,coffee,recent,names,search,share-inbox}.js` | Below. |
 | `js/lib/{pdfjs,tesseract}.js` | Wrappers of the vendored pdf.js and Tesseract (below). |
-| `js/screens/{home,recent,settings,language,about,licenses,choose}.js` | The shell's screens, each `mount(ctx)` like a tool. |
+| `js/screens/{home,recent,settings,language,about,licenses,donate,sponsors,choose}.js` | The shell's screens, each `mount(ctx)` like a tool. |
 | `css/app.css` | Page basics, screen transitions, the shell's screens. |
 | `locales/languages.js`, `locales/en/common.js` | Languages; shared strings. |
 | `manifest.webmanifest`, `sw.js`, `icons/` | Installable app, offline use, share target, app icons. |
@@ -80,8 +81,8 @@ h('button', { class: ['x', on && 'is-on'], onClick: go, 'aria-label': t('back') 
   In another language, the app's translation of `key` shows while `web_<key>` has none of its own
   yet (rather than the English web wording). The `web_` strings whose meaning differs from the
   app's (`web_recent_lost_body`, `web_empty_share_hint`, `web_reorder_hint`, `web_edit_hint_draw`,
-  `web_ocr_download_note`, `web_sign_pad_hint`, `web_sign_place_hint`) must be translated before
-  a language ships.
+  `web_ocr_download_note`, `web_sign_pad_hint`, `web_sign_place_hint`,
+  `web_search_keywords_compress`) must be translated before a language ships.
 - `hasString(key): boolean` *extra*.
 - `getLanguage(): string` (`'en'`), `getDirection(): 'ltr'|'rtl'` *extra*.
 - `setLanguage(code): Promise<void>`: saves it, reloads the namespaces loaded so far, sets
@@ -106,9 +107,14 @@ throw (no storage: the values hold for the visit). The website pages read `appea
 
 ## core/router.js
 
-Routes (hash): `#/` Home, `#/tool/<id>` (any id in `core/tools.js`), `#/recent`, `#/settings`,
-`#/settings/about`, `#/settings/about/licenses`, `#/choose` (Choose a tool), `#/language` (first
-launch, only with more than one language). `?a=b` after a path becomes params. Unknown → Home.
+Routes (hash): `#/` Home, `#/tool/<id>` (any id in `core/tools.js`; an id in its `MOVED_TOOLS`,
+`rotate` and `delete-pages`, leads to the tool that does that work now, Reorganize PDF, and the
+address bar is put right in the same history entry; followed while Reorganize PDF already shows,
+the router steps back over the new entry, so the screen and its work stay and one Back leaves),
+`#/recent`, `#/settings`,
+`#/settings/about`, `#/settings/about/licenses`, `#/settings/donate` (Donate),
+`#/settings/donate/github` (GitHub Sponsors; route name `sponsors`), `#/choose` (Choose a tool),
+`#/language` (first launch, only with more than one language). `?a=b` after a path becomes params. Unknown → Home.
 
 - `navigate(path, { files?, params?, replace?, from?, force?, replaceScreen? }): Promise<void>` (resolves once the
   screen has mounted). `files` (FileItem[]) and `params` go to `mount(ctx)`. `replace` swaps the
@@ -121,7 +127,8 @@ launch, only with more than one language). `?a=b` after a path becomes params. U
   `discardQuestion()` (below), else `alertDialog({ title: t('tool_discard_title'),
   confirm: t('discard'), dismiss: t('keep'), destructive: true })` ("Discard your changes?",
   Discard / Keep, as the app). Then it goes to the previous page of the app, or (opened straight
-  at an address) up to the parent: tool → Home (or Choose a tool), licenses → About → Settings → Home.
+  at an address) up to the parent: tool → Home (or Choose a tool), licenses → About → Settings → Home,
+  GitHub Sponsors → Donate → Settings.
 - The browser's Back/Forward do the same, with the same question; Keep stays on the screen.
   Closing or reloading the tab with unsaved work gets the browser's own "Leave site?".
 - **Back closes what is open first**, as Android's Back: with a kit menu or a dismissible dialog
@@ -191,7 +198,7 @@ your internet connection and try again.") or `web_tool_crashed`, with Try again 
 - `hasIcon(name)`, `iconNames()` *extra*.
 - `ICON_SET` *extra*: `{ name: 'Material Icons', style: 'Round', package: '@material-design-icons/svg',
   version, license: 'Apache-2.0', copyright: 'Copyright Google LLC' }`, for the licenses screen.
-- 238 icons: every icon of the Android app (snake_case, e.g. `document_scanner`), plus
+- 240 icons: every icon of the Android app (snake_case, e.g. `document_scanner`), plus
   `settings_outline` and `info_outline` (the app's Outlined.Settings and Outlined.Info), plus
   many the web screens may need (zoom_in, drag_indicator, expand_more, upload_file, chevron_left...).
 - **Adding icons**: use the name in your code, then run `node tools/build-icons.mjs --js`; the
@@ -200,6 +207,31 @@ your internet connection and try again.") or `web_tool_crashed`, with Try again 
   `icon(busy ? 'sync' : 'done')`) and lists the names the Material set doesn't have.
   (`--android <path to the app>` checks that every Android icon is listed; `--png` renders only
   the app icons.) tests/shell.test.mjs fails when a name used isn't in icons.js.
+
+## core/coffee.js
+
+The ways out to where Usugami takes donations. Buy Me a Coffee's own button is a script loaded
+from its site, which the "no outside requests" rule and the page's Content-Security-Policy don't
+allow: the button is drawn here instead, as an ordinary link in its colours (`--coffee` and
+`--on-coffee` in tokens.css: yellow with black words and the `coffee` icon, the same in both themes).
+
+- `DONATE_URL`: `https://buymeacoffee.com/usugami` (the app's `DonateScreen.DONATE_URL`).
+- `linkButton({ href, label, icon, cls, iconSize = 18 })`: an `<a>` drawn as a button that opens
+  another site in a new tab (`target="_blank"`, `rel="noopener noreferrer"`): the icon, the label
+  (`.ui-btn-label`) and a visually hidden "(opens in a new tab)". `el.setLabel(text)`.
+- `coffeeButton(cls)`: the "Buy me a coffee" button (`web_donate_coffee`), to `DONATE_URL`.
+- `coffeeFloat()`: the same button fixed at the bottom corner of the window (`.coffee-float`).
+  main.js adds it once, after `#app`, so Tab reaches it last. It follows the route
+  (`onRouteChange`): shown on Home, Recent files, Settings, About and Open-source licenses; hidden
+  (`hidden`) while files are worked on (every tool, and Choose a tool), on Donate and GitHub
+  Sponsors (where it leads) and on the first launch's language screen. While it shows, `<html>`
+  has the class `has-coffee-float`: app.css then leaves 72 px more under `.page`, so a screen's
+  last rows scroll clear of it, sets `scroll-padding-block-end` (a control reached with Tab isn't
+  left under it) and, in windows under 1000 px wide, lifts snackbars over it
+  (`--snackbar-offset: 64px`). Under 600 px wide, and under 480 px high, it is a round 56 px
+  button with the cup alone (its words stay its name); in larger windows it shows its words. It
+  isn't printed. To show it on another screen, add the
+  route's name to `FLOAT_ROUTES`, and check what that screen has at its bottom corner first.
 
 ## core/recent.js
 
@@ -329,6 +361,17 @@ Each exports `mount(ctx)`. Also exported, for reuse:
   row opening a new tab, `rel="noopener noreferrer"`, with the open_in_new icon), `APPEARANCES`, `currentAppearance()`,
   `WEBSITE_SOURCE_URL` (https://github.com/Nath-Goa/usugami-website), `WEBSITE_NOTICES_URL`
   *extra* (its THIRD_PARTY_NOTICES.md on GitHub).
+- `settings.js`'s rows are the app's: Language, Appearance, Source code on GitHub, Donate (detail
+  "Buy Me a Coffee"), About Usugami.
+- `donate.js` (DonateScreen.kt's `DonateScreen`): how to donate through Buy Me a Coffee in four
+  numbered steps on one sheet, the first with the address and the "Buy me a coffee" button
+  (`coffeeButton('donate-coffee')`, in place of the app's "Open Buy Me a Coffee"), "Thank you!",
+  then a text button, "Donate with GitHub Sponsors instead", to `#/settings/donate/github`.
+  `donatePage(ctx, { title, intro, steps: [{ text, address?, link? }], after? })` draws such a
+  page (the steps are an `<ol role="list">`, each number a circle).
+- `sponsors.js` (`GitHubSponsorsScreen`): the other way, in four steps, the first with "Open
+  GitHub" to `ANDROID_SOURCE_URL`: the app's repository, whose Sponsor button the second step
+  names (its `.github/FUNDING.yml` lists both ways), as in the app.
 - `about.js`: `APP_VERSION` (`'1.0.0'`), `ANDROID_SOURCE_URL`, `appIcon()`. The name under the
   icon is `about_edition_name_standard` ("Usugami™"), the one place in the app where the name
   carries the trademark sign, as on the Android app's About screen. About links the
@@ -362,8 +405,8 @@ Each exports `mount(ctx)`. Also exported, for reuse:
 For everyone: `[hidden]` always hides; `.visually-hidden`; `.page` (a screen's content under its
 top bar: 20 px sides on phones, centred at `--content-max` on wide screens, safe-area bottom),
 `.page--narrow` (760 px), `.page--list` (no side padding, for full-width list rows); `.icon`.
-The rest (`.home-*`, `.scan-card`, `.recent-*`, `.choice-*`, `.about-*`, `.license*`,
-`.choose-*`, `.shell-*`, `.screen*`, `.route-progress`) is the shell's own. Screens slide in as
+The rest (`.home-*`, `.scan-card`, `.recent-*`, `.choice-*`, `.about-*`, `.license*`, `.donate-*`,
+`.coffee-float`, `.choose-*`, `.shell-*`, `.screen*`, `.route-progress`) is the shell's own. Screens slide in as
 Motion.kt's screen change (24 px, 300 ms; none with reduced motion). `html` has a
 `scroll-padding` clear of the sticky top bar, and of the bottom bar while a screen has one, so a
 control reached with Tab isn't left under them. In Windows' contrast themes (forced colours) the
@@ -377,7 +420,7 @@ Shared by every screen; don't redefine these keys in another namespace. Copied f
 share_all save save_file keep discard undo redo`; Home (`home_title home_subtitle settings
 scan_title scan_detail scan_upload add_from_camera home_section_* home_search_*`); every tool's
 `tool_*`, `tool_*_detail`, `search_keywords_*` and `search_keywords_batch`; Recent files
-(`recent_*`); Settings and About (`language_* settings_* appearance_* about*`); sharing
+(`recent_*`); Settings, Donate and About (`language_* settings_* appearance_* donate_* about*`); sharing
 (`share_title share_several_hint share_unsupported share_other_kind msg_share_unreadable
 share_waits tool_discard_title pdf_discard_title share_discard_* pdf_discard_shared_*`); picking
 (`pick_pdf pick_pdfs add_pdfs pick_several_hint remove_file move_file_earlier move_file_later`);
@@ -391,7 +434,12 @@ msg_out_of_memory msg_out_of_space msg_unknown_error pdf_import_failed`). Web-on
 `web_` (`web_more_options` "More options", `web_more_options_for`, `web_try_again`, `web_page_title` "{1} –
 Usugami", `web_home_title`, `web_recent_open_failed`, `web_recent_share_ready`,
 `web_opens_elsewhere`, `web_size_*`, `web_home_subtitle`, `web_tool_word_detail`,
-`web_about_notices` "Third-party notices", `web_about_notices_detail`, `web_licenses_notices`,
+`web_search_keywords_compress` (Compress PDF's search words without the app's "black and white,
+grayscale...", which the web app's Compress PDF can't do yet: Home shows a tool's detail and
+reads its keywords through `tWeb`, so a `web_` twin stands in for the app's string in English
+and wherever it is translated),
+`web_about_notices` "Third-party notices", `web_about_notices_detail`, `web_donate_coffee` "Buy
+me a coffee" (the button's words), `web_licenses_notices`,
 `web_lic_*`...).
 
 ## Service worker (sw.js) and manifest
@@ -402,7 +450,12 @@ Usugami", `web_home_title`, `web_recent_open_failed`, `web_recent_share_ready`,
   used (modules, CSS, strings, libraries, anything not data) in `usugami-code-<VERSION>`; data the
   same in every version (`fonts/`, `vendor/tesseract/lang/`) in `usugami-runtime`. Installing a
   new version fetches again the code the last one had kept (checked with the server: unchanged
-  files cost a 304), so the tools used before still open offline; activating it deletes the old
+  files cost a 304), then what that code now imports and the style sheets it loads with
+  `ensureCss(new URL('….css', import.meta.url))`, read with the same patterns as the shell test
+  (`keepWithImports`), so the tools used before still open offline, also when they import a module
+  new in this version. A tool another took over (`TAKEN_OVER`: Rotate PDF's and Delete pages'
+  `index.js`) brings the files of Reorganize PDF and its strings, from which the rest follows.
+  Strings a tool newly loads (`loadStrings`) are not found that way. Activating it deletes the old
   versions' shells and code (and code an older worker left in `usugami-runtime`). Offline the
   shell answers first.
 - `const LANGUAGES = ['en'];` in sw.js lists the codes of `locales/languages.js` (the test checks
@@ -444,7 +497,10 @@ Usugami", `web_home_title`, `web_recent_open_failed`, `web_recent_share_ready`,
 tests (ToolSearch, FileNames, SharedFiles), common.js against strings.xml, Home in Chromium,
 Firefox and WebKit at 360 and 1366 px (every tool in its section, no outside requests, no
 sideways scroll), search, routes and Back with the unsaved-work question and steps, missing tool
-modules, Settings (appearance applied and kept, language, About links, licenses), Recent files
+modules, Settings (appearance applied and kept, language, About links, licenses), Donate and
+GitHub Sponsors (steps, the two links, Back), the floating "Buy me a coffee" button (where it
+shows and hides, its place, size and words at 360, 768 and 1366 px, the room under each screen's
+content, snackbars above or beside it), Recent files
 (order, de-duplication, 50 max, menu, Clear list, lost copies, no storage), shared/dropped files
 routing with Choose a tool, the manifest and icons, the service worker offline and its share
 target, and 320 px layouts. Screenshots go to `tests/output/shell-*.png`. Also: FileNames' Kotlin

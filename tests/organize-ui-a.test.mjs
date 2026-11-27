@@ -1,13 +1,13 @@
-// Split PDF, Delete pages and Rotate PDF (js/tools/split, delete-pages, rotate): each screen driven
-// in the app as a person would, by touch at phone size and by mouse and keyboard at desktop size,
-// with the PDFs made read back (page counts, turns, text with pdf.js, what the pages show).
+// Split PDF (js/tools/split: index.js, and frame.js, the screen around its options): driven in the
+// app as a person would, by touch at phone size and by mouse and keyboard at desktop size, with the
+// PDFs made read back (page counts, text with pdf.js, what the pages show).
 // Run with: node tests/organize-ui-a.test.mjs   (--quick: Chromium only, no screenshots;
 // --others: Firefox and WebKit only; --review: Chromium, the reviewers' findings only)
 // Screenshots go to .tmp/organize-ui-a/screens/ to be looked at.
 import { readFile, mkdir, access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { withPage, assert, root, runInPage, chooserFromKeyboard } from './harness.mjs';
-import { PDFDocument, PDFName, rgb, degrees, StandardFonts } from '../site/app/vendor/pdf-lib/pdf-lib.esm.min.js';
+import { PDFDocument, rgb, StandardFonts } from '../site/app/vendor/pdf-lib/pdf-lib.esm.min.js';
 import { unzipSync, strToU8 } from '../site/app/vendor/fflate/fflate.esm.js';
 
 const REVIEW = process.argv.includes('--review');
@@ -23,11 +23,9 @@ const exists = (p) => access(p).then(() => true, () => false);
 const PHONE = { width: 360, height: 780 };
 const DESKTOP = { width: 1366, height: 900 };
 
-// The English the screens should show (strings.xml).
+// The English the screen should show (strings.xml).
 const S = {
   split: 'Split PDF',
-  deleteAction: 'Delete pages',
-  rotateAction: 'Rotate PDF',
   pickPdf: 'Choose PDF',
   another: 'Choose another PDF',
   selected: 'Selected pages',
@@ -45,17 +43,6 @@ const S = {
   range: (n) => `Pages must be between 1 and ${n}.`,
   reversed: 'Write ranges from low to high, such as 3-8.',
   chunk: (n) => `Pages per PDF must be between 1 and ${n}.`,
-  needPage: 'Keep at least one page.',
-  deleteField: 'Pages to delete',
-  deleteHint: 'For example: 2,5-7. Or tap the pages below.',
-  deleteCount: (a, b) => `To delete: ${a} of ${b}`,
-  rotateAll: 'All pages',
-  rotateHint: 'Turn pages one by one, or all at once.',
-  turnedRight: 'Turned right',
-  turnedLeft: 'Turned left',
-  upsideDown: 'Upside down',
-  reset: 'Reset pages',
-  discardTitle: 'Discard your changes?',
   importFailed: "Couldn't open that PDF. It may be damaged or unsupported.",
   wrongPassword: "That password didn't open the PDF.",
   noPassword: 'The new PDF has no password.',
@@ -177,7 +164,6 @@ async function chosen(page, name) {
 }
 
 const mainButton = (page) => page.locator('.onepdf > .ui-bottombar .ui-btn');
-const fieldInput = (page, cls) => page.locator(`${cls} .ui-field-input`);
 
 async function typeInto(page, selector, text) {
   const input = page.locator(selector);
@@ -253,15 +239,6 @@ async function shownPages(page, bytes) {
   }, Buffer.from(bytes).toString('base64'));
 }
 
-async function rotationsOf(bytes) {
-  const doc = await PDFDocument.load(bytes, { updateMetadata: false });
-  return doc.getPages().map((p) => p.getRotation().angle);
-}
-
-async function resultNames(page) {
-  return page.$$eval('.ui-result-file .ui-result-name', (els) => els.map((e) => e.textContent));
-}
-
 /** Back from the result screen to the tool, by the top bar's arrow or the browser's Back. */
 async function backToEditing(page, { browserBack = false, touch = false } = {}) {
   if (browserBack) await page.goBack();
@@ -309,52 +286,31 @@ async function testStrings() {
     }
   }
   if (!Object.keys(app).length) console.log('strings.xml not found: app-string comparison skipped');
-  for (const ns of ['split', 'delete-pages', 'rotate']) {
-    const strings = (await import(`../site/app/locales/en/${ns}.js`)).default;
-    for (const [key, text] of Object.entries(strings)) {
-      ok(!(key in common) && !(key in kit), `${ns}: ${key} isn't redefined`);
-      if (key.startsWith('web_') || !Object.keys(app).length) continue;
-      eq(text, app[key], `${ns}: ${key} as strings.xml has it`);
-    }
+  const strings = (await import('../site/app/locales/en/split.js')).default;
+  for (const [key, text] of Object.entries(strings)) {
+    ok(!(key in common) && !(key in kit), `split: ${key} isn't redefined`);
+    if (key.startsWith('web_') || !Object.keys(app).length) continue;
+    eq(text, app[key], `split: ${key} as strings.xml has it`);
   }
 }
 
 // ---------------------------------------------------------------------------------------------
-// The screens' own helpers (PageGrids.kt typedPages/tappedOnto, the taps' text, turns)
+// The screen's own helpers (PageGrids.kt typedPages/tappedOnto, the taps' text)
 
 async function testHelpers(page, url) {
   await openTool(page, url, 'split');
-  const call = (mod, name, ...args) => runInPage(page, url, `app/js/tools/${mod}/index.js`, name, ...args);
-  eq(await call('split', 'tappedOnto', '3,1-2', 5), [2, 0, 1], 'pages in the order typed');
-  eq(await call('split', 'tappedOnto', '  ', 5), [], 'blank: none');
-  eq(await call('split', 'tappedOnto', '2-', 5), null, 'half typed: unreadable');
-  eq(await call('split', 'tappedOnto', '9', 5), null, 'past the end: unreadable');
-  eq(await call('split', 'typedPages', '2-', 5), [], 'unreadable: none framed');
-  eq(await call('split', 'tapPage', '', 3, 5), '4', 'first tap');
-  eq(await call('split', 'tapPage', '3,1', 1, 5), '3,1-2', 'a tap adds at the end, runs kept short');
-  eq(await call('split', 'tapPage', '3,1-2', 0, 5), '3,2', 'a tap takes a page out');
-  eq(await call('split', 'tapPage', '5,4', 5, 6), '5,4,6', 'only runs going up become ranges');
-  eq(await call('split', 'tapPage', '2-', 0, 5), '2-', 'unreadable text left alone');
-  eq(await call('split', 'tapPage', '1,1', 0, 5), '', 'a page typed twice comes out once');
-  eq(await call('delete-pages', 'toggleMark', '2,7', 4, 10), '2,5,7', 'marked, sorted');
-  eq(await call('delete-pages', 'toggleMark', '2,5-7', 5, 10), '2,5,7', 'unmarked');
-  eq(await call('delete-pages', 'toggleMark', '', 0, 10), '1', 'first mark');
-  eq(await call('delete-pages', 'toggleMark', '3-', 0, 10), '3-', 'unreadable text left alone');
-  eq(await call('delete-pages', 'toggleMark', '7,6,5', 4, 10), '6-7', 'sorted into a run');
-  eq(await call('rotate', 'turnedKey', 90), 'rotated_right', 'right');
-  eq(await call('rotate', 'turnedKey', 180), 'rotated_upside_down', 'upside down');
-  eq(await call('rotate', 'turnedKey', -90), 'rotated_left', 'left');
-  eq(await call('rotate', 'turnedKey', 360), null, 'upright');
-  eq(await call('rotate', 'nextAngle', 270, 0), 360, '270 to 0 goes a quarter on');
-  eq(await call('rotate', 'nextAngle', 0, 270), -90, '0 to 270 goes a quarter back');
-  eq(await call('rotate', 'nextAngle', -90, 90), 90, 'a half turn goes clockwise, as the app');
-  eq(await call('rotate', 'nextAngle', 450, 180), 540, 'running angles stay running');
-  // A portrait page fills the box's height upright; lying down, its height is the box's width.
-  const portrait = await call('rotate', 'sidewaysScale', 595 / 842);
-  ok(Math.abs(portrait - 55 / 72) < 1e-6, `a portrait page lying down shrinks to fit (${portrait})`);
-  // A landscape page fills the box's width upright; stood up, it grows to the box's height.
-  const landscape = await call('rotate', 'sidewaysScale', 842 / 595);
-  ok(Math.abs(landscape - 72 / 55) < 1e-6, `a landscape page stood up grows to fit (${landscape})`);
+  const call = (name, ...args) => runInPage(page, url, 'app/js/tools/split/index.js', name, ...args);
+  eq(await call('tappedOnto', '3,1-2', 5), [2, 0, 1], 'pages in the order typed');
+  eq(await call('tappedOnto', '  ', 5), [], 'blank: none');
+  eq(await call('tappedOnto', '2-', 5), null, 'half typed: unreadable');
+  eq(await call('tappedOnto', '9', 5), null, 'past the end: unreadable');
+  eq(await call('typedPages', '2-', 5), [], 'unreadable: none framed');
+  eq(await call('tapPage', '', 3, 5), '4', 'first tap');
+  eq(await call('tapPage', '3,1', 1, 5), '3,1-2', 'a tap adds at the end, runs kept short');
+  eq(await call('tapPage', '3,1-2', 0, 5), '3,2', 'a tap takes a page out');
+  eq(await call('tapPage', '5,4', 5, 6), '5,4,6', 'only runs going up become ranges');
+  eq(await call('tapPage', '2-', 0, 5), '2-', 'unreadable text left alone');
+  eq(await call('tapPage', '1,1', 0, 5), '', 'a page typed twice comes out once');
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -368,6 +324,11 @@ async function testSplit(page, url, fx, { touch, wide }) {
   eq(await mainButton(page).textContent(), S.split, 'main button');
   ok(await mainButton(page).isDisabled(), 'main button off without a PDF');
   await shot(page, `split-empty-${size}`);
+
+  // A file that isn't a PDF says so, and the screen stays as it was.
+  await pick(page, asFile('Broken.pdf', fx.damaged), { touch });
+  await snack(page, S.importFailed);
+  ok(await page.isVisible('.onepdf .ui-empty'), 'still asks for a PDF');
 
   await pick(page, asFile('Report.pdf', fx.report), { touch });
   await chosen(page, 'Report.pdf');
@@ -418,6 +379,13 @@ async function testSplit(page, url, fx, { touch, wide }) {
   eq(shown.map((p) => p.landscape), [true, false], 'page 3 stays landscape');
   ok(/^2 pages · /.test(await page.textContent('.ui-result-file .ui-result-details')), 'result says 2 pages');
   await shot(page, `split-result-one-${size}`);
+  // Start over asks while the PDF isn't saved; Cancel keeps it.
+  await press(page, '.ui-result-startover', { touch });
+  await page.waitForSelector('dialog[open] .ui-dialog-title');
+  eq(await page.textContent('dialog[open] .ui-dialog-title'), 'Start over?', 'asked first');
+  await press(page, 'dialog[open] .ui-btn:has-text("Cancel")', { touch });
+  await page.waitForSelector('dialog[open]', { state: 'detached' });
+  ok(await page.isVisible('.ui-result'), 'kept');
   // Saving it: a download named after the file name.
   const [download] = await Promise.all([page.waitForEvent('download'), press(page, '.ui-result-actions .ui-btn:has-text("Save to Downloads")', { touch })]);
   eq(download.suggestedFilename(), 'Report_split.pdf', 'downloaded name');
@@ -496,6 +464,12 @@ async function testSplit(page, url, fx, { touch, wide }) {
   eq(await page.textContent('.split-field .ui-field-label'), S.custom, 'custom label again');
   eq(await page.textContent('.split-field .ui-field-outline legend'), S.custom, 'the outline leaves room for it');
   eq(await page.getAttribute('.split-field .ui-field-input', 'inputmode'), null, 'no number keyboard for ranges');
+  // The Combine switch's section, closed for Fixed chunks, is open again.
+  const combineOpen = await page.evaluate(() => {
+    const box = document.querySelector('.split-section:has(.ui-switch-row)');
+    return !box.hidden && !box.inert && !box.classList.contains('is-collapsed');
+  });
+  ok(combineOpen, 'the Combine switch is back for custom ranges');
 
   // Every page: nothing to type; a PDF of each page, and a ZIP of them all.
   await press(page, `.split-options .ui-chip:has-text("${S.every}")`, { touch });
@@ -525,91 +499,26 @@ async function testSplit(page, url, fx, { touch, wide }) {
   // The history step of the result went with it.
   await page.waitForTimeout(100);
   eq(await page.evaluate(() => history.state?.step ?? null), null, 'no result step left');
-}
 
-// ---------------------------------------------------------------------------------------------
-// Delete pages
-
-async function testDeletePages(page, url, fx, { touch, wide }) {
-  const size = wide ? 'desktop' : 'phone';
-  await openTool(page, url, 'delete-pages');
-  eq(await page.textContent('.ui-topbar-title'), S.deleteAction, 'title');
-  eq(await mainButton(page).textContent(), S.deleteAction, 'main button');
-
-  // A file that isn't a PDF says so, and the screen stays as it was.
-  await pick(page, asFile('Broken.pdf', fx.damaged), { touch });
-  await snack(page, S.importFailed);
-  ok(await page.isVisible('.onepdf .ui-empty'), 'still asks for a PDF');
-
+  // Choose another PDF (a web extra): Split PDF holds no changes to lose, so the picker opens at
+  // once; the new PDF comes with its own pages and name, and nothing typed.
   await pick(page, asFile('Report.pdf', fx.report), { touch });
   await chosen(page, 'Report.pdf');
-  eq(await page.inputValue('.onepdf-name .ui-field-input'), 'Report_pages_deleted', 'default name');
-  eq(await page.textContent('.delete-pages-count'), S.deleteCount(0, 12), 'none marked');
-  eq(await page.getAttribute('.delete-pages-count', 'aria-live'), 'polite', 'count is announced');
-  eq(await page.textContent('.ui-field:not(.onepdf-name) .ui-field-label'), S.deleteField, 'field label');
-  eq(await page.textContent('.ui-field:not(.onepdf-name) .ui-field-support'), S.deleteHint, 'field hint');
-  ok(await mainButton(page).isDisabled(), 'off until pages are named');
-  ok(await page.isHidden('.delete-pages-need'), 'no warning yet');
-
-  // Tapping marks pages, written sorted with runs as ranges.
-  const tile = (n) => `.delete-pages-grid .ui-page-tile:nth-of-type(${n}) .ui-page`;
-  for (const n of [7, 2, 5, 6]) await press(page, tile(n), { touch });
-  eq(await page.inputValue('.ui-field:not(.onepdf-name) .ui-field-input'), '2,5-7', 'taps written as typed');
-  eq(await page.textContent('.delete-pages-count'), S.deleteCount(4, 12), 'four to delete');
-  eq(await selectedTiles(page, '.delete-pages-grid'), [2, 5, 6, 7], 'marked pages');
-  eq(await page.getAttribute(tile(2), 'aria-label'), 'Page 2, Marked to delete', 'a marked page says so');
-  eq(await page.getAttribute(tile(3), 'aria-label'), 'Page 3, Kept', 'a kept page says so');
-  ok(!(await mainButton(page).isDisabled()), 'Delete pages on');
-  await page.waitForSelector('.delete-pages-grid .ui-page-tile.is-selected .ui-page-picture.has-picture');
-  await themes(page, `delete-marked-${size}`);
-  await press(page, tile(6), { touch });
-  eq(await page.inputValue('.ui-field:not(.onepdf-name) .ui-field-input'), '2,5,7', 'unmarked');
-
-  // Every page marked: one must stay.
-  await typeInto(page, '.ui-field:not(.onepdf-name) .ui-field-input', '1-12');
-  eq(await page.textContent('.delete-pages-count'), S.deleteCount(12, 12), 'all marked');
-  await page.waitForSelector('.delete-pages-need', { state: 'visible' });
-  eq(await page.textContent('.delete-pages-need'), S.needPage, 'keep a page');
-  await shot(page, `delete-need-${size}`);
-  await press(page, '.onepdf > .ui-bottombar .ui-btn', { touch });
-  await snack(page, S.needPage);
-  for (const [typed, message] of [['13', S.range(12)], ['2,x', S.format], ['9-4', S.reversed], ['  ', null]]) {
-    await typeInto(page, '.ui-field:not(.onepdf-name) .ui-field-input', typed);
-    if (!message) {
-      ok(await mainButton(page).isDisabled(), 'blank: nothing to delete');
-      continue;
-    }
-    await press(page, '.onepdf > .ui-bottombar .ui-btn', { touch });
-    await snack(page, message);
-  }
-  await page.waitForSelector('.delete-pages-need', { state: 'hidden' });
-
-  await typeInto(page, '.ui-field:not(.onepdf-name) .ui-field-input', '2,5-7');
-  const files = await runTool(page, { touch });
-  eq(files.map((f) => f.name), ['Report_pages_deleted.pdf'], 'named');
-  eq(await pageTexts(page, files[0].bytes), ['PAGE 1', 'PAGE 3', 'PAGE 4', 'PAGE 8', 'PAGE 9', 'PAGE 10', 'PAGE 11', 'PAGE 12'], 'the pages left');
-  ok(!(new TextDecoder('latin1').decode(files[0].bytes).includes('PAGE 6')), 'deleted pages are gone from the file');
-  ok(/^8 pages · /.test(await page.textContent('.ui-result-file .ui-result-details')), 'result says 8 pages');
-  await shot(page, `delete-result-${size}`);
-  // Start over asks while the PDF isn't saved.
-  await press(page, '.ui-result-startover', { touch });
-  await page.waitForSelector('dialog[open] .ui-dialog-title');
-  eq(await page.textContent('dialog[open] .ui-dialog-title'), 'Start over?', 'asked first');
-  await press(page, 'dialog[open] .ui-btn:has-text("Cancel")', { touch });
-  await page.waitForSelector('dialog[open]', { state: 'detached' });
-  ok(await page.isVisible('.ui-result'), 'kept');
-  // On the computer the browser's Back returns to editing (the result's history step).
-  await backToEditing(page, { touch, browserBack: !touch });
-  eq(await page.evaluate(() => location.hash), '#/tool/delete-pages', 'still in Delete pages');
-  // The marks stay for another go.
-  eq(await page.inputValue('.ui-field:not(.onepdf-name) .ui-field-input'), '2,5-7', 'marks kept');
-  // Leaving the tool with marks only doesn't ask: nothing is turned or moved (as the app).
-  await press(page, '.onepdf .ui-topbar-nav', { touch });
-  await page.waitForSelector('#app .screen[data-tool="delete-pages"]', { state: 'detached' });
-  ok(!(await page.$('dialog[open]')), 'nothing asked on leaving');
+  await typeInto(page, '.split-field .ui-field-input', '2-4');
+  await typeInto(page, '.onepdf-name .ui-field-input', 'Mine');
+  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), press(page, `.onepdf-card .ui-btn:has-text("${S.another}")`, { touch })]);
+  ok(!(await page.$('dialog[open]')), 'nothing asked before the picker');
+  await chooser.setFiles(asFile('Other.pdf', fx.other));
+  await chosen(page, 'Other.pdf');
+  eq(await page.locator('.split-picker .ui-page').count(), 3, "the other PDF's pages");
+  eq(await page.inputValue('.onepdf-name .ui-field-input'), 'Other_split', 'its own name');
+  eq(await page.inputValue('.split-field .ui-field-input'), '', 'nothing typed yet');
+  // Remove takes it away: the screen asks for a PDF again.
+  await press(page, '.onepdf-card .ui-icon-btn[aria-label="Remove Other.pdf"]', { touch });
+  await page.waitForSelector('.onepdf .ui-empty');
+  ok(await mainButton(page).isDisabled(), 'Split off once the PDF is removed');
 
   // A PDF with a password: asked for, a wrong one said, the new PDF has none.
-  await openTool(page, url, 'delete-pages');
   await pick(page, asFile('protected.pdf', fx.locked.bytes), { touch });
   await page.waitForSelector('dialog[open] input[type="password"]');
   await shot(page, `password-${size}`);
@@ -620,177 +529,35 @@ async function testDeletePages(page, url, fx, { touch, wide }) {
   await page.fill('dialog[open] input[type="password"]', fx.locked.password);
   await press(page, 'dialog[open] .ui-btn:has-text("Open PDF")', { touch });
   await chosen(page, 'protected.pdf');
-  await typeInto(page, '.ui-field:not(.onepdf-name) .ui-field-input', '1');
+  await typeInto(page, '.split-field .ui-field-input', '1');
   const locked = await runTool(page, { touch });
   ok(locked[0].passwordRemoved, 'told the password went');
   eq(await page.textContent('.ui-result-note'), S.noPassword, 'says the new PDF has no password');
   const out = await PDFDocument.load(locked[0].bytes, { updateMetadata: false });
   ok(!out.isEncrypted, 'saved without a password');
-  eq(out.getPageCount(), (await PDFDocument.load(fx.locked.bytes, { ignoreEncryption: true })).getPageCount() - 1, 'one page fewer');
-}
+  eq(out.getPageCount(), 1, 'the one page asked for');
 
-// ---------------------------------------------------------------------------------------------
-// Rotate PDF
-
-const turnOf = (page, n) => page.evaluate((i) => document.querySelectorAll('.rotate-card')[i].card.angle, n - 1);
-/** What page n says about its turn, or null while it says nothing (its line closed or closing). */
-const turnedText = (page, n) => page.evaluate((i) => {
-  const box = document.querySelectorAll('.rotate-card')[i].querySelector('.onepdf-collapse');
-  return box.hidden || box.classList.contains('is-collapsed') ? null : box.textContent;
-}, n - 1);
-
-async function testRotate(page, url, fx, { touch, wide }) {
-  const size = wide ? 'desktop' : 'phone';
-  await openTool(page, url, 'rotate');
-  eq(await page.textContent('.ui-topbar-title'), S.rotateAction, 'title');
-  await pick(page, asFile('Report.pdf', fx.report), { touch });
-  await chosen(page, 'Report.pdf');
-  eq(await page.inputValue('.onepdf-name .ui-field-input'), 'Report_rotated', 'default name');
-  eq(await page.textContent('.rotate-all-title'), S.rotateAll, 'all pages');
-  eq(await page.textContent('.rotate-all .onepdf-hint'), S.rotateHint, 'hint');
-  eq(await page.locator('.rotate-card').count(), 12, 'a card per page');
-  ok(await mainButton(page).isDisabled(), 'off until a page is turned');
-  ok(await page.isDisabled('.rotate-reset'), 'Reset off');
-  await page.waitForSelector('.rotate-card .rotate-thumb.has-picture canvas');
-  // The turn icons aren't mirrored for right-to-left text (TurnIcon.kt).
-  eq(await page.locator('.rotate-card .icon-mirrored').count(), 0, 'turn icons drawn the same either way');
-
-  const btn = (n, way) => `.rotate-card:nth-of-type(${n}) .ui-icon-btn[aria-label="Rotate page ${n} ${way}"]`;
-  await press(page, btn(1, 'right'), { touch });
-  eq(await turnOf(page, 1), 90, 'page 1 turned right');
-  eq(await turnedText(page, 1), S.turnedRight, 'says turned right');
-  ok(!(await mainButton(page).isDisabled()), 'Rotate on');
-  ok(!(await page.isDisabled('.rotate-reset')), 'Reset on');
-  // Two quarters left: upside down, the short way round.
-  await press(page, btn(2, 'left'), { touch });
-  await press(page, btn(2, 'left'), { touch });
-  eq(await turnOf(page, 2), -180, 'page 2 went left twice');
-  eq(await turnedText(page, 2), S.upsideDown, 'upside down');
-  // Animated: the picture is mid-turn just after a press. Pressed in the page, so the frames are
-  // watched from the press on, however busy the machine is between the test and the browser.
-  await page.locator(btn(3, 'right')).scrollIntoViewIfNeeded();
-  // The angles the picture shows over the next frames: some between the two.
-  const angles = await page.evaluate(async (selector) => {
-    const turn = document.querySelectorAll('.rotate-card')[2].querySelector('.rotate-turn');
-    document.querySelector(selector).click();
-    const seen = [];
-    for (let i = 0; i < 30; i++) {
-      const x = new DOMMatrix(getComputedStyle(turn).transform);
-      seen.push(Math.round(Math.atan2(x.b, x.a) * 180 / Math.PI));
-      await new Promise((r) => requestAnimationFrame(r));
-    }
-    return seen;
-  }, btn(3, 'right'));
-  ok(angles.some((a) => a > 5 && a < 85) && angles.at(-1) === 90, `turning, not jumping (${angles.join(' ')})`);
-  await page.waitForTimeout(400);
-  await themes(page, `rotate-turned-${size}`);
-
-  // All pages at once.
-  await press(page, '.rotate-all .ui-icon-btn[aria-label="Rotate all pages right"]', { touch });
-  eq(await turnedText(page, 1), S.upsideDown, 'page 1 now upside down');
-  eq(await turnedText(page, 2), S.turnedLeft, 'page 2 now turned left');
-  eq(await turnedText(page, 3), S.upsideDown, 'page 3 now upside down');
-  eq(await turnedText(page, 4), S.turnedRight, 'page 4 now turned right');
-  eq(await turnOf(page, 2), -90, 'page 2 the short way');
-  await press(page, '.rotate-all .ui-icon-btn[aria-label="Rotate all pages left"]', { touch });
-  // Reset turns them all back, and Rotate is off again.
-  await press(page, '.rotate-reset', { touch });
-  await page.waitForTimeout(300);
-  ok(await mainButton(page).isDisabled(), 'off after Reset');
-  eq(await page.$$eval('.rotate-card .onepdf-collapse', (els) => els.every((e) => e.hidden)), true, 'no page says it is turned');
-
-  // Turned pages are work: leaving or removing the PDF asks first.
-  await press(page, btn(1, 'right'), { touch });
+  // Leaving the tool with pages typed doesn't ask: typing isn't work to lose (as the app).
+  await backToEditing(page, { touch });
+  eq(await page.inputValue('.split-field .ui-field-input'), '1', 'pages kept');
   await press(page, '.onepdf .ui-topbar-nav', { touch });
-  await page.waitForSelector('dialog[open] .ui-dialog-title');
-  eq(await page.textContent('dialog[open] .ui-dialog-title'), S.discardTitle, 'asked on leaving');
-  await press(page, 'dialog[open] .ui-btn:has-text("Keep")', { touch });
-  await page.waitForSelector('dialog[open]', { state: 'detached' });
-  eq(await turnOf(page, 1), 90, 'kept');
-  await press(page, '.onepdf-card .ui-icon-btn[aria-label="Remove Report.pdf"]', { touch });
-  await page.waitForSelector('dialog[open] .ui-dialog-title');
-  await press(page, 'dialog[open] .ui-btn:has-text("Keep")', { touch });
-  await page.waitForSelector('dialog[open]', { state: 'detached' });
-  ok(await page.isVisible('.onepdf-card'), 'still there after Keep');
-
-  // Another PDF in its place: asked first too, then the new one's pages.
-  await press(page, '.onepdf-card .ui-btn:has-text("Choose another PDF")', { touch });
-  await page.waitForSelector('dialog[open] .ui-dialog-title');
-  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), press(page, 'dialog[open] .ui-btn:has-text("Discard")', { touch })]);
-  await chooser.setFiles(asFile('Other.pdf', fx.other));
-  await chosen(page, 'Other.pdf');
-  eq(await page.locator('.rotate-card').count(), 3, "the other PDF's pages");
-  eq(await page.inputValue('.onepdf-name .ui-field-input'), 'Other_rotated', 'its own name');
-  ok(await mainButton(page).isDisabled(), 'nothing turned yet');
-  await press(page, '.onepdf-card .ui-icon-btn[aria-label="Remove Other.pdf"]', { touch });
-  await page.waitForSelector('.onepdf .ui-empty');
-
-  // Turn pages 1 right, 2 upside down, 4 left; the PDF says so and its content is as it was.
-  await pick(page, asFile('Report.pdf', fx.report), { touch });
-  await chosen(page, 'Report.pdf');
-  await press(page, btn(1, 'right'), { touch });
-  await press(page, btn(2, 'right'), { touch });
-  await press(page, btn(2, 'right'), { touch });
-  await press(page, btn(4, 'left'), { touch });
-  const files = await runTool(page, { touch });
-  eq(files.map((f) => f.name), ['Report_rotated.pdf'], 'named');
-  eq(await rotationsOf(files[0].bytes), [90, 180, 0, 270, 0, 0, 0, 0, 0, 0, 0, 0], 'turns saved');
-  eq((await pageTexts(page, files[0].bytes)).slice(0, 4), ['PAGE 1', 'PAGE 2', 'PAGE 3', 'PAGE 4'], 'text as it was');
-  const shown = await shownPages(page, files[0].bytes);
-  eq(shown.slice(0, 5).map((p) => p.landscape), [true, false, true, true, false], 'pages shown turned');
-  await shot(page, `rotate-result-${size}`);
-  // On the phone, Back (the browser's) returns to editing, as Android's Back does in the app.
-  await backToEditing(page, { touch, browserBack: touch });
-  eq(await page.evaluate(() => location.hash), '#/tool/rotate', 'still in Rotate PDF');
-  eq(await turnOf(page, 4), -90, 'turns kept after Back to editing');
+  await page.waitForSelector('#app .screen[data-tool="split"]', { state: 'detached' });
+  ok(!(await page.$('dialog[open]')), 'nothing asked on leaving');
 }
 
 // ---------------------------------------------------------------------------------------------
-// Desktop extras: keyboard, files dropped and pasted, a long PDF, cancelling
+// Desktop extras: files dropped, a long PDF, cancelling, a PDF handed over, the password question
 
 async function testDesktopExtras(page, url, fx) {
-  // Delete pages from the keyboard: arrows move between pages, Space marks one.
-  await openTool(page, url, 'delete-pages');
-  await pick(page, asFile('Report.pdf', fx.report));
-  await chosen(page, 'Report.pdf');
-  await page.focus('.delete-pages-grid .ui-page-tile:nth-of-type(1) .ui-page');
-  await page.keyboard.press('ArrowRight');
-  await page.keyboard.press('Space');
-  await page.keyboard.press('ArrowDown');
-  await page.keyboard.press('Enter');
-  const cols = await page.evaluate(() => getComputedStyle(document.querySelector('.delete-pages-grid .ui-pagegrid')).gridTemplateColumns.split(' ').length);
-  eq(await page.inputValue('.ui-field:not(.onepdf-name) .ui-field-input'), `2,${2 + cols}`, 'marked from the keyboard');
-  ok(cols >= 4, `more columns on a wide screen (${cols})`);
-
-  // A PDF dropped on the screen takes the place of the one there.
+  // A PDF dropped on the Choose PDF card opens; one dropped on the screen then takes its place.
+  await openTool(page, url, 'split');
   const drop = (name, bytes, target = '.onepdf') => dropFile(page, name, bytes, target);
-  await drop('Other.pdf', fx.other);
-  await chosen(page, 'Other.pdf');
-  eq(await page.locator('.delete-pages-grid .ui-page').count(), 3, 'the dropped PDF');
-
-  // Rotate: a drop over turned pages asks first.
-  await openTool(page, url, 'rotate');
   await drop('Report.pdf', fx.report, '.ui-empty');
   await chosen(page, 'Report.pdf');
-  await page.focus('.rotate-card:nth-of-type(1) .ui-icon-btn[aria-label="Rotate page 1 right"]');
-  await page.keyboard.press('Enter');
-  eq(await turnOf(page, 1), 90, 'turned from the keyboard');
+  eq(await page.locator('.split-picker .ui-page').count(), 12, 'the PDF dropped on the card');
   await drop('Other.pdf', fx.other);
-  await page.waitForSelector('dialog[open] .ui-dialog-title');
-  await page.click('dialog[open] .ui-btn:has-text("Keep")');
-  await page.waitForSelector('dialog[open]', { state: 'detached' });
-  eq(await page.textContent('.onepdf-card .ui-file-name'), 'Report.pdf', 'kept on Keep');
-  // Pasted, with Discard.
-  await page.evaluate(async (b64) => {
-    const data = new DataTransfer();
-    data.items.add(new File([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], 'Pasted.pdf', { type: 'application/pdf' }));
-    document.body.focus();
-    document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
-  }, Buffer.from(fx.other).toString('base64'));
-  await page.waitForSelector('dialog[open] .ui-dialog-title');
-  await page.click('dialog[open] .ui-btn:has-text("Discard")');
-  await chosen(page, 'Pasted.pdf');
-  ok(await mainButton(page).isDisabled(), 'nothing turned in the pasted PDF');
+  await chosen(page, 'Other.pdf');
+  eq(await page.locator('.split-picker .ui-page').count(), 3, 'the PDF dropped on the screen');
 
   // A long PDF: the screen stays responsive, pages are drawn as they come near, and the work can
   // be cancelled.
@@ -851,14 +618,16 @@ async function testDesktopExtras(page, url, fx) {
   // The main button was only marked off meanwhile, so the dialog gave the focus back to it.
   ok(await page.evaluate(() => document.activeElement === document.querySelector('.onepdf > .ui-bottombar .ui-btn')), 'the focus is back on Split PDF');
 
-  // Tool opened with a PDF handed over (Choose a tool, Home's drop).
+  // Tool opened with a PDF handed over (Choose a tool, Home's drop): from Home, so the tool mounts
+  // anew with the file rather than the screen above being shown again.
   await page.evaluate(async (b64) => {
     const { navigate } = await import(new URL('js/core/router.js', location.href).href);
     const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-    await navigate('/tool/rotate', { files: [{ name: 'Handed.pdf', type: 'application/pdf', size: bytes.length, lastModified: 0, bytes }] });
+    await navigate('/');
+    await navigate('/tool/split', { files: [{ name: 'Handed.pdf', type: 'application/pdf', size: bytes.length, lastModified: 0, bytes }] });
   }, Buffer.from(fx.other).toString('base64'));
   await chosen(page, 'Handed.pdf');
-  eq(await page.locator('.rotate-card').count(), 3, 'the PDF handed over is open');
+  eq(await page.locator('.split-picker .ui-page').count(), 3, 'the PDF handed over is open');
 
   // The browser's Back while a password is asked for closes the question, as Android's Back closes
   // a dialog, and stays; the focus goes back to the card picked from.
@@ -889,7 +658,7 @@ async function testReviewFixes(page, url, fx) {
   });
 
   // A password question cancelled with Escape: the focus stays on Choose PDF, opened from the keyboard.
-  await openTool(page, url, 'delete-pages');
+  await openTool(page, url, 'split');
   const chooser = await chooserFromKeyboard(page, '.onepdf .ui-empty');
   await chooser.setFiles(asFile('protected.pdf', fx.locked.bytes));
   await page.waitForSelector('dialog[open] input[type="password"]');
@@ -955,18 +724,11 @@ async function testReviewFixes(page, url, fx) {
   await page.waitForSelector('dialog[open]', { state: 'detached' });
   ok(await page.evaluate(() => document.activeElement === document.querySelector('.onepdf .ui-empty')), `Start over: the focus on Choose PDF (${await active()})`);
 
-  // Rotate: Reset pages turns itself off; the focus goes to "Rotate all pages right".
-  await openTool(page, url, 'rotate');
+  // On a wide screen the main button ends where the column above it ends (with a PDF open, so the
+  // column holds the screen's parts).
+  await openTool(page, url, 'split');
   await pick(page, asFile('Report.pdf', fx.report));
   await chosen(page, 'Report.pdf');
-  await page.focus('.rotate-card:nth-of-type(2) .ui-icon-btn[aria-label="Rotate page 2 left"]');
-  await page.keyboard.press('Enter');
-  await page.focus('.rotate-reset');
-  await page.keyboard.press('Enter');
-  eq(await page.evaluate(() => [...document.querySelectorAll('.rotate-card')].map((c) => c.card.angle % 360)).then((a) => a.every((x) => x === 0)), true, 'Reset pages turns them back');
-  eq(await active(), 'Rotate all pages right', 'Reset pages: the focus on Rotate all pages right');
-
-  // On a wide screen the main button ends where the column above it ends.
   for (const width of [1366, 1920]) {
     await page.setViewportSize({ width, height: 900 });
     const edges = await page.evaluate(() => {
@@ -980,31 +742,19 @@ async function testReviewFixes(page, url, fx) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Reduced motion, narrow screens
+// Narrow screens
 
-async function testMotionAndWidths(page, url, fx) {
-  await page.emulateMedia({ reducedMotion: 'reduce' });
-  await openTool(page, url, 'rotate');
-  await pick(page, asFile('Report.pdf', fx.report), { touch: true });
-  await chosen(page, 'Report.pdf');
-  eq(await page.$eval('.rotate-turn', (e) => getComputedStyle(e).transitionDuration), '0s', 'no turning animation with reduced motion');
-  await page.tap('.rotate-card:nth-of-type(1) .ui-icon-btn[aria-label="Rotate page 1 right"]');
-  const angle = await page.$eval('.rotate-turn', (e) => { const x = new DOMMatrix(getComputedStyle(e).transform); return Math.round(Math.atan2(x.b, x.a) * 180 / Math.PI); });
-  eq(angle, 90, 'turned at once');
-  await page.emulateMedia({ reducedMotion: 'no-preference' });
-
-  for (const tool of ['split', 'delete-pages', 'rotate']) {
-    await page.setViewportSize({ width: 320, height: 640 });
-    await openTool(page, url, tool);
-    await checkNoSideways(page, `${tool} empty at 320 px`);
-    await pick(page, asFile('A very long file name for a report that goes on and on.pdf', fx.report), { touch: true });
-    await chosen(page, 'A very long file name for a report that goes on and on.pdf');
-    await page.waitForTimeout(300);
-    await checkNoSideways(page, `${tool} at 320 px`);
-    const small = await page.evaluate(() => [...document.querySelectorAll('.onepdf .ui-icon-btn')].filter((b) => b.getBoundingClientRect().height < 48 && b.getClientRects().length).length);
-    eq(small, 0, `${tool}: icon buttons 48 px to tap`);
-    await shot(page, `${tool}-320`, { full: true });
-  }
+async function testNarrow(page, url, fx) {
+  await page.setViewportSize({ width: 320, height: 640 });
+  await openTool(page, url, 'split');
+  await checkNoSideways(page, 'split empty at 320 px');
+  await pick(page, asFile('A very long file name for a report that goes on and on.pdf', fx.report), { touch: true });
+  await chosen(page, 'A very long file name for a report that goes on and on.pdf');
+  await page.waitForTimeout(300);
+  await checkNoSideways(page, 'split at 320 px');
+  const small = await page.evaluate(() => [...document.querySelectorAll('.onepdf .ui-icon-btn')].filter((b) => b.getBoundingClientRect().height < 48 && b.getClientRects().length).length);
+  eq(small, 0, 'split: icon buttons 48 px to tap');
+  await shot(page, 'split-320', { full: true });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1012,7 +762,7 @@ async function testMotionAndWidths(page, url, fx) {
 
 async function testOtherBrowser(page, url, fx, browser) {
   const touch = browser !== 'firefox';
-  // Split PDF and Rotate PDF get their PDF through the file input, Delete pages by a drop.
+  // The PDF picked through the file input; the top bar's arrow back to editing.
   await openTool(page, url, 'split');
   await pick(page, asFile('Report.pdf', fx.report), { touch });
   await chosen(page, 'Report.pdf');
@@ -1023,26 +773,16 @@ async function testOtherBrowser(page, url, fx, browser) {
   await backToEditing(page, { touch });
   await shot(page, `split-${browser}`);
 
-  await openTool(page, url, 'delete-pages');
+  // The PDF dropped on the card; the browser's Back to editing.
+  await openTool(page, url, 'split');
   await pick(page, asFile('Report.pdf', fx.report), { touch, drop: true });
   await chosen(page, 'Report.pdf');
-  await press(page, '.delete-pages-grid .ui-page-tile:nth-of-type(1) .ui-page', { touch });
-  eq(await page.textContent('.delete-pages-count'), S.deleteCount(1, 12), `${browser}: marked`);
+  await press(page, '.split-picker .ui-page-tile:nth-of-type(1) .ui-page', { touch });
   files = await runTool(page, { touch });
-  eq(await rotationsOf(files[0].bytes).then((r) => r.length), 11, `${browser}: page deleted`);
-  // The browser's Back returns to editing.
+  eq(await pageTexts(page, files[0].bytes), ['PAGE 1'], `${browser}: the dropped PDF split`);
   await backToEditing(page, { browserBack: true });
-  eq(await page.evaluate(() => location.hash), '#/tool/delete-pages', `${browser}: still in Delete pages`);
-  eq(await page.textContent('.delete-pages-count'), S.deleteCount(1, 12), `${browser}: marks kept`);
-
-  await openTool(page, url, 'rotate');
-  await pick(page, asFile('Report.pdf', fx.report), { touch });
-  await chosen(page, 'Report.pdf');
-  await press(page, '.rotate-all .ui-icon-btn[aria-label="Rotate all pages left"]', { touch });
-  await page.waitForTimeout(300);
-  await shot(page, `rotate-${browser}`);
-  files = await runTool(page, { touch });
-  eq(await rotationsOf(files[0].bytes), new Array(12).fill(270), `${browser}: all turned left`);
+  eq(await page.evaluate(() => location.hash), '#/tool/split', `${browser}: still in Split PDF`);
+  eq(await page.inputValue('.split-field .ui-field-input'), '1', `${browser}: pages kept`);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1066,22 +806,18 @@ console.log('Phone (360 px, touch), Chromium');
 await withPage(async (page, url) => {
   await step('helpers', () => testHelpers(page, url));
   await step('split', () => testSplit(page, url, fx, { touch: true, wide: false }));
-  await step('delete pages', () => testDeletePages(page, url, fx, { touch: true, wide: false }));
-  await step('rotate', () => testRotate(page, url, fx, { touch: true, wide: false }));
-  await step('reduced motion and 320 px', () => testMotionAndWidths(page, url, fx));
+  await step('320 px', () => testNarrow(page, url, fx));
 }, { viewport: PHONE });
 
 console.log('Desktop (1366 px, mouse and keyboard), Chromium');
 await withPage(async (page, url) => {
-  // Nothing these tools do embeds a font with pdf-lib: fontkit (157 kB gzipped) isn't loaded.
+  // Nothing Split PDF does embeds a font with pdf-lib: fontkit (157 kB gzipped) isn't loaded.
   const fontkit = [];
   page.on('request', (r) => { if (r.url().includes('/vendor/fontkit/')) fontkit.push(r.url()); });
   await step('split', () => testSplit(page, url, fx, { touch: false, wide: true }));
-  await step('delete pages', () => testDeletePages(page, url, fx, { touch: false, wide: true }));
-  await step('rotate', () => testRotate(page, url, fx, { touch: false, wide: true }));
-  await step('keyboard, drop, paste, long PDF, cancel', () => testDesktopExtras(page, url, fx));
+  await step('drop, long PDF, cancel, a PDF handed over, the password question', () => testDesktopExtras(page, url, fx));
   await step('focus, messages after the progress, paste after a result, layout', () => testReviewFixes(page, url, fx));
-  eq(fontkit, [], 'no fontkit loaded by Split, Delete pages or Rotate');
+  eq(fontkit, [], 'no fontkit loaded by Split PDF');
 }, { viewport: DESKTOP, mobile: false });
 }
 
@@ -1089,7 +825,7 @@ if (!QUICK) {
   for (const browser of ['firefox', 'webkit']) {
     console.log(`Phone (360 px), ${browser}`);
     await withPage(async (page, url) => {
-      await step(`${browser}: split, delete pages, rotate`, () => testOtherBrowser(page, url, fx, browser));
+      await step(`${browser}: split`, () => testOtherBrowser(page, url, fx, browser));
     }, { browser, viewport: PHONE });
   }
 }

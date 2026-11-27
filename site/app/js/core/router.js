@@ -1,9 +1,9 @@
 // Moving between screens with the address's hash: #/ (Home), #/tool/<id>, #/recent, #/settings,
-// #/settings/about, #/settings/about/licenses, #/choose (Choose a tool) and #/language (the first
-// launch's language choice). Each screen is a module whose mount(ctx) renders into ctx.root, loaded
-// when first shown. The browser's Back goes back as the app's back arrow does, and asks first when
+// #/settings/about, #/settings/about/licenses, #/settings/donate, #/settings/donate/github (GitHub
+// Sponsors), #/choose (Choose a tool) and #/language (the first launch's language choice). Each
+// screen is a module whose mount(ctx) renders into ctx.root, loaded when first shown. The browser's Back goes back as the app's back arrow does, and asks first when
 // the screen has unsaved work; with a dialog or menu open it closes that instead, as Android's Back.
-import { TOOLS } from './tools.js';
+import { TOOLS, MOVED_TOOLS } from './tools.js';
 import { h } from './dom.js';
 import { t, onLanguageChange } from './i18n.js';
 import { icon } from './icons.js';
@@ -17,6 +17,8 @@ const SCREENS = {
   settings: { module: 'screens/settings.js', depth: 1 },
   about: { module: 'screens/about.js', depth: 2 },
   licenses: { module: 'screens/licenses.js', depth: 3 },
+  donate: { module: 'screens/donate.js', depth: 2 },
+  sponsors: { module: 'screens/sponsors.js', depth: 3 },
   choose: { module: 'screens/choose.js', depth: 1 },
   language: { module: 'screens/language.js', depth: 0 },
 };
@@ -27,6 +29,8 @@ const PATHS = {
   '/settings': 'settings',
   '/settings/about': 'about',
   '/settings/about/licenses': 'licenses',
+  '/settings/donate': 'donate',
+  '/settings/donate/github': 'sponsors',
   '/choose': 'choose',
   '/language': 'language',
 };
@@ -63,6 +67,12 @@ export function parsePath(path) {
   if (p in PATHS) return { path: p, name: PATHS[p], query };
   const m = p.match(/^\/tool\/([a-z0-9-]+)$/);
   if (m && Object.prototype.hasOwnProperty.call(TOOLS, m[1])) return { path: p, name: 'tool', id: m[1], query };
+  // A tool that is now part of another: its old address leads there (moved tells show() to put
+  // the new address in the bar, and onLocationChange to step back over it while that tool shows).
+  if (m && Object.prototype.hasOwnProperty.call(MOVED_TOOLS, m[1])) {
+    const id = MOVED_TOOLS[m[1]];
+    return { path: `/tool/${id}`, name: 'tool', id, query, moved: true };
+  }
   return null;
 }
 
@@ -75,6 +85,8 @@ function parentOf(route, from) {
   if (route.name === 'tool') return from === '/choose' ? '/choose' : '/';
   if (route.name === 'licenses') return '/settings/about';
   if (route.name === 'about') return '/settings';
+  if (route.name === 'sponsors') return '/settings/donate';
+  if (route.name === 'donate') return '/settings';
   if (route.name === 'home' || route.name === 'language') return null;
   return '/';
 }
@@ -313,6 +325,9 @@ async function show(path, state, { files = null, params = null, initial = false 
     history.replaceState(home, '', location.pathname + location.search + '#/');
     route = parsePath('/');
     state = home;
+  } else if (route.moved) {
+    // An old tool's address: the bar shows where it leads now, in the same history entry.
+    history.replaceState(state ?? { usugami: 1, idx: 0 }, '', location.pathname + location.search + '#' + route.path + queryString(route.query));
   }
   const from = state?.from ?? null;
   const depth = depthOf(route, from);
@@ -415,7 +430,7 @@ async function show(path, state, { files = null, params = null, initial = false 
 
 /**
  * Shows the screen for `path` ('/', '/tool/<id>', '/recent', '/settings', '/settings/about',
- * '/choose'). `files` (FileItem[]) and `params` go to the screen's mount(ctx). `replace` swaps
+ * '/settings/donate', '/choose'). `files` (FileItem[]) and `params` go to the screen's mount(ctx). `replace` swaps
  * the current history entry instead of adding one; `from` is where the back arrow leads when
  * there is no page to go back to (a tool opened from Choose a tool passes '/choose'); `force`
  * shows the screen again even when it is showing already. It doesn't ask about unsaved work:
@@ -536,7 +551,8 @@ async function onLocationChange() {
   }
   const path = hashPath();
   let state = history.state;
-  if (!state?.usugami) {
+  const fresh = !state?.usugami;
+  if (fresh) {
     // A link or a typed address: a new page of the app.
     state = { usugami: 1, idx: (current?.idx ?? 0) + 1 };
     history.replaceState(state, '', location.href);
@@ -548,6 +564,16 @@ async function onLocationChange() {
     return;
   }
   const route = parsePath(path);
+  if (current && route?.moved && route.path === current.path) {
+    // An old tool's address followed while the tool that took it over shows: no second entry of
+    // the same screen. The new entry is gone back over (not again for the hashchange after its
+    // popstate, which finds it noted); an entry met again gets the tool's address in the bar.
+    if (fresh) {
+      moveOwn(() => history.back());
+      return;
+    }
+    history.replaceState(state, '', location.pathname + location.search + '#' + route.path + queryString(route.query));
+  }
   if (current && route && route.path === current.path && (state.from ?? null) === (current.from ?? null)) {
     // The same screen, on another of its steps.
     const step = state.step ?? null;

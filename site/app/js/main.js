@@ -4,6 +4,7 @@ import { getSetting, onSettingChange } from './core/settings.js';
 import { initI18n, loadStrings, t, LANGUAGES, onLanguageChange } from './core/i18n.js';
 import { h } from './core/dom.js';
 import { startRouter } from './core/router.js';
+import { coffeeFloat } from './core/coffee.js';
 import { initShareInbox } from './core/share-inbox.js';
 
 const THEME_COLORS = { light: '#fff8f7', dark: '#171717' };
@@ -85,6 +86,8 @@ async function start() {
   await loadStrings('kit', 'mark').catch(() => {});
   document.body.prepend(skipLink());
   const app = document.getElementById('app');
+  // The "Buy me a coffee" button at the bottom corner: after the screens, so Tab reaches it last.
+  app.after(coffeeFloat());
   // With more than one language, the first launch asks for one, as the Android app does; the
   // screen the address named shows once it is chosen.
   const firstLaunch = LANGUAGES.length > 1 && getSetting('language') == null;

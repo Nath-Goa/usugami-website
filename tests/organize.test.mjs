@@ -1,8 +1,10 @@
-// Split PDF, Merge PDF, Reorganize PDF, Delete pages and Rotate PDF (engine/organize.js), page
-// selection (engine/page-selection.js) and the clean-up that makes removed pages really gone
+// Split PDF, Merge PDF and Reorganize PDF (engine/organize.js), page selection
+// (engine/page-selection.js) and the clean-up that makes removed pages really gone
 // (engine/cleanup.js). Ports PdfPageSelectionTest.kt and the matching cases of the app's
-// PdfToolsDeviceTest.kt and PageToolsDeviceTest.kt. Results are read back with pdf-lib (structure),
-// pdf.js (text, labels, rendering) and by inflating every stream in the file.
+// PdfToolsDeviceTest.kt, PageToolsDeviceTest.kt and PdfEditingDeviceTest.kt. Pages turned and pages
+// removed are saved by Reorganize PDF, which took over from Rotate PDF and Delete pages: what those
+// two were tested for is tested here through reorganizePdf. Results are read back with pdf-lib
+// (structure), pdf.js (text, labels, rendering) and by inflating every stream in the file.
 //
 //   node tests/organize.test.mjs
 import zlib from 'node:zlib';
@@ -11,10 +13,12 @@ import {
   PDFRawStream, PDFStream, decodePDFRawStream,
 } from '@cantoo/pdf-lib';
 import { withPage, assert, runInPage, saveOutput } from './harness.mjs';
-import {
-  parsePageSelection, parseRanges, fixedChunks, pagesToDelete, formatPages, formatPagesInOrder, PageSelectionError,
-  defaultName as lightDefaultName,
-} from '../site/app/js/engine/page-selection.js';
+import * as pageSelection from '../site/app/js/engine/page-selection.js';
+
+const {
+  parsePageSelection, parseRanges, fixedChunks, formatPages, formatPagesInOrder, PageSelectionError,
+  defaultName: lightDefaultName,
+} = pageSelection;
 
 const ENGINE = 'app/js/engine/organize.js';
 const A4 = [595.28, 841.89];
@@ -78,10 +82,12 @@ function pageSelectionTests() {
   equal(outOfRange.pageCount, 6, 'The error knows the page count');
   equal([outOfRange.key, outOfRange.args], ['pdf_pages_range', [6]], 'Its message is pdf_pages_range with the count');
 
-  equal(pagesToDelete('5-7,2,6', 10), [1, 4, 5, 6], 'Pages to delete are sorted');
-  const all = throwsProblem(() => pagesToDelete('1-3,4', 4), 'ALL_PAGES', 'Deleting every page');
-  equal([all.key, all.args], ['pdf_need_page', []], 'Keep at least one page');
-  throwsProblem(() => pagesToDelete('5', 4), 'OUT_OF_RANGE', 'Deleting a page that is not there');
+  // The app's toDelete and its "every page" problem went with Delete pages (commit 7db36467):
+  // Reorganize's screen keeps a page, and its engine refuses a plan without any (see engineTests).
+  check(!('pagesToDelete' in pageSelection), 'pagesToDelete is gone, as the app\'s toDelete');
+  equal(new PageSelectionError('ALL_PAGES', 4).key, undefined, 'and so is the ALL_PAGES problem');
+  equal(formatPages(parsePageSelection('5-7,2,6', 10)), '2,5-7', 'Pages typed in any order are written sorted');
+  throwsProblem(() => parsePageSelection('5', 4), 'OUT_OF_RANGE', 'A page that is not there');
 
   equal(formatPages([6, 1, 4, 5]), '2,5-7', 'Pages are written as ranges');
   equal(formatPages(new Set([0])), '1', 'One page');
@@ -121,11 +127,11 @@ async function newDoc() {
 
 const save = (doc) => doc.save({ addDefaultPage: false, updateFieldAppearances: false, useObjectStreams: false });
 
-/** A page saying `text`, with its own resources unless `resources` is given (a ref) or false (none). */
-function textPage(doc, text, { size = A4, resources, extra = '' } = {}) {
+/** A page saying `text` at `at`, with its own resources unless `resources` is given (a ref) or false (none). */
+function textPage(doc, text, { size = A4, resources, extra = '', at = [72, 700] } = {}) {
   const page = doc.addPage(size);
   const ctx = doc.context;
-  const content = `${extra} BT /F1 14 Tf 72 700 Td (${text}) Tj ET`;
+  const content = `${extra} BT /F1 14 Tf ${at[0]} ${at[1]} Td (${text}) Tj ET`;
   page.node.set(N('Contents'), ctx.register(ctx.flateStream(content)));
   if (resources === false) page.node.delete(N('Resources'));
   else page.node.set(N('Resources'), resources ?? ctx.obj({ Font: { F1: doc.helv } }));
@@ -210,6 +216,48 @@ async function chapters({ named = false } = {}) {
     doc.catalog.set(N('Names'), ctx.obj({ Dests: { Kids: [ctx.register(leaf('bad', S('not a place'))), ctx.register(leaf('three', ctx.obj([pages[2].ref, 'Fit'])))] } }));
     addAnnots(pages[0], ['three', 'bad'].map((name) => ctx.register(ctx.obj({ Type: 'Annot', Subtype: 'Link', Rect: [72, 480, 272, 500], Dest: S(name) }))));
   }
+  return save(doc);
+}
+
+/**
+ * Four pages saying "PAGE ONE" to "PAGE FOUR", with bookmarks under bookmarks. Each leads to its
+ * page by /Dest or, with `byAction`, by a go-to action, as many programs write them:
+ *   Part A (page 2): A STAYS (page 1), A GOES (page 2)
+ *   Part B (page 4): B GOES (page 4)
+ *   Part C (page 3): C GOES (page 2), C STAYS (page 3)
+ * Named for what becomes of them when pages 2 and 4 are removed.
+ */
+async function nestedOutline(byAction) {
+  const doc = await newDoc();
+  const ctx = doc.context;
+  const pages = [0, 1, 2, 3].map((i) => textPage(doc, `PAGE ${WORDS[i]}`));
+  const leads = (page) => (byAction ? { A: { S: 'GoTo', D: [page.ref, 'Fit'] } } : { Dest: [page.ref, 'Fit'] });
+  // Writes the bookmarks `items` ([title, page, those under it]) under `parent`; returns their references.
+  const write = (parent, items) => {
+    const refs = items.map(() => ctx.nextRef());
+    items.forEach(([title, page, under = []], i) => {
+      const dict = ctx.obj({ Title: S(title), Parent: parent, ...leads(pages[page]) });
+      if (i > 0) dict.set(N('Prev'), refs[i - 1]);
+      if (i < items.length - 1) dict.set(N('Next'), refs[i + 1]);
+      if (under.length) {
+        const kids = write(refs[i], under);
+        dict.set(N('First'), kids[0]);
+        dict.set(N('Last'), kids[kids.length - 1]);
+        // Open: the bookmarks under it are shown, and counted.
+        dict.set(N('Count'), PDFNumber.of(under.length));
+      }
+      ctx.assign(refs[i], dict);
+    });
+    return refs;
+  };
+  const rootRef = ctx.nextRef();
+  const top = write(rootRef, [
+    ['Part A', 1, [['A STAYS', 0], ['A GOES', 1]]],
+    ['Part B', 3, [['B GOES', 3]]],
+    ['Part C', 2, [['C GOES', 1], ['C STAYS', 2]]],
+  ]);
+  ctx.assign(rootRef, ctx.obj({ Type: 'Outlines', First: top[0], Last: top[top.length - 1], Count: 8 }));
+  doc.catalog.set(N('Outlines'), rootRef);
   return save(doc);
 }
 
@@ -310,12 +358,51 @@ async function nestedPages() {
   const pages = [0, 1, 2].map((i) => textPage(doc, `MAIN ${WORDS[i]}`));
   addAnnots(pages[0], [link(doc, pages[2].ref, 600)]);
   const rootRef = doc.catalog.get(N('Pages'));
-  const node = ctx.register(ctx.obj({ Type: 'Pages', Parent: rootRef, Kids: [pages[0].ref, pages[1].ref], Count: 2, MediaBox: LETTER, Rotate: 90 }));
+  const node = ctx.register(ctx.obj({ Type: 'Pages', Parent: rootRef, Kids: [pages[0].ref, pages[1].ref], Count: 2, MediaBox: [0, 0, ...LETTER], Rotate: 90 }));
   for (const p of pages.slice(0, 2)) {
     p.node.delete(N('MediaBox'));
     p.node.set(N('Parent'), node);
   }
   ctx.lookup(rootRef).set(N('Kids'), ctx.obj([node, pages[2].ref]));
+  return save(doc);
+}
+
+/**
+ * "DEEP ONE" to "DEEP THREE" under two parts of the page tree, one inside the other. The pages
+ * have no size and no turn of their own: the root gives them a quarter turn, the outer part US
+ * Letter. So what they inherit comes from further up than the part that holds them.
+ */
+async function deepPages() {
+  const doc = await newDoc();
+  const ctx = doc.context;
+  const pages = [0, 1, 2].map((i) => textPage(doc, `DEEP ${WORDS[i]}`));
+  const rootRef = doc.catalog.get(N('Pages'));
+  const outer = ctx.nextRef();
+  const inner = ctx.register(ctx.obj({ Type: 'Pages', Parent: outer, Kids: pages.map((p) => p.ref), Count: 3 }));
+  ctx.assign(outer, ctx.obj({ Type: 'Pages', Parent: rootRef, Kids: [inner], Count: 3, MediaBox: [0, 0, ...LETTER] }));
+  for (const p of pages) {
+    p.node.delete(N('MediaBox'));
+    p.node.set(N('Parent'), inner);
+  }
+  const root = ctx.lookup(rootRef);
+  root.set(N('Kids'), ctx.obj([outer]));
+  root.set(N('Rotate'), PDFNumber.of(90));
+  return save(doc);
+}
+
+/**
+ * Four pages, each with a caption in the middle (PdfEditingDeviceTest's mixedPages): A4 upright; A4
+ * turned clockwise (/Rotate 90); A4 with a crop box that leaves a 100-point border off on every
+ * side; landscape A4 turned anticlockwise (/Rotate 270).
+ */
+async function mixedPages() {
+  const doc = await newDoc();
+  [A4, A4, A4, [A4[1], A4[0]]].forEach((size, i) => {
+    const page = textPage(doc, `CAPTION ${'ABCD'[i]}`, { size, at: [size[0] / 2 - 40, size[1] / 2] });
+    if (i === 1) page.node.set(N('Rotate'), PDFNumber.of(90));
+    if (i === 2) page.node.set(N('CropBox'), doc.context.obj([100, 100, size[0] - 100, size[1] - 100]));
+    if (i === 3) page.node.set(N('Rotate'), PDFNumber.of(270));
+  });
   return save(doc);
 }
 
@@ -384,6 +471,26 @@ function outlineItems(doc) {
   return { root, items };
 }
 
+/**
+ * The bookmarks as they are nested: for each, its title, the place in the PDF of the page it leads
+ * to (by /Dest or by a go-to action; null when it leads nowhere) and the bookmarks under it. Walked
+ * from /First by /Next or, `backwards`, from /Last by /Prev: both must give the same.
+ */
+function bookmarkTree(doc, backwards = false, parent = doc.catalog.lookup(N('Outlines'))) {
+  const places = new Map(doc.getPages().map((p, i) => [p.ref, i]));
+  const items = [];
+  const seen = new Set();
+  let item = parent.lookup(N(backwards ? 'Last' : 'First'));
+  while (item instanceof PDFDict && !seen.has(item)) {
+    seen.add(item);
+    const dest = item.lookup(N('Dest')) ?? item.lookup(N('A'))?.lookup(N('D'));
+    const page = dest instanceof PDFArray ? places.get(dest.get(0)) ?? null : null;
+    items.push([item.lookup(N('Title')).decodeText(), page, bookmarkTree(doc, backwards, item)]);
+    item = item.lookup(N(backwards ? 'Prev' : 'Next'));
+  }
+  return backwards ? items.reverse() : items;
+}
+
 function annots(doc, index) {
   const page = doc.getPages()[index].node;
   const list = page.lookup(N('Annots'));
@@ -414,6 +521,38 @@ function contentOf(doc, index) {
 
 // runInPage passes Uint8Arrays (and Buffers) through as they are.
 const pdfIn = (name, bytes, extra = {}) => ({ name, bytes: new Uint8Array(bytes), ...extra });
+
+// Reorganize's page lists for a PDF's own pages (zero-based), as its screen makes them. Lists like
+// these, in the PDF's own order, are saved in place.
+/** Pages `indexes`, not turned (TestPdfs.kt's pagesOf). */
+const pagesOf = (...indexes) => indexes.map((page) => ({ page }));
+/** Every page of a PDF of `count` pages but those in `removed`. */
+const without = (count, ...removed) => pagesOf(...[...Array(count).keys()].filter((p) => !removed.includes(p)));
+/** Every page of a PDF of `count` pages, those in `turns` ({ page: degrees }) turned by that much more. */
+const turnedBy = (count, turns) => [...Array(count).keys()].map((page) => ({ page, rotation: turns[page] ?? 0 }));
+
+/** The page tree as it is laid out: a list for each part of it, a page's place in the PDF for each page. */
+function pageTree(doc) {
+  const places = new Map(doc.getPages().map((p, i) => [p.node, i]));
+  const walk = (node) => node.lookup(N('Kids')).asArray().map((kid) => {
+    const dict = doc.context.lookup(kid);
+    return dict.has(N('Kids')) ? walk(dict) : places.get(dict);
+  });
+  return walk(doc.catalog.lookup(N('Pages')));
+}
+
+/** The /Count of every part of the page tree, the root's first, then each part's as the tree is read. */
+function partCounts(doc) {
+  const walk = (node) => [node.lookup(N('Count')).asNumber(), ...node.lookup(N('Kids')).asArray()
+    .map((kid) => doc.context.lookup(kid)).filter((kid) => kid.has(N('Kids'))).flatMap(walk)];
+  return walk(doc.catalog.lookup(N('Pages')));
+}
+
+/** Each page's turn as the file gives it, its own or inherited (pdf-lib reads both). */
+const turnsOf = (doc) => doc.getPages().map((p) => p.getRotation().angle);
+
+/** The names of the entries page `index` has of its own (not what it inherits), sorted. */
+const ownEntries = (doc, index) => doc.getPages()[index].node.keys().map((key) => key.decodeText()).sort();
 
 /** Each page's text and the labels viewers show, read by pdf.js in the page. */
 async function readBack(page, url, bytes, password) {
@@ -484,12 +623,21 @@ async function engineTests(page, url) {
   // --- Names (the view model's defaultName and FileNames)
   equal(await call('defaultName', 'split', { name: 'Report.pdf', pageCount: 12 }), 'Report_split', 'Split default name');
   equal(await call('defaultName', 'merge', { name: 'Report.pdf' }), 'Merged_PDF', 'Merge default name');
-  equal(await call('defaultName', 'rotate', { name: 'Report.pdf' }), 'Report_rotated', 'Rotate default name');
-  equal(await call('defaultName', 'delete-pages', { name: 'Report.pdf' }), 'Report_pages_deleted', 'Delete pages default name');
   equal(await call('defaultName', 'reorganize', { name: 'Report.pdf' }), 'Report_reorganized', 'Reorganize default name');
   // The same names from page-selection.js, which the screens use before the engine has loaded.
-  for (const [tool, input] of [['merge'], ['reorganize', { name: 'Report.pdf' }], ['split', { name: 'R.pdf', pageCount: 300 }], ['rotate', { name: 'CON.pdf' }]]) {
+  for (const [tool, input] of [['merge'], ['reorganize', { name: 'Report.pdf' }], ['split', { name: 'R.pdf', pageCount: 300 }], ['reorganize', { name: 'CON.pdf' }]]) {
     equal(lightDefaultName(tool, input), await call('defaultName', tool, input), `${tool}: page-selection.js names it as organize.js`);
+  }
+  // Rotate PDF and Delete pages went from the app (commits 640285a6 and 7db36467): their engines and
+  // their names are gone here too, and what the other screens use is still there.
+  for (const tool of ['rotate', 'delete-pages']) {
+    await rejects(call('defaultName', tool, { name: 'Report.pdf' }), /Unknown tool/, `${tool} names no PDF any more`);
+  }
+  const exported = await page.evaluate(async (src) => Object.keys(await import(src)), new URL(ENGINE, url).href);
+  for (const gone of ['rotatePdf', 'deletePages']) check(!exported.includes(gone), `${gone} is gone from organize.js`);
+  for (const kept of ['splitGroups', 'splitPdf', 'mergePdfs', 'reorganizePdf', 'shownPageSize', 'blankPageAfter', 'countPages',
+    'fileNames', 'defaultName', 'partSuffix', 'PageSelectionError', 'checkCancelled', 'resourcesOf']) {
+    check(exported.includes(kept), `organize.js still exports ${kept}`);
   }
   const long = 'é'.repeat(150);
   const longSplit = await call('defaultName', 'split', { name: `${long}.pdf`, pageCount: 120 });
@@ -556,7 +704,7 @@ async function engineTests(page, url) {
   // Passwords: alpha locked with "test123", by AES-256 and the older RC4 and AES-128.
   for (const algorithm of ['AES-256', 'RC4-128', 'AES-128']) {
     // Locked only against changes (an owner password, none to open it): it opens as it is.
-    const ownerOnly = await call('deletePages', pdfIn('owner.pdf', await encrypted(alpha, algorithm, '')), [0]);
+    const ownerOnly = await call('reorganizePdf', pdfIn('owner.pdf', await encrypted(alpha, algorithm, '')), pagesOf(1, 2));
     equal(squash((await readBack(page, url, ownerOnly.bytes)).texts), ['ALPHATWO', 'ALPHATHREE'], `${algorithm}: a PDF with only an owner password`);
     const locked = await encrypted(alpha, algorithm);
     await rejects(call('splitPdf', pdfIn('protected.pdf', locked), { groups: [[1]] }), /Password|password/, `${algorithm}: no password`);
@@ -566,25 +714,31 @@ async function engineTests(page, url) {
     check(part[0].passwordRemoved === true, `${algorithm}: the result says its password went`);
     equal(squash((await readBack(page, url, part[0].bytes)).texts), ['ALPHATWO'], `${algorithm}: split of a protected PDF`);
     check(!(await load(part[0].bytes)).isEncrypted && !everythingIn(part[0].bytes).includes('/Encrypt'), `${algorithm}: the part has no password`);
+    // turningAPageOfAProtectedPdfRemovesThePassword (PdfEditingDeviceTest)
+    const turnedLocked = await call('reorganizePdf', lockedIn, turnedBy(3, { 1: 180 }));
+    equal((await load(turnedLocked.bytes)).getPages().map((p) => p.getRotation().angle), [0, 180, 0], `${algorithm}: a page of a protected PDF turned`);
     for (const [name, result] of [
       ['merge', await call('mergePdfs', [lockedIn, betaIn], { pages: [{ input: 0, page: 2 }, { input: 1, page: 0 }] })],
-      ['delete', await call('deletePages', lockedIn, [0])],
-      ['reorganize', await call('reorganizePdf', alphaIn, [{ page: 0 }, { input: 0, page: 2 }], [lockedIn])],
-      ['rotate', await call('rotatePdf', lockedIn, { 1: 90 })],
+      ['pages removed', await call('reorganizePdf', lockedIn, pagesOf(1, 2))],
+      ['pages added', await call('reorganizePdf', alphaIn, [{ page: 0 }, { input: 0, page: 2 }], [lockedIn])],
+      ['a page turned', turnedLocked],
     ]) {
       const texts = squash((await readBack(page, url, result.bytes)).texts);
       check(texts.some((t) => t === 'ALPHATHREE') && !(await load(result.bytes)).isEncrypted, `${algorithm}: ${name} of a protected PDF has no password (${texts})`);
+      check(!everythingIn(result.bytes).includes('/Encrypt'), `${algorithm}: ${name} leaves no encryption dictionary`);
       check(result.passwordRemoved === true, `${algorithm}: ${name} says its password went`);
     }
   }
+  // A PDF that had no password says nothing about one.
+  check(!('passwordRemoved' in await call('reorganizePdf', alphaIn, turnedBy(3, { 0: 90 }))), 'No password, none removed');
 
   // --- deletedPagesAreGoneFromTheFile (PageToolsDeviceTest)
   const chaptersPdf = await chapters();
   const chaptersIn = pdfIn('chapters.pdf', chaptersPdf);
   const source = everythingIn(chaptersPdf);
   check(['SECRET VALUE', 'SECRET NOTE', 'Chapter FOUR', 'PAGE FOUR'].every((t) => holds(source, t)), 'The fixture holds the words checked below');
-  const deleted = await call('deletePages', chaptersIn, { pages: [3, 1], fileName: 'chapters_pages_deleted' });
-  equal([deleted.name, deleted.pageCount], ['chapters_pages_deleted.pdf', 3], 'Delete pages: name and count');
+  const deleted = await call('reorganizePdf', chaptersIn, { pages: pagesOf(0, 2, 4), fileName: 'chapters_reorganized' });
+  equal([deleted.name, deleted.pageCount], ['chapters_reorganized.pdf', 3], 'Pages removed: name and count');
   await saveOutput('organize_pages_deleted.pdf', deleted.bytes);
   equal(squash((await readBack(page, url, deleted.bytes)).texts), ['PAGEONE', 'PAGETHREE', 'PAGEFIVE'], 'Pages 2 and 4 deleted');
   let everything = everythingIn(deleted.bytes);
@@ -603,11 +757,58 @@ async function engineTests(page, url) {
   equal(fieldNames(doc), ['keep'], "Page 4's field went with it");
   equal(doc.context.lookup(doc.catalog.lookup(N('AcroForm')).lookup(N('Fields')).get(0)).lookup(N('V')).decodeText(), 'KEEP VALUE', "Page 1's field stays, filled in");
   check(doc.catalog.lookup(N('Dests')).lookup(N('four')).get(0) === PDFNull, 'The named destination to page 4 is emptied');
-  // Typed as on the screen.
-  equal((await call('deletePages', chaptersIn, '2,4-5')).pageCount, 2, 'Pages typed like 2,4-5');
-  await rejects(call('deletePages', alphaIn, [0, 1, 2]), /pdf_need_page/, 'Deleting every page is refused');
-  await rejects(call('deletePages', alphaIn, '1-3'), /pdf_need_page/, 'Typing every page is refused');
-  await rejects(call('deletePages', alphaIn, [5]), /pdf_pages_range/, 'Deleting a page that is not there');
+  // Selected as on the screen, typed like 2,4-5, then removed: the pages left are saved, under the PDF's name.
+  const typed = parsePageSelection('2,4-5', 5);
+  const afterTyping = await call('reorganizePdf', chaptersIn, without(5, ...typed));
+  equal([afterTyping.name, afterTyping.pageCount], ['chapters_reorganized.pdf', 2], 'Pages typed like 2,4-5 removed');
+  equal(squash((await readBack(page, url, afterTyping.bytes)).texts), ['PAGEONE', 'PAGETHREE'], 'and pages 1 and 3 left');
+  // Pages removed and pages turned in one save, which neither of the two old tools could do. A turn
+  // goes to the page it names, though that page has a new place in the PDF: pages 2 and 4 removed,
+  // page 3 turned right and page 5 upside down.
+  const fewerTurned = await call('reorganizePdf', chaptersIn, [{ page: 0 }, { page: 2, rotation: 90 }, { page: 4, rotation: 180 }]);
+  back = await readBack(page, url, fewerTurned.bytes);
+  equal([squash(back.texts), back.sizes.map((s) => s[2])], [['PAGEONE', 'PAGETHREE', 'PAGEFIVE'], [0, 90, 180]], 'Pages removed and others turned: each turn is on the page it was given to');
+  doc = await load(fewerTurned.bytes);
+  refs = pageRefs(doc);
+  equal(outlineItems(doc).items.map((item) => refs.indexOf(item.page)), [0, 1, 2], 'and the bookmarks left lead to their pages');
+  // aPdfWithNoPagesLeftIsRefused: nothing is made of a list without pages.
+  await rejects(call('reorganizePdf', alphaIn, pagesOf()), /pdf_need_page/, 'A PDF with no pages left is refused');
+  await rejects(call('reorganizePdf', alphaIn, { pages: [], fileName: 'none' }), /pdf_need_page/, 'A PDF with no pages left is refused, also with a name typed');
+  await rejects(call('reorganizePdf', alphaIn, { fileName: 'none' }), /pdf_need_page/, 'and so is no list of pages at all');
+  await rejects(call('mergePdfs', [alphaIn, betaIn], { pages: [] }), /pdf_need_page/, 'Merge keeps a page too');
+  // The engine takes pages, not what was typed: one that isn't in the PDF is a mistake of the caller's.
+  await rejects(call('reorganizePdf', alphaIn, pagesOf(0, 5)), /pdf_process_failed/, 'A page that is not there, in the PDF\'s own order');
+  await rejects(call('reorganizePdf', alphaIn, pagesOf(5, 0)), /pdf_process_failed/, 'A page that is not there, among pages moved');
+  await rejects(call('reorganizePdf', alphaIn, pagesOf(1, 1)), /pdf_process_failed/, 'A page listed twice');
+  await rejects(call('reorganizePdf', alphaIn, [{ page: 0 }, { input: 'other', page: 0 }], [betaIn]), /pdf_process_failed/, 'A page of a PDF that was not added');
+  await rejects(call('reorganizePdf', alphaIn, [{ page: 0 }, { blank: true }]), /pdf_process_failed/, 'A blank page without a size');
+
+  // --- Bookmarks under bookmarks, and bookmarks that lead to their page by a go-to action
+  // (PageCleanup's pruneBookmarks, which the chapters' flat list of /Dest bookmarks doesn't go
+  // through): a bookmark goes with its page, unless it holds a bookmark to a page that stays.
+  for (const byAction of [false, true]) {
+    const how = byAction ? 'by a go-to action' : 'by /Dest';
+    const outlinedIn = pdfIn('outlined.pdf', await nestedOutline(byAction));
+    equal(bookmarkTree(await load(outlinedIn.bytes)), [
+      ['Part A', 1, [['A STAYS', 0, []], ['A GOES', 1, []]]],
+      ['Part B', 3, [['B GOES', 3, []]]],
+      ['Part C', 2, [['C GOES', 1, []], ['C STAYS', 2, []]]],
+    ], `The fixture's bookmarks, read ${how}`);
+    // Pages 2 and 4 removed, each way Reorganize saves. `places`: where pages 1 and 3 then are.
+    for (const [what, kept, places] of [['Pages removed', pagesOf(0, 2), [0, 1]], ['Pages moved', pagesOf(2, 0), [1, 0]]]) {
+      const out = await call('reorganizePdf', outlinedIn, kept);
+      doc = await load(out.bytes);
+      // Part A led to page 2, which went: it stays for A STAYS, and leads nowhere now.
+      const left = [['Part A', null, [['A STAYS', places[0], []]]], ['Part C', places[1], [['C STAYS', places[1], []]]]];
+      equal(bookmarkTree(doc), left, `${what} (${how}): the bookmarks of the pages left, where they were`);
+      equal(bookmarkTree(doc, true), left, `${what} (${how}): the same read from the end`);
+      const outlineRoot = doc.catalog.lookup(N('Outlines'));
+      const partCount = (item) => item.lookup(N('Count')).asNumber();
+      equal([partCount(outlineRoot), partCount(outlineRoot.lookup(N('First'))), partCount(outlineRoot.lookup(N('Last')))], [4, 1, 1], `${what} (${how}): the outline and its parts count the bookmarks left`);
+      everything = everythingIn(out.bytes);
+      for (const gone of ['A GOES', 'Part B', 'B GOES', 'C GOES', 'PAGE TWO', 'PAGE FOUR']) check(!holds(everything, gone), `${what} (${how}): "${gone}" is still in the file`);
+    }
+  }
 
   // --- mergePagesLeftOutAreGoneFromTheFile
   const leftOut = await call('mergePdfs', [chaptersIn, alphaIn], { pages: [{ input: 0, page: 0 }, { input: 1, page: 0 }, { input: 0, page: 2 }], fileName: 'merged' });
@@ -664,8 +865,8 @@ async function engineTests(page, url) {
     check(holds(all, 'FAR VALUE') === (index === 1), `Part ${index + 1} has page 2's value: ${index === 1}`);
     equal(fieldNames(await load(half.bytes)), ['topmostSubform[0]'], `Part ${index + 1} keeps the field tree's top`);
   }
-  const nestedDeleted = await call('deletePages', nestedIn, [1]);
-  check(!holds(everythingIn(nestedDeleted.bytes), 'FAR VALUE') && holds(everythingIn(nestedDeleted.bytes), 'NEAR VALUE'), 'Deleting page 2 takes its nested field');
+  const nestedDeleted = await call('reorganizePdf', nestedIn, pagesOf(0));
+  check(!holds(everythingIn(nestedDeleted.bytes), 'FAR VALUE') && holds(everythingIn(nestedDeleted.bytes), 'NEAR VALUE'), 'Removing page 2 takes its nested field');
 
   // --- linksBetweenPagesOfAPartStillWork
   const linked = pdfIn('links.pdf', await chapters({ named: true }));
@@ -694,13 +895,17 @@ async function engineTests(page, url) {
         check(dark > 30000, `${what} (inherited: ${inherited}): page ${i + 1} shows its image (${dark})`);
       }
     };
-    const del = await call('deletePages', sharedIn, [1]);
-    equal(squash((await readBack(page, url, del.bytes)).texts), ['PAGEONE', 'PAGETHREE'], 'Delete pages with shared resources');
-    assertImages(del.bytes, [0, 2], 'Delete pages');
-    await assertDrawn(del.bytes, 2, 'Delete pages');
+    const del = await call('reorganizePdf', sharedIn, pagesOf(0, 2));
+    equal(squash((await readBack(page, url, del.bytes)).texts), ['PAGEONE', 'PAGETHREE'], 'A page removed with shared resources');
+    assertImages(del.bytes, [0, 2], 'Pages removed');
+    await assertDrawn(del.bytes, 2, 'Pages removed');
+    // Saved in place, the pages left still take their resources from where they took them.
+    const delDoc = await load(del.bytes);
+    equal([0, 1].map((i) => delDoc.getPages()[i].node.has(N('Resources'))), [!inherited, !inherited], `Pages removed (inherited: ${inherited}): resources stay where they were`);
     const reo = await call('reorganizePdf', sharedIn, [{ page: 2 }, { page: 0 }]);
-    assertImages(reo.bytes, [0, 2], 'Reorganize');
-    await assertDrawn(reo.bytes, 2, 'Reorganize');
+    equal(squash((await readBack(page, url, reo.bytes)).texts), ['PAGETHREE', 'PAGEONE'], 'Pages moved with shared resources');
+    assertImages(reo.bytes, [0, 2], 'Pages moved');
+    await assertDrawn(reo.bytes, 2, 'Pages moved');
     const mer = await call('mergePdfs', [sharedIn, alphaIn], { pages: [{ input: 0, page: 0 }, { input: 1, page: 0 }, { input: 0, page: 2 }] });
     assertImages(mer.bytes, [0, 2], 'Merge');
     const spl = await call('splitPdf', sharedIn, { groups: [[0], [1, 2]] });
@@ -737,16 +942,16 @@ async function engineTests(page, url) {
     const refsLoop = outline(d, [0, 1, 2, 3].map((i) => ({ title: `Chapter ${i}`, page: pages[i % 2].ref })));
     for (const r of refsLoop) d.context.lookup(r).set(N('First'), refsLoop[0]);
     const started = Date.now();
-    const out = await call('deletePages', pdfIn('loop.pdf', await save(d)), [1]);
-    equal(out.pageCount, 1, 'A looping outline: one page left');
+    const out = await call('reorganizePdf', pdfIn('loop.pdf', await save(d)), pagesOf(0));
+    equal([out.pageCount, (await load(out.bytes)).getPageCount()], [1, 1], 'A looping outline: one page left');
     check(Date.now() - started < 20000, 'and quickly');
   }
 
   // --- tagsOfDeletedPagesGo
   const taggedIn = pdfIn('tagged.pdf', await taggedPages());
   for (const [what, result] of [
-    ['Delete pages', await call('deletePages', taggedIn, [1])],
-    ['Reorganize', await call('reorganizePdf', taggedIn, [{ page: 2 }, { page: 0 }])],
+    ['Pages removed', await call('reorganizePdf', taggedIn, pagesOf(0, 2))],
+    ['Pages moved', await call('reorganizePdf', taggedIn, [{ page: 2 }, { page: 0 }])],
   ]) {
     everything = everythingIn(result.bytes);
     check(!holds(everything, 'SECRET ALT 2'), `${what}: page 2's alternate text is gone`);
@@ -782,8 +987,13 @@ async function engineTests(page, url) {
   const bookIn = pdfIn('book.pdf', await labelledPages());
   const labelsOf = async (bytes) => (await readBack(page, url, bytes)).labels ?? (await readBack(page, url, bytes)).texts.map((_, i) => `${i + 1}`);
   equal(await labelsOf(await labelledPages()), ['i', 'ii', 'iii', '1', '2', '3'], 'The book fixture');
-  equal(await labelsOf((await call('deletePages', bookIn, [0])).bytes), ['ii', 'iii', '1', '2', '3'], 'Without its cover');
-  equal(await labelsOf((await call('deletePages', bookIn, [1, 3])).bytes), ['i', 'iii', '2', '3'], 'Fewer pages');
+  equal(await labelsOf((await call('reorganizePdf', bookIn, pagesOf(1, 2, 3, 4, 5))).bytes), ['ii', 'iii', '1', '2', '3'], 'Without its cover');
+  equal(await labelsOf((await call('reorganizePdf', bookIn, pagesOf(0, 2, 4, 5))).bytes), ['i', 'iii', '2', '3'], 'Fewer pages');
+  // Pages only turned: no page changes place, and the labels are left exactly as they were.
+  const bookTurned = await call('reorganizePdf', bookIn, turnedBy(6, { 1: 90, 4: 270 }));
+  equal(await labelsOf(bookTurned.bytes), ['i', 'ii', 'iii', '1', '2', '3'], 'Pages turned keep their labels');
+  const labelTree = async (bytes) => (await load(bytes)).catalog.lookup(N('PageLabels'))?.toString();
+  equal(await labelTree(bookTurned.bytes), await labelTree(bookIn.bytes), 'as they were written');
   const reversed = [5, 4, 3, 2, 1, 0].map((p) => ({ page: p })).concat([{ blank: true, width: 300, height: 400 }]);
   equal(await labelsOf((await call('reorganizePdf', bookIn, reversed)).bytes), ['3', '2', '1', 'iii', 'ii', 'i', 'ii'], 'Reversed, with a blank page at the end');
   const book = await labelledPages();
@@ -794,9 +1004,13 @@ async function engineTests(page, url) {
   const joined = await call('mergePdfs', [alphaIn, bookIn], {});
   equal(await labelsOf(joined.bytes), ['1', '2', '3', 'i', 'ii', 'iii', '1', '2', '3'], 'Joined whole, the one without labels first');
   equal((await load(joined.bytes)).catalog.lookup(N('PageLabels')).lookup(N('Nums')).get(0).asNumber(), 0, 'Labels from the first page on');
-  const plainDeleted = await call('deletePages', pdfIn('plain.pdf', await labelledPages(true)), [2]);
+  const plainIn = pdfIn('plain.pdf', await labelledPages(true));
+  const plainDeleted = await call('reorganizePdf', plainIn, pagesOf(0, 1, 3, 4, 5));
   equal(await labelsOf(plainDeleted.bytes), ['1', '2', '3', '4', '5'], 'Labels that are just the places follow the new places');
   check(!(await load(plainDeleted.bytes)).catalog.has(N('PageLabels')), 'and are left out');
+  // With no page gone there is nothing to put right: even such labels stay as they were written.
+  const plainTurned = await call('reorganizePdf', plainIn, turnedBy(6, { 2: 90 }));
+  equal([await labelTree(plainTurned.bytes), await labelsOf(plainTurned.bytes)], [await labelTree(plainIn.bytes), ['1', '2', '3', '4', '5', '6']], 'Pages only turned leave them alone');
 
   // --- reorganizeKeepsOrderTurnsAddedAndBlankPages
   const mainIn = pdfIn('nested.pdf', await nestedPages(), { id: 7 });
@@ -825,6 +1039,159 @@ async function engineTests(page, url) {
   equal(await call('shownPageSize', mainIn, 0), { width: 792, height: 612 }, 'A page shown sideways');
   equal(await call('shownPageSize', mainIn, 2), { width: 595.28, height: 841.89 }, 'A page shown upright');
   await rejects(call('reorganizePdf', alphaIn, []), /pdf_need_page/, 'Reorganizing to no page');
+
+  // --- pagesOnlyTurnedOrRemovedLeaveTheRestOfTheFileAsItWas (PageToolsDeviceTest): pages only
+  // turned, or turned and removed, are saved in place. The page tree stays as it was, nested, and
+  // the pages keep what they inherit from it.
+  {
+    const was = await load(mainIn.bytes);
+    const treeNode = (d) => d.context.lookup(d.catalog.lookup(N('Pages')).lookup(N('Kids')).get(0));
+    const counts = (d) => [d.catalog.lookup(N('Pages')).lookup(N('Count')).asNumber(), treeNode(d).lookup(N('Count')).asNumber()];
+    equal(pageTree(was), [[0, 1], 2], "The fixture's root holds a part with pages 1 and 2, and page 3");
+    check([0, 1].every((i) => !was.getPages()[i].node.has(N('MediaBox')) && !was.getPages()[i].node.has(N('Rotate'))), 'whose pages 1 and 2 have no size or turn of their own');
+
+    // Page 3 turned, nothing else. The pages are named with the PDF's id, as the screen names them.
+    const turned = await call('reorganizePdf', mainIn, { pages: [{ input: 7, page: 0, rotation: 0 }, { input: 7, page: 1, rotation: 0 }, { input: 7, page: 2, rotation: 90 }], fileName: 'nested_turned' });
+    await saveOutput('organize_nested_turned.pdf', turned.bytes);
+    equal([turned.name, turned.pageCount], ['nested_turned.pdf', 3], 'Turned in place: name and count');
+    doc = await load(turned.bytes);
+    equal(pageTree(doc), [[0, 1], 2], 'The page tree is still nested');
+    equal(counts(doc), [3, 2], 'and counts its pages as before');
+    equal(treeNode(doc).toString(), treeNode(was).toString(), 'The part of the tree is as it was, with the size and turn its pages inherit');
+    for (const i of [0, 1]) {
+      equal(ownEntries(doc, i), ownEntries(was, i), `Page ${i + 1} has the entries it had: no size and no turn of its own`);
+      // Still shown as it inherits it: US Letter, a quarter turn.
+      equal([doc.getPages()[i].getRotation().angle, doc.getPages()[i].getSize()], [90, { width: 612, height: 792 }], `Page ${i + 1} is shown as before`);
+      check(contentOf(doc, i) === contentOf(was, i), `Page ${i + 1}'s content is as it was`);
+    }
+    equal(doc.getPages()[2].getRotation().angle, 90, 'Page 3 is turned');
+    equal(ownEntries(doc, 2), [...ownEntries(was, 2), 'Rotate'].sort(), 'and its turn is all it gained');
+    refs = pageRefs(doc);
+    check(destPage(doc, annots(doc, 0).find((a) => subtype(a) === 'Link')) === refs[2], "Page 1's link still leads to page 3");
+    equal((await readBack(page, url, turned.bytes)).sizes, [[792, 612, 90], [792, 612, 90], [842, 595, 90]], 'Viewers show all three sideways');
+
+    // Page 2 left out and page 1 turned, in one save.
+    const fewer = await call('reorganizePdf', mainIn, [{ page: 0, rotation: 90 }, { page: 2 }]);
+    await saveOutput('organize_nested_fewer.pdf', fewer.bytes);
+    equal(fewer.pageCount, 2, 'Two pages left');
+    doc = await load(fewer.bytes);
+    equal(pageTree(doc), [[0], 1], 'The tree keeps its nesting without page 2');
+    equal(counts(doc), [2, 1], 'and each part of it counts one page fewer');
+    const first = doc.getPages()[0];
+    equal(first.getRotation().angle, 180, 'The quarter turn it inherited, and one more');
+    check(!first.node.has(N('MediaBox')), 'Page 1 still has no size of its own');
+    equal(first.getSize(), { width: 612, height: 792 }, 'and is still US Letter');
+    equal(ownEntries(doc, 1), ownEntries(was, 2), 'Page 3, not turned, has the entries it had');
+    check(!holds(everythingIn(fewer.bytes), 'MAIN TWO'), 'The page left out is gone');
+    back = await readBack(page, url, fewer.bytes);
+    equal([squash(back.texts), back.sizes], [['MAINONE', 'MAINTHREE'], [[612, 792, 180], [595, 842, 0]]], 'Viewers show page 1 upside down and page 3 as it was');
+
+    // Page 2 left out and page 3 turned left, the pages named with the PDF's id as the screen names
+    // them. The turn goes to the page it names, which comes after the page left out, and page 1,
+    // not turned, is left as it was: it still inherits its size and its turn.
+    const after = await call('reorganizePdf', mainIn, [{ input: 7, page: 0, rotation: 0 }, { input: 7, page: 2, rotation: 270 }]);
+    doc = await load(after.bytes);
+    equal(pageTree(doc), [[0], 1], 'Named with the PDF\'s id, a page left out is taken out of the tree where it stands');
+    equal(counts(doc), [2, 1], 'and each part of the tree counts one page fewer');
+    equal(turnsOf(doc), [90, 270], 'A page turned that comes after the page left out');
+    equal(doc.getPages()[0].node.toString(), was.getPages()[0].node.toString(), 'Page 1, not turned, is as it was beside a page left out, entry for entry');
+    back = await readBack(page, url, after.bytes);
+    equal([squash(back.texts), back.sizes], [['MAINONE', 'MAINTHREE'], [[792, 612, 90], [842, 595, 270]]], 'Viewers show page 1 as it was and page 3 turned left');
+
+    // Page 3 left out and nothing turned: pages 1 and 2, and the part of the tree that holds them
+    // and gives them their size and turn, are as they were.
+    const firstTwo = await call('reorganizePdf', mainIn, pagesOf(0, 1));
+    doc = await load(firstTwo.bytes);
+    equal(pageTree(doc), [[0, 1]], 'Page 3 left out: the part still holds pages 1 and 2');
+    equal(counts(doc), [2, 2], 'and only the root counts one page fewer');
+    equal(treeNode(doc).toString(), treeNode(was).toString(), 'The part is as it was');
+    for (const i of [0, 1]) equal(ownEntries(doc, i), ownEntries(was, i), `Page ${i + 1} still has no size and no turn of its own`);
+    equal((await readBack(page, url, firstTwo.bytes)).sizes, [[792, 612, 90], [792, 612, 90]], 'Viewers show both as before');
+
+    // A page that inherits its turn, turned, with every page kept: the turn is added to the one it inherits.
+    const inheritedTurn = await call('reorganizePdf', mainIn, turnedBy(3, { 1: 90 }));
+    doc = await load(inheritedTurn.bytes);
+    equal([pageTree(doc), turnsOf(doc)], [[[0, 1], 2], [90, 180, 0]], 'A turn added to an inherited turn, no page left out');
+    equal([ownEntries(doc, 0), ownEntries(doc, 1)], [ownEntries(was, 0), [...ownEntries(was, 1), 'Rotate'].sort()], 'Its turn is all page 2 gained, and page 1 gained nothing');
+
+    // The list alone decides how the PDF is saved: a PDF given along, none of whose pages is in
+    // the list, changes nothing.
+    const unused = await call('reorganizePdf', mainIn, [{ page: 0 }, { page: 2 }], [betaIn]);
+    equal([unused.pageCount, pageTree(await load(unused.bytes))], [2, [[0], 1]], 'A PDF given but not used: still saved in place');
+
+    // A part of the tree left without pages stays, empty, as PDFBox leaves it: viewers and this
+    // engine read the page that is left.
+    const last = await call('reorganizePdf', mainIn, pagesOf(2));
+    doc = await load(last.bytes);
+    equal([pageTree(doc), counts(doc)], [[[], 0], [1, 0]], 'The part emptied stays, counting no pages');
+    equal(squash((await readBack(page, url, last.bytes)).texts), ['MAINTHREE'], 'Viewers show the page left');
+    check(!holds(everythingIn(last.bytes), 'MAIN ONE') && !holds(everythingIn(last.bytes), 'MAIN TWO'), 'and the two taken out are gone');
+    const again = await call('reorganizePdf', pdfIn('last.pdf', last.bytes), turnedBy(1, { 0: 90 }));
+    equal([again.pageCount, pageTree(await load(again.bytes))], [1, [[], 0]], 'What was saved in place can be saved in place again');
+
+    // Any page moved, and the pages are laid out again, flat, each with what it inherited.
+    const moved = await call('reorganizePdf', mainIn, pagesOf(1, 0, 2));
+    doc = await load(moved.bytes);
+    equal(pageTree(doc), [0, 1, 2], 'Pages moved are laid out flat');
+    check([0, 1].every((i) => doc.getPages()[i].node.has(N('MediaBox')) && doc.getPages()[i].node.has(N('Rotate'))), 'with the size and turn they inherited as their own');
+    equal(squash((await readBack(page, url, moved.bytes)).texts), ['MAINTWO', 'MAINONE', 'MAINTHREE'], 'in the new order');
+
+    // A page added is not one of the PDF's own, whatever its number: BETA TWO after MAIN ONE, and a
+    // blank page after MAIN ONE, are laid out again too.
+    const added = await call('reorganizePdf', mainIn, [{ page: 0 }, { input: 'beta', page: 1 }], [pdfIn('beta.pdf', beta, { id: 'beta' })]);
+    equal([squash((await readBack(page, url, added.bytes)).texts), pageTree(await load(added.bytes))], [['MAINONE', 'BETATWO'], [0, 1]], 'A page of a PDF added after the first page');
+    const withBlank = await call('reorganizePdf', mainIn, [{ page: 0 }, { blank: true, width: 300, height: 400 }, { page: 1 }]);
+    equal([squash((await readBack(page, url, withBlank.bytes)).texts), pageTree(await load(withBlank.bytes))], [['MAINONE', '', 'MAINTWO'], [0, 1, 2]], 'A blank page among the pages in their own order');
+  }
+
+  // --- What pages inherit from further up the page tree than the part that holds them: the turn
+  // from the root and the size from a part between, two and three levels above the pages.
+  {
+    const deepIn = pdfIn('deep.pdf', await deepPages());
+    const was = await load(deepIn.bytes);
+    equal([pageTree(was), partCounts(was), turnsOf(was)], [[[[0, 1, 2]]], [3, 3, 3], [90, 90, 90]], 'The fixture: three pages two parts down, turned by the root');
+    equal([0, 1, 2].map((i) => ownEntries(was, i).filter((key) => key === 'MediaBox' || key === 'Rotate')), [[], [], []], 'with no size and no turn of their own');
+
+    // Page 1 turned: the turn is added to the root's.
+    const turned = await call('reorganizePdf', deepIn, turnedBy(3, { 0: 90 }));
+    doc = await load(turned.bytes);
+    equal([pageTree(doc), partCounts(doc), turnsOf(doc)], [[[[0, 1, 2]]], [3, 3, 3], [180, 90, 90]], 'A turn inherited from the root is added to');
+    equal((await readBack(page, url, turned.bytes)).sizes, [[612, 792, 180], [792, 612, 90], [792, 612, 90]], 'Viewers show page 1 upside down, the others as before');
+
+    // Page 2 left out and page 3 turned: every part above the page counts one fewer.
+    const fewer = await call('reorganizePdf', deepIn, [{ page: 0 }, { page: 2, rotation: 180 }]);
+    doc = await load(fewer.bytes);
+    equal([pageTree(doc), partCounts(doc), turnsOf(doc)], [[[[0, 1]]], [2, 2, 2], [90, 270]], 'A page left out two parts down');
+    equal(doc.getPages()[0].node.toString(), was.getPages()[0].node.toString(), 'Page 1 is as it was, entry for entry');
+    equal(doc.getPages().map((p) => p.getSize()), [{ width: 612, height: 792 }, { width: 612, height: 792 }], 'Both still US Letter, from the part between');
+    back = await readBack(page, url, fewer.bytes);
+    equal([squash(back.texts), back.sizes], [['DEEPONE', 'DEEPTHREE'], [[792, 612, 90], [792, 612, 270]]], 'Viewers show pages 1 and 3, page 3 turned round');
+
+    // Pages moved are laid out flat, each with what it inherited from wherever it came.
+    const moved = await call('reorganizePdf', deepIn, pagesOf(2, 0, 1));
+    doc = await load(moved.bytes);
+    equal([pageTree(doc), partCounts(doc), turnsOf(doc)], [[0, 1, 2], [3], [90, 90, 90]], 'Pages moved: flat, each with the turn it inherited');
+    equal(doc.getPages().map((p) => [p.node.has(N('MediaBox')), p.node.has(N('Rotate')), p.getSize()]), Array(3).fill([true, true, { width: 612, height: 792 }]), 'and the size, now their own');
+    equal(squash((await readBack(page, url, moved.bytes)).texts), ['DEEPTHREE', 'DEEPONE', 'DEEPTWO'], 'in the new order');
+  }
+
+  // --- aPageListedTwiceIsRemovedWhereChosen: a damaged PDF whose page tree lists one page twice
+  // shows it twice. Taking out one of the two keeps the other where it is.
+  {
+    const d = await newDoc();
+    const pages = ['ONE', 'TWO'].map((word) => textPage(d, `PAGE ${word}`));
+    const tree = d.catalog.lookup(N('Pages'));
+    tree.set(N('Kids'), d.context.obj([pages[0].ref, pages[1].ref, pages[0].ref]));
+    tree.set(N('Count'), PDFNumber.of(3));
+    const twiceIn = pdfIn('listed_twice.pdf', await save(d));
+    equal(await call('countPages', twiceIn), 3, 'A page listed twice is counted twice, as viewers show it');
+    const left = await call('reorganizePdf', twiceIn, pagesOf(0, 1));
+    equal(squash((await readBack(page, url, left.bytes)).texts), ['PAGEONE', 'PAGETWO'], 'The second of the two taken out');
+    const right = await call('reorganizePdf', twiceIn, pagesOf(1, 2));
+    equal(squash((await readBack(page, url, right.bytes)).texts), ['PAGETWO', 'PAGEONE'], 'The first of the two taken out');
+    const one = await call('reorganizePdf', twiceIn, pagesOf(1));
+    equal([squash((await readBack(page, url, one.bytes)).texts), holds(everythingIn(one.bytes), 'PAGE ONE')], [['PAGETWO'], false], 'Both taken out: the page is gone');
+  }
 
   // Reorganize keeps the PDF's bookmarks, fields and links of the pages kept, and takes in those of a PDF added.
   {
@@ -855,27 +1222,85 @@ async function engineTests(page, url) {
     pages[1].node.delete(N('Type'));
     const damagedIn = pdfIn('damaged_tree.pdf', await save(d));
     equal(await call('countPages', damagedIn), 3, 'The damaged tree has the three pages viewers show');
-    const left = await call('deletePages', damagedIn, [1]);
-    equal(squash((await readBack(page, url, left.bytes)).texts), ['PAGEONE', 'PAGETHREE'], 'Deleting from a damaged page tree');
-    const rotated = await call('rotatePdf', damagedIn, { 1: 90 });
-    equal((await readBack(page, url, rotated.bytes)).sizes.map((s) => s[2]), [0, 90, 0], 'Rotating a page of a mended tree');
+    const left = await call('reorganizePdf', damagedIn, pagesOf(0, 2));
+    equal(squash((await readBack(page, url, left.bytes)).texts), ['PAGEONE', 'PAGETHREE'], 'Removing a page of a damaged page tree');
+    const rotated = await call('reorganizePdf', damagedIn, turnedBy(3, { 1: 90 }));
+    back = await readBack(page, url, rotated.bytes);
+    equal([squash(back.texts), back.sizes.map((s) => s[2])], [['PAGEONE', 'PAGETWO', 'PAGETHREE'], [0, 90, 0]], 'Turning a page of a mended tree');
   }
 
-  // --- Rotate PDF: only the turn changes.
+  // --- Pages only turned: only the turn changes.
   {
     const rotSrc = await simple('TURN', 3, [A4, LETTER, [400, 300]]);
-    const rotated = await call('rotatePdf', pdfIn('turn.pdf', rotSrc), { rotations: [[0, 90], [1, -90], [2, 180], [0, 180]], fileName: 'turned' });
-    equal([rotated.name, rotated.pageCount], ['turned.pdf', 3], 'Rotate: name and count');
+    const turnIn = pdfIn('turn.pdf', rotSrc);
+    const rotated = await call('reorganizePdf', turnIn, { pages: [{ page: 0, rotation: 270 }, { page: 1, rotation: -90 }, { page: 2, rotation: 180 }], fileName: 'turned' });
+    equal([rotated.name, rotated.pageCount], ['turned.pdf', 3], 'Pages turned: name and count');
     const before = await load(rotSrc);
     doc = await load(rotated.bytes);
-    equal(doc.getPages().map((p) => p.getRotation().angle), [270, 270, 180], 'Turns add up, left is negative');
+    equal(doc.getPages().map((p) => p.getRotation().angle), [270, 270, 180], 'Three quarters right is one left, and left is negative');
     equal(doc.getPages().map((p) => p.getSize()), before.getPages().map((p) => p.getSize()), 'Sizes stay');
     check([0, 1, 2].every((i) => contentOf(doc, i) === contentOf(before, i)), 'Content stays exactly as it was');
     back = await readBack(page, url, rotated.bytes);
     equal(back.sizes, [[842, 595, 270], [792, 612, 270], [400, 300, 180]], 'Viewers show them turned');
-    const turnedMap = await call('rotatePdf', pdfIn('turn.pdf', rotSrc), [{ page: 1, rotation: 90 }]);
-    equal((await load(turnedMap.bytes)).getPages().map((p) => p.getRotation().angle), [0, 90, 0], 'Rotations as a list');
-    await rejects(call('rotatePdf', pdfIn('turn.pdf', rotSrc), { 0: 45 }), /pdf_process_failed/, 'Only quarter turns');
+    const turnedList = await call('reorganizePdf', turnIn, turnedBy(3, { 1: 90 }));
+    equal((await load(turnedList.bytes)).getPages().map((p) => p.getRotation().angle), [0, 90, 0], 'The pages as a plain list');
+    // A page not turned keeps its /Rotate exactly as it was written, however oddly: more than a
+    // full turn (page 1), to the left (page 2), kept in an object of its own (page 3).
+    {
+      const odd = await load(await simple('ODD', 4));
+      const oddPages = odd.getPages();
+      oddPages[0].node.set(N('Rotate'), PDFNumber.of(450));
+      oddPages[1].node.set(N('Rotate'), PDFNumber.of(-90));
+      oddPages[2].node.set(N('Rotate'), odd.context.register(PDFNumber.of(90)));
+      const oddIn = pdfIn('odd.pdf', await save(odd));
+      const written = async (bytes) => (await load(bytes)).getPages().map((p) => p.node.get(N('Rotate'))?.toString() ?? null);
+      const dicts = async (bytes) => (await load(bytes)).getPages().map((p) => p.node.toString());
+      const asWritten = await written(oddIn.bytes);
+      check(asWritten[0] === '450' && asWritten[1] === '-90' && /^\d+ 0 R$/.test(asWritten[2]) && asWritten[3] === null, `The fixture's turns as written: ${asWritten}`);
+      const oneTurned = await call('reorganizePdf', oddIn, turnedBy(4, { 3: 90 }));
+      equal(await written(oneTurned.bytes), [...asWritten.slice(0, 3), '90'], 'Pages not turned keep their turn as it was written');
+      equal((await dicts(oneTurned.bytes)).slice(0, 3), (await dicts(oddIn.bytes)).slice(0, 3), 'and the rest of their dictionaries, entry for entry');
+      const oneRemoved = await call('reorganizePdf', oddIn, without(4, 3));
+      equal(await written(oneRemoved.bytes), asWritten.slice(0, 3), 'also beside a page left out');
+      // A page that is turned has such a turn read as viewers read it, and written plainly.
+      const allTurned = await call('reorganizePdf', oddIn, turnedBy(4, { 0: 90, 1: 90, 2: 90 }));
+      equal(await written(allTurned.bytes), ['180', '0', '180', null], 'A turn written oddly is read as viewers read it once the page is turned');
+    }
+    // The turn a page has is added to: saved once more, the pages turned above turn further.
+    const twice = await call('reorganizePdf', pdfIn('turned.pdf', rotated.bytes), turnedBy(3, { 0: 180, 2: 90 }));
+    equal((await load(twice.bytes)).getPages().map((p) => p.getRotation().angle), [90, 270, 270], 'Turns add up to the turn a page has');
+    await rejects(call('reorganizePdf', turnIn, turnedBy(3, { 0: 45 })), /pdf_process_failed/, 'Only quarter turns');
+    await rejects(call('reorganizePdf', turnIn, [{ page: 1 }, { page: 0, rotation: 45 }]), /pdf_process_failed/, 'Only quarter turns, among pages moved too');
+  }
+
+  // --- turningPagesChangesOnlyTheirTurn (PdfEditingDeviceTest)
+  {
+    const mixedSrc = await mixedPages();
+    const turns = [90, 90, 0, 270];
+    const out = await call('reorganizePdf', pdfIn('mixed.pdf', mixedSrc), turns.map((rotation, index) => ({ page: index, rotation })));
+    await saveOutput('organize_pages_turned.pdf', out.bytes);
+    const was = await load(mixedSrc);
+    doc = await load(out.bytes);
+    equal(doc.getPages().map((p) => p.getRotation().angle), [90, 180, 0, 180], 'Each turn is added to the turn the page had');
+    // The content isn't touched: only the page's turn changes.
+    equal(doc.getPages()[0].getSize(), { width: A4[0], height: A4[1] }, 'Page 1 keeps its size');
+    equal(doc.getPages()[2].getCropBox().x, 100, 'Page 3 keeps its crop box');
+    turns.forEach((turn, i) => {
+      // Each page keeps what its dictionary had, and only a page turned gets a /Rotate it may not have had.
+      equal(ownEntries(doc, i), [...new Set([...ownEntries(was, i), ...(turn ? ['Rotate'] : [])])].sort(), `Page ${i + 1}'s entries`);
+      check(contentOf(doc, i) === contentOf(was, i), `Page ${i + 1}'s content is as it was`);
+      for (const box of ['MediaBox', 'CropBox']) {
+        equal(doc.getPages()[i].node.lookup(N(box))?.toString(), was.getPages()[i].node.lookup(N(box))?.toString(), `Page ${i + 1}'s ${box}`);
+      }
+    });
+    // The page not turned is as it was.
+    const [untouched, original] = [doc.getPages()[2].node, was.getPages()[2].node];
+    check(!untouched.has(N('Rotate')), 'The page not turned gets no /Rotate');
+    equal(untouched.toString(), original.toString(), 'and its dictionary is as it was, entry for entry');
+    equal(untouched.lookup(N('Resources')).toString(), original.lookup(N('Resources')).toString(), 'with the resources it had');
+    back = await readBack(page, url, out.bytes);
+    equal(squash(back.texts).join(''), 'CAPTIONACAPTIONBCAPTIONCCAPTIOND', 'The text is all there, in order');
+    check(back.sizes[0][0] > back.sizes[0][1], 'Page 1 is shown sideways now');
   }
 
   // --- Mixed page sizes and a shared font through split and merge.
@@ -893,7 +1318,7 @@ async function engineTests(page, url) {
 
   // --- Damaged and hostile files fail with a clear message.
   await rejects(call('splitPdf', pdfIn('junk.pdf', new TextEncoder().encode('this is not a PDF at all')), { mode: 'every' }), /pdf_import_failed|pdf_process_failed/, 'Not a PDF');
-  await rejects(call('deletePages', pdfIn('cut.pdf', alpha.subarray(0, 200)), [0]), /pdf_import_failed|pdf_process_failed/, 'A PDF cut short');
+  await rejects(call('reorganizePdf', pdfIn('cut.pdf', alpha.subarray(0, 200)), pagesOf(1, 2)), /pdf_import_failed|pdf_process_failed/, 'A PDF cut short');
   {
     // Content that inflates hugely, and a form drawing itself: still finishes.
     const d = await newDoc();
@@ -903,7 +1328,7 @@ async function engineTests(page, url) {
     const shared = ctx.register(ctx.obj({ Font: { F1: d.helv }, XObject: { Fm0: selfForm } }));
     textPage(d, 'LOOPING FORM', { resources: shared, extra: '/Fm0 Do' });
     textPage(d, 'SECOND', { resources: shared });
-    const out = await call('deletePages', pdfIn('selfform.pdf', await save(d)), [1]);
+    const out = await call('reorganizePdf', pdfIn('selfform.pdf', await save(d)), pagesOf(0));
     equal(squash((await readBack(page, url, out.bytes)).texts), ['LOOPINGFORM'], 'A form that draws itself');
   }
   {
@@ -918,7 +1343,7 @@ async function engineTests(page, url) {
     bombPage.node.set(N('Contents'), ctx.register(PDFRawStream.of(ctx.obj({ Filter: 'FlateDecode' }), new Uint8Array(bomb))));
     textPage(d, 'DRAWS THE IMAGE', { resources: shared, extra: 'q 100 0 0 100 0 0 cm /Im0 Do Q' });
     const started = Date.now();
-    const out = await call('deletePages', pdfIn('bomb.pdf', await save(d)), [1]);
+    const out = await call('reorganizePdf', pdfIn('bomb.pdf', await save(d)), pagesOf(0));
     check(holds(everythingIn(out.bytes), 'BOMB IMAGE 12345') && !holds(everythingIn(out.bytes), 'DRAWS THE IMAGE'), 'A page too big to read keeps what it lists');
     check(Date.now() - started < 20000, `A decompression bomb doesn't hold it up (${Date.now() - started} ms)`);
   }
@@ -936,15 +1361,20 @@ async function engineTests(page, url) {
       return save(d);
     };
     const staticIn = pdfIn('static_xfa.pdf', await withXfa(false));
-    const deleted = await call('deletePages', staticIn, [3]);
-    check(!holds(everythingIn(deleted.bytes), 'SECRET XFA DATA') && fieldNames(await load(deleted.bytes)).join() === 'keep', 'Deleting pages drops a static XFA form, keeping the fields left');
+    const deleted = await call('reorganizePdf', staticIn, without(5, 3));
+    check(!holds(everythingIn(deleted.bytes), 'SECRET XFA DATA') && fieldNames(await load(deleted.bytes)).join() === 'keep', 'Removing pages drops a static XFA form, keeping the fields left');
+    const movedXfa = await call('reorganizePdf', staticIn, pagesOf(4, 0, 1, 2));
+    check(!holds(everythingIn(movedXfa.bytes), 'SECRET XFA DATA') && fieldNames(await load(movedXfa.bytes)).join() === 'keep', 'and so does removing them among pages moved');
+    // With every page kept, no value has to go: the form stays whole.
+    const turnedXfa = await call('reorganizePdf', staticIn, turnedBy(5, { 3: 90 }));
+    check(holds(everythingIn(turnedXfa.bytes), 'SECRET XFA DATA') && fieldNames(await load(turnedXfa.bytes)).join() === 'keep,secret', 'Pages only turned keep a static XFA form and every field');
     const partsXfa = await call('splitPdf', staticIn, { groups: [[0]] });
     check(!holds(everythingIn(partsXfa[0].bytes), 'SECRET XFA DATA'), 'A part of a split has no XFA form');
     const mergedXfa = await call('mergePdfs', [staticIn, alphaIn], {});
     check(!holds(everythingIn(mergedXfa.bytes), 'SECRET XFA DATA') && fieldNames(await load(mergedXfa.bytes)).join() === 'keep,secret', 'A merge keeps the fields, not the XFA form');
     const dynamicIn = pdfIn('dynamic_xfa.pdf', await withXfa(true));
     await rejects(call('mergePdfs', [alphaIn, dynamicIn], {}), /pdf_process_failed/, 'A dynamic XFA form is not merged');
-    check(holds(everythingIn((await call('rotatePdf', dynamicIn, { 0: 90 })).bytes), 'SECRET XFA DATA'), 'Other tools leave a dynamic XFA form as it is');
+    check(holds(everythingIn((await call('reorganizePdf', dynamicIn, turnedBy(5, { 0: 90 }))).bytes), 'SECRET XFA DATA'), 'Pages only turned leave a dynamic XFA form as it is');
   }
 
   // --- Merge joins named places, attachments, layers and document details.
@@ -999,13 +1429,30 @@ async function engineTests(page, url) {
       } catch (e) {
         before = e.name;
       }
-      return { seen, cancelled, before };
+      // Reorganize, as its screen calls it: saved in place, then with pages moved and a PDF added.
+      const inPlace = [];
+      await mod.reorganizePdf({ name: 'many.pdf', bytes }, { pages: [{ page: 0 }, { page: 5, rotation: 90 }] }, [], { onProgress: (done, total) => inPlace.push([done, total]) });
+      const laidOut = [];
+      await mod.reorganizePdf({ name: 'many.pdf', bytes }, { pages: [{ page: 5 }, { page: 0 }, { input: 0, page: 1 }] }, [{ name: 'b.pdf', bytes }], { onProgress: (done, total) => laidOut.push([done, total]) });
+      const stopped = [];
+      for (const pages of [[{ page: 0 }, { page: 5 }], [{ page: 5 }, { page: 0 }]]) {
+        try {
+          await mod.reorganizePdf({ name: 'many.pdf', bytes }, { pages }, [], { signal: early.signal });
+          stopped.push('finished');
+        } catch (e) {
+          stopped.push(e.name);
+        }
+      }
+      return { seen, cancelled, before, inPlace, laidOut, stopped };
     }, { src: new URL(ENGINE, url).href, b64: Buffer.from(many).toString('base64') });
     const totals = new Set(result.seen.map(([, t]) => t));
     check(result.seen.length > 4 && totals.size === 1 && result.seen.every(([d, t], i) => d <= t && (i === 0 || d >= result.seen[i - 1][0])), `Progress goes up to its total: ${JSON.stringify(result.seen.slice(-2))}`);
     equal(result.seen[result.seen.length - 1][0], result.seen[0][1], 'and reaches it');
     equal(result.cancelled, 'CancelledError', 'Cancelling stops a split');
     equal(result.before, 'CancelledError', 'A signal aborted before it starts stops a merge');
+    equal(result.inPlace, [[1, 3], [2, 3], [3, 3]], 'Reorganize in place: the PDF read, its pages turned and removed, the PDF saved');
+    equal(result.laidOut, [[1, 4], [2, 4], [3, 4], [4, 4]], 'Reorganize with a PDF added: one step more for it');
+    equal(result.stopped, ['CancelledError', 'CancelledError'], 'A signal aborted before it starts stops a reorganize, either way it saves');
   }
 
   // --- A long PDF stays responsive: the page keeps handling events while it is split.
@@ -1019,12 +1466,27 @@ async function engineTests(page, url) {
       const timer = setInterval(() => { const now = performance.now(); worst = Math.max(worst, now - last); last = now; }, 10);
       const started = performance.now();
       const out = await mod.splitPdf({ name: 'long.pdf', bytes }, { mode: 'every' });
-      const deleted = await mod.deletePages({ name: 'long.pdf', bytes }, '2-299');
+      // Pages 2 to 299 removed, then every page turned: both saved in place.
+      const deleted = await mod.reorganizePdf({ name: 'long.pdf', bytes }, [{ page: 0 }, { page: 299 }]);
+      const turned = await mod.reorganizePdf({ name: 'long.pdf', bytes }, Array.from({ length: 300 }, (_, page) => ({ page, rotation: 90 })));
       clearInterval(timer);
-      return { parts: out.length, left: deleted.pageCount, seconds: (performance.now() - started) / 1000, worst };
+      const seconds = (performance.now() - started) / 1000;
+      // The two PDFs go back to the test, which reads them: the counts the engine gives are not enough.
+      const base64 = (data) => {
+        let text = '';
+        for (let i = 0; i < data.length; i += 0x8000) text += String.fromCharCode(...data.subarray(i, i + 0x8000));
+        return btoa(text);
+      };
+      return { parts: out.length, left: deleted.pageCount, turned: turned.pageCount, leftPdf: base64(deleted.bytes), turnedPdf: base64(turned.bytes), seconds, worst };
     }, { src: new URL(ENGINE, url).href, b64: Buffer.from(longPdf).toString('base64') });
-    equal([result.parts, result.left], [300, 2], 'A 300-page PDF split into every page, and 298 deleted');
-    console.log(`  300 pages split and pages deleted in ${result.seconds.toFixed(1)} s; longest pause ${Math.round(result.worst)} ms`);
+    equal([result.parts, result.left, result.turned], [300, 2, 300], 'A 300-page PDF split into every page, 298 removed, and all 300 turned');
+    // What the two files hold: the first and the last page alone, and a quarter turn on every page.
+    const leftPdf = Buffer.from(result.leftPdf, 'base64');
+    equal([(await load(leftPdf)).getPageCount(), squash((await readBack(page, url, leftPdf)).texts)], [2, ['LONGONE', 'LONG300']], 'The PDF with 298 pages removed holds its first and last page');
+    check(!holds(everythingIn(leftPdf), 'LONG 150'), 'and nothing of a page between');
+    const longTurns = turnsOf(await load(Buffer.from(result.turnedPdf, 'base64')));
+    equal([longTurns.length, longTurns.filter((angle) => angle === 90).length], [300, 300], 'The PDF with every page turned has 300 pages, each a quarter turned');
+    console.log(`  300 pages split, pages removed and pages turned in ${result.seconds.toFixed(1)} s; longest pause ${Math.round(result.worst)} ms`);
     check(result.worst < 1500, `The page stayed responsive (longest pause ${Math.round(result.worst)} ms)`);
   }
 }
@@ -1097,10 +1559,12 @@ async function damagedTrees(page, url, browser) {
       await run('dropRemovedPages', async () => { await c.dropRemovedPages(await p.loadPdf(bytes()), [], c.ticker()); return 'done'; });
       await run('splitPdf', async () => (await o.splitPdf(input(), { mode: 'every' })).map((f) => f.pageCount));
       await run('mergePdfs', async () => (await o.mergePdfs([input(), input()], {})).pageCount);
+      // Reorganize, each way it saves: a page removed and a page turned in place, pages moved laid out again.
       await run('reorganizePdf', async () => (await o.reorganizePdf(input(), [{ page: 0 }])).pageCount);
-      await run('deletePages', async () => (await o.deletePages(input(), [0])).pageCount);
-      await run('rotatePdf', async () => {
-        const turned = await o.rotatePdf(input(), { 1: 90 });
+      await run('removed', async () => (await o.reorganizePdf(input(), [{ page: 1 }])).pageCount);
+      await run('moved', async () => (await o.reorganizePdf(input(), [{ page: 1 }, { page: 0 }])).pageCount);
+      await run('turned', async () => {
+        const turned = await o.reorganizePdf(input(), [{ page: 0 }, { page: 1, rotation: 90 }]);
         // Read back as viewers read it.
         const view = await openPdfJs(turned.bytes);
         const sizes = [];
@@ -1124,7 +1588,7 @@ async function damagedTrees(page, url, browser) {
   for (const name of Object.keys(NO_PAGES)) {
     const r = results[name];
     const where = `${browser}: ${name}`;
-    for (const engine of ['repairPageTree', 'splitPdf', 'mergePdfs', 'reorganizePdf', 'deletePages', 'rotatePdf']) {
+    for (const engine of ['repairPageTree', 'splitPdf', 'mergePdfs', 'reorganizePdf', 'removed', 'moved', 'turned']) {
       equal(r[engine], damaged, `${where}: ${engine} says the PDF is damaged`);
     }
     if (UNCOUNTED.has(name)) {
@@ -1139,24 +1603,31 @@ async function damagedTrees(page, url, browser) {
   }
   const looping = results.looping;
   equal([looping.readPages, looping.repairPageTree, looping.countPages], [2, 2, 2], `${browser}: a looping tree's two pages are read once each`);
-  equal(looping.rotatePdf, { pageCount: 2, sizes: [[200, 300], [200, 400]] }, `${browser}: a looping tree is mended, its page without a type kept`);
-  equal([looping.splitPdf, looping.mergePdfs, looping.reorganizePdf, looping.deletePages], [[1, 1], 4, 1, 1], `${browser}: every tool reads a looping tree`);
+  equal(looping.turned, { pageCount: 2, sizes: [[200, 300], [200, 400]] }, `${browser}: a looping tree is mended, its page without a type kept`);
+  equal([looping.splitPdf, looping.mergePdfs, looping.reorganizePdf, looping.removed, looping.moved], [[1, 1], 4, 1, 1, 2], `${browser}: every tool reads a looping tree`);
 }
 
 /** The same engines in Firefox and WebKit, briefly: they use nothing Chromium alone has. */
 async function otherBrowserTests(page, url, browser) {
   const call = (name, ...args) => runInPage(page, url, ENGINE, name, ...args);
   const chaptersIn = pdfIn('chapters.pdf', await chapters({ named: true }));
-  const deleted = await call('deletePages', chaptersIn, '2,4');
-  check(!holds(everythingIn(deleted.bytes), 'SECRET VALUE') && deleted.pageCount === 3, `${browser}: delete pages`);
+  const deleted = await call('reorganizePdf', chaptersIn, pagesOf(0, 2, 4));
+  check(!holds(everythingIn(deleted.bytes), 'SECRET VALUE') && deleted.pageCount === 3, `${browser}: pages removed`);
   const parts = await call('splitPdf', chaptersIn, { mode: 'custom', pages: '1-2;3-5', combine: false });
   equal(parts.map((p) => p.name), ['chapters_split_1_1-2.pdf', 'chapters_split_2_3-5.pdf'], `${browser}: split`);
   const merged = await call('mergePdfs', [chaptersIn, chaptersIn], { pages: [{ input: 1, page: 4 }, { input: 0, page: 0, rotation: 90 }] });
   equal(merged.pageCount, 2, `${browser}: merge`);
   const reo = await call('reorganizePdf', chaptersIn, [{ page: 1 }, { blank: true, width: 200, height: 200 }]);
-  equal(reo.pageCount, 2, `${browser}: reorganize`);
-  const rot = await call('rotatePdf', chaptersIn, { 0: 270 });
-  equal((await load(rot.bytes)).getPages()[0].getRotation().angle, 270, `${browser}: rotate`);
+  equal(reo.pageCount, 2, `${browser}: a page kept and a blank page added`);
+  const rot = await call('reorganizePdf', chaptersIn, turnedBy(5, { 0: 270 }));
+  equal((await load(rot.bytes)).getPages().map((p) => p.getRotation().angle), [270, 0, 0, 0, 0], `${browser}: a page turned`);
+  const nested = await call('reorganizePdf', pdfIn('nested.pdf', await nestedPages()), [{ page: 0, rotation: 90 }, { page: 2 }]);
+  const nestedDoc = await load(nested.bytes);
+  equal([pageTree(nestedDoc), nestedDoc.getPages().map((p) => p.getRotation().angle)], [[[0], 1], [180, 0]], `${browser}: saved in place, the page tree keeps its nesting`);
+  // As the app's screen test saves it (ScreensDeviceTest): page 2 of three removed, pages 1 and 3 turned left.
+  const sides = await call('reorganizePdf', pdfIn('alpha.pdf', await simple('ALPHA', 3)), [{ page: 0, rotation: 270 }, { page: 2, rotation: 270 }]);
+  const sidesDoc = await load(sides.bytes);
+  equal([sides.pageCount, turnsOf(sidesDoc), [0, 1].map((i) => contentOf(sidesDoc, i).includes(`ALPHA ${WORDS[i * 2]}`))], [2, [270, 270], [true, true]], `${browser}: a page removed and the pages on both sides of it turned`);
   const locked = await encrypted(await simple('ALPHA', 3), 'AES-256');
   const part = await call('splitPdf', pdfIn('locked.pdf', locked, { password: 'test123' }), { groups: [[2]] });
   equal(part[0].pageCount, 1, `${browser}: a protected PDF`);
@@ -1171,7 +1642,7 @@ await withPage(async (page, url) => {
   await page.goto(url + 'app/vendor/VERSIONS.json');
   await engineTests(page, url);
   await damagedTrees(page, url, 'chromium');
-  equal(fontkitRequests, [], 'no fontkit loaded for splitting, merging, reorganizing, deleting or rotating');
+  equal(fontkitRequests, [], 'no fontkit loaded for splitting, merging or reorganizing');
 });
 for (const browser of ['firefox', 'webkit']) {
   await withPage(async (page, url) => {

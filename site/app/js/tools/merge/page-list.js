@@ -1,6 +1,7 @@
 // The list of pages Merge PDF's page mode and Reorganize PDF work on, with Undo: the page logic of
-// the app's PdfToolsViewModel (pages, movePage, movePageBy, rotatePage, removePage, resetPages,
-// resetToOriginal, append, insertBlankPage, followFileOrder, beginPageDrag/endPageDrag, undo).
+// the app's PdfToolsViewModel (pages, movePage, movePageBy, rotatePage, rotateChosen, removePage,
+// removeChosen, resetPages, resetToOriginal, append, insertBlankPage, followFileOrder,
+// beginPageDrag/endPageDrag, undo).
 //
 // A page is { input, page, rotation } (input: the id of the PDF it comes from, page: zero-based,
 // rotation: 0, 90, 180 or 270 clockwise on top of the page's own turn), or a blank page
@@ -171,11 +172,38 @@ export class PageList {
     this.set(this.pages.map((p) => ({ ...p, rotation: turn((p.rotation ?? 0) + degrees) })));
   }
 
+  /**
+   * Turns every page whose key is in `keys` (a Set) by `degrees` more, as one change for Undo
+   * (rotateChosen). Returns whether a page was turned: with none of them in the list nothing
+   * changes and Undo gets no step.
+   */
+  rotateKeys(keys, degrees) {
+    if (!this.pages.some((p) => keys.has(pageKey(p)))) return false;
+    this.pushUndo();
+    this.set(this.pages.map((p) => (keys.has(pageKey(p)) ? { ...p, rotation: turn((p.rotation ?? 0) + degrees) } : p)));
+    return true;
+  }
+
   /** Takes the page with `key` out (removePage). */
   remove(key) {
     if (this.indexOf(key) < 0) return false;
     this.pushUndo();
     this.set(this.pages.filter((p) => pageKey(p) !== key));
+    return true;
+  }
+
+  /**
+   * Takes the pages whose keys are in `keys` (a Set) out, as one change for Undo (removeChosen).
+   * Returns false, changing nothing, when that would leave no page: a PDF keeps at least one.
+   * With no keys, or none of them in the list, it does nothing (no Undo step) and returns true.
+   */
+  removeKeys(keys) {
+    if (!keys.size) return true;
+    const left = this.pages.filter((p) => !keys.has(pageKey(p)));
+    if (!left.length) return false;
+    if (left.length === this.pages.length) return true;
+    this.pushUndo();
+    this.set(left);
     return true;
   }
 

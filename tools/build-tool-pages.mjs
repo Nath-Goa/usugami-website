@@ -14,9 +14,9 @@
 //   in the hidden language switcher;
 // - from site/index.html: the groups and their order (Home's feature groups, but not Everywhere),
 //   each tool's icon (its feature card, id="f-<card>"), the two buttons with their notes and the
-//   promise pills (the hero). A page for one kind of file (variantOf, such as JPG to PDF of Images
-//   to PDF) has no feature card of its own: it takes its tool page's icon and group, and follows
-//   that page in More PDF tools and the sitemap.
+//   promise pills (the hero). A page for one kind of file or one job (variantOf, such as JPG to PDF
+//   of Images to PDF, or Rotate PDF pages of Reorganize PDF) has no feature card of its own: it
+//   takes its tool page's icon and group, and follows that page in More PDF tools and the sitemap.
 // Run it again after changing tools/tool-pages.mjs, or those parts of Download or Home (the test
 // fails until you do). Don't edit the generated files by hand.
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';

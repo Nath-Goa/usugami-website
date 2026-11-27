@@ -1,11 +1,14 @@
-// Reorganize PDF (PageGrids.kt's ReorganizeOptions, PageActions and AddPagesButton, with
-// PdfToolsViewModel's page list, prepareInsert, addBlankPage, undo, resetToOriginal and
-// runReorganize): a PDF's pages in a grid; a page tapped is chosen, and the bar above the grid moves,
-// turns or removes it; pages are also dragged (a long press on touch screens); "Add pages" puts the
-// pages of another PDF, or a blank page the size of the page before it, after the chosen page (or at
-// the end); Undo takes back one change at a time; Save PDF makes the new PDF.
-import { h, ensureCss, announce } from '../../core/dom.js';
+// Reorganize PDF (PageGrids.kt's ReorganizeOptions, PageActions, ReorganizeTile and AddPagesButton,
+// with PdfToolsViewModel's page list, selected pages, prepareInsert, addBlankPage, undo,
+// resetToOriginal and runReorganize): a PDF's pages in a grid. Pages are selected by tapping them,
+// by typing their numbers like "2,5-7" or with Select all; the field and the pages stay in step.
+// The bar above the grid turns or removes every selected page at once and, while one page is
+// selected, moves it too. Pages are also dragged (a long press on touch screens). "Add pages" puts
+// the pages of another PDF, or a blank page the size of the page before it, after the last
+// selected page (or at the end). Undo takes back one change at a time; Save PDF makes the new PDF.
+import { h, ensureCss, announce, prefersReducedMotion } from '../../core/dom.js';
 import { t, tp, loadStrings, formatSize } from '../../core/i18n.js';
+import { icon } from '../../core/icons.js';
 import {
   topBar, button, iconButton, bottomBar, textField, emptyState, fileCard, linearProgress, snackbar,
   alertDialog, menu, dropZone,
@@ -15,9 +18,13 @@ import { openPdf, preloadPdfJs } from '../../core/pdfdoc.js';
 import { pageGrid } from '../../core/pagegrid.js';
 import { CancelledError, UserError } from '../../core/errors.js';
 import { defaultName } from '../../engine/page-selection.js';
+import { readPages, pagesProblem, places as placesOf, following, fieldText } from '../../engine/page-choice.js';
 import { PageList, pageKey, pagesOf, samePages, isBlank, turnedKey, enginePages } from '../merge/page-list.js';
 import { problemText, runWithProgress, resultScreen, engineLoader, setOff } from '../merge/tool-run.js';
 import { blankPicture } from '../merge/thumbs.js';
+
+/** Room kept round a page scrolled into sight in the grid, for the outline the keyboard focus draws. */
+const SIGHT_MARGIN = 4;
 
 /** Renders Reorganize PDF into ctx.root. */
 export async function mount(ctx) {
@@ -40,9 +47,29 @@ export async function mount(ctx) {
   /** The PDF's own pages as they are: what the list starts as, and Reset goes back to. */
   let original = [];
   const pages = new PageList();
-  /** The chosen page, by its key (it keeps being chosen as it moves). */
-  let chosen = null;
+
+  /** The selected pages, by their keys: they stay selected wherever they are moved (ChosenPages). */
+  let chosen = new Set();
+  /** Their places in the list as it is now, going up; and the same as the set the grid reads. */
+  let places = [];
   const chosenSet = new Set();
+  /** What was typed into the Selected pages field, and the page count it was typed for. */
+  let typed = '';
+  let typedFor = 0;
+  /** Typing is done (Enter, the field left, or a page tapped): what can't be read is now explained. */
+  let showProblem = false;
+  /** Remove was pressed with every page selected: a PDF keeps at least one. */
+  let keepOne = false;
+  /** The selection was last made by typing: a page typed alone is then scrolled into sight. */
+  let typedLast = false;
+  /** The page selected alone when the scrolling rule last ran, and what it last ran for. */
+  let lastSingle = null;
+  let followed = { place: -1, key: null };
+  /** While Remove takes pages out: the place the keyboard focus goes to if the bar's buttons had it. */
+  let handFocusTo = -1;
+  /** What the field's support line says in place of its hint, so it is only written when it changes. */
+  let said = null;
+
   let fileName = '';
   let importing = false;
   let processing = false;
@@ -58,9 +85,12 @@ export async function mount(ctx) {
   let shownPages = [];
   let grid = null;
   let card = null;
+  /** Each page's check mark, by its key: a tile drawn again gets the same one back. */
+  const checkMarks = new Map();
 
   const inputOf = (id) => (main?.id === id ? main : extras.find((e) => e.id === id));
-  const indexOfChosen = () => (chosen == null ? -1 : pages.indexOf(chosen));
+  /** The selected page that comes last in the list (pages added go after it), or null with none. */
+  const lastChosen = () => (places.length ? pages.pages[places[places.length - 1]] : null);
 
   // -------------------------------------------------------------------------------------------
   // The screen
@@ -77,14 +107,56 @@ export async function mount(ctx) {
   });
   const cardSlot = h('div', { class: 'reorganize-card' });
 
-  // "12 pages", said again as pages are added or removed, and Undo.
+  // "12 pages", said again as pages are added or removed; Select all, or Select none while every
+  // page is selected; and Undo.
   const countEl = h('h2', { class: 'reorganize-count', 'aria-live': 'polite', tabindex: '-1' });
+  const selectAll = button({ label: t('reorganize_select_all'), variant: 'text', onClick: () => selectAllOrNone() });
   const undoButton = iconButton({ icon: 'undo', label: t('undo'), onClick: () => undo() });
-  const hint = h('p', { class: 'reorganize-hint' }, t('reorganize_hint'));
 
-  // The bar above the grid: always there and as tall with or without a page chosen, so the grid
-  // never moves under the finger that taps a page.
-  const barLabel = h('span', { class: 'reorganize-bar-label' });
+  // The selected pages, typed like "2,5-7". Under the field its hint, or what is wrong in its
+  // place: the field's own support line, which a screen reader hears change.
+  const pagesField = textField({
+    label: t('reorganize_pages_field'),
+    helper: t('reorganize_pages_hint'),
+    autocomplete: 'off',
+    spellcheck: false,
+    onInput: (text) => typedPages(text),
+    onEnter: () => doneTyping(),
+  });
+  pagesField.classList.add('reorganize-pages-field');
+  const pagesInput = pagesField.input;
+  pagesInput.setAttribute('autocapitalize', 'off');
+  pagesInput.setAttribute('autocorrect', 'off');
+  pagesInput.setAttribute('enterkeyhint', 'done');
+  // Leaving the field ends the typing: what can't be read is explained now, not while it is typed.
+  // Not when only the window lost the focus (another window or tab looked at): the field is still
+  // the one to type in on the way back.
+  pagesInput.addEventListener('blur', () => {
+    if (!alive || document.activeElement === pagesInput) return;
+    showProblem = true;
+    render();
+  });
+  // Every text the support line can show, unseen in the same place (reorganize.css): the line is
+  // as tall whichever shows, so the bar and the grid under it never move when the hint and an
+  // error swap, as they do when a page is tapped while what is typed can't be read.
+  const rangeRoom = h('span');
+  pagesField.append(h('div', { class: 'ui-field-support reorganize-room', 'aria-hidden': 'true' },
+    h('span', {}, t('reorganize_pages_hint')),
+    h('span', {}, t('pdf_pages_format')),
+    rangeRoom,
+    h('span', {}, t('pdf_pages_reversed')),
+    h('span', {}, t('pdf_need_page'))));
+  // The cross at the field's end, there while the field holds text.
+  const clearButton = iconButton({ icon: 'close', label: t('reorganize_pages_clear'), cls: 'reorganize-clear', onClick: () => clearPages() });
+  // Pressed with a mouse or a finger it doesn't take the focus: the field would count as left
+  // (and a phone's keyboard would close) just before it is emptied.
+  clearButton.addEventListener('mousedown', (e) => e.preventDefault());
+  const selectBox = h('div', { class: 'reorganize-select' }, pagesField, clearButton);
+
+  // The bar above the grid: always there and as tall whatever is selected, with nothing between
+  // it and the grid, so the grid never moves under the finger that taps a page. A screen reader
+  // hears its text as pages are selected.
+  const barLabel = h('span', { class: 'reorganize-bar-label', 'aria-live': 'polite' });
   const earlier = iconButton({ icon: 'arrow_back', label: '', onClick: () => moveChosen(-1) });
   const later = iconButton({ icon: 'arrow_forward', label: '', onClick: () => moveChosen(1) });
   const turnLeft = iconButton({ icon: 'rotate_left', label: '', onClick: () => turnChosen(-90) });
@@ -95,15 +167,16 @@ export async function mount(ctx) {
   const barButtons = h('div', { class: 'reorganize-bar-buttons' }, earlier, later, turnLeft, turnRight, removeButton);
   const actionBar = h('div', { class: 'reorganize-bar' }, barLabel, barButtons);
   const gridSlot = h('div', { class: 'reorganize-grid-slot' });
-  const pagesPane = h('div', { class: 'reorganize-pages' }, actionBar, gridSlot);
+  const hint = h('p', { class: 'reorganize-hint' }, t('reorganize_move_hint'));
+  const pagesPane = h('div', { class: 'reorganize-pages' }, actionBar, gridSlot, hint);
 
   const addButton = button({ label: t('reorganize_add'), icon: 'add', variant: 'outlined', onClick: () => openAddMenu() });
   addButton.setAttribute('aria-haspopup', 'menu');
   addButton.setAttribute('aria-expanded', 'false');
   const resetButton = button({ label: t('pdf_reset_pages'), variant: 'text', onClick: () => resetPages() });
   const options = h('div', { class: 'reorganize-options' },
-    h('div', { class: 'reorganize-head' }, countEl, undoButton),
-    hint,
+    h('div', { class: 'reorganize-head' }, countEl, selectAll, undoButton),
+    selectBox,
     pagesPane,
     h('div', { class: 'reorganize-actions' }, addButton, resetButton));
 
@@ -120,7 +193,7 @@ export async function mount(ctx) {
   const detachDrop = dropZone(content, {
     accept: 'pdf',
     multiple: false,
-    onFiles: ([item]) => addPagesOf(item, chosen != null && pages.indexOf(chosen) >= 0 ? chosen : null),
+    onFiles: ([item]) => addPagesOf(item, lastChosen()),
   });
 
   // Ctrl+Z (⌘Z) takes back the latest change, as Undo, outside text fields.
@@ -144,10 +217,11 @@ export async function mount(ctx) {
       count: pages.length,
       thumbnail: (i, width, o) => thumbnailOf(pages.pages[i], width, o),
       tileLabel: (i) => tileName(i),
-      // One page chosen at a time, as the app's selectable tiles: a listbox of options.
-      selectable: 'single',
+      // Each page is a check box, as the app's tiles: tapped, it goes into the selection or out of it.
+      selectable: true,
       selected: chosenSet,
-      onToggle: (i) => choose(i),
+      onToggle: (i) => tapped(i),
+      badge: (i) => checkMark(i),
       reorderable: true,
       moveButtons: false,
       ariaLabel: t('tool_reorganize'),
@@ -198,39 +272,182 @@ export async function mount(ctx) {
     return turned ? `${name}, ${t(turned)}` : name;
   }
 
-  // -------------------------------------------------------------------------------------------
-  // Choosing a page and the bar's buttons
+  /**
+   * The check mark in the corner of page `i`: every page has one, which reorganize.css shows while
+   * the page is selected, so it fades in and out. Only for the eye: the check box says its state.
+   */
+  function checkMark(i) {
+    const ref = pages.pages[i];
+    if (!ref) return null;
+    const key = pageKey(ref);
+    let mark = checkMarks.get(key);
+    if (!mark) {
+      mark = h('span', { class: 'reorganize-check', 'aria-hidden': 'true' }, icon('check', { size: 16 }));
+      checkMarks.set(key, mark);
+    }
+    return mark;
+  }
 
-  function choose(i) {
-    const key = pageKey(pages.pages[i]);
-    chosen = key === chosen ? null : key;
+  /** The tile of the page at `place` in the grid, or undefined. */
+  const tileAt = (place) => grid?.querySelectorAll('.ui-page-tile')[place];
+
+  /** Whether any of the page at `place` shows in the grid's own scrolling area. */
+  function inSight(place) {
+    const tile = tileAt(place);
+    if (!tile) return true;
+    const top = tile.offsetTop - grid.scrollTop;
+    return top + tile.offsetHeight > 0 && top < grid.clientHeight;
+  }
+
+  /**
+   * Scrolls the grid, and only the grid, until the row of the page at `place` is the first that
+   * shows, as the app's animateScrollToItem: right under the bar and the field. Scrolled by the
+   * least that shows the page instead, a page further down would stop at the grid's foot, which
+   * on a phone lies under Save PDF or below the screen. Not scrollIntoView, which also scrolls the
+   * window: the field being typed in would leave a phone's screen. The last rows can't reach the
+   * top: the grid stops at its end, as the app's does.
+   */
+  function bringIntoSight(place) {
+    const tile = tileAt(place);
+    if (!tile) return;
+    const to = Math.max(0, tile.offsetTop - SIGHT_MARGIN);
+    if (to !== grid.scrollTop) grid.scrollTo({ top: to, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+  }
+
+  /**
+   * The page selected alone is scrolled into sight when it is out of it and was moved (with the
+   * bar's buttons or the keyboard, or by Undo or Reset pages changing its place), or typed. A
+   * page left selected alone by taps is not: the grid never moves under the finger that taps a
+   * page, also when the one left is out of sight. Never during a drag either (PageGrids.kt's
+   * LaunchedEffect on the single selected page).
+   */
+  function followSingle() {
+    const place = places.length === 1 ? places[0] : -1;
+    const key = place >= 0 ? pageKey(pages.pages[place]) : null;
+    // As the app's effect, this runs only when the page selected alone, or its place, has changed.
+    if (place === followed.place && key === followed.key) return;
+    followed = { place, key };
+    const moved = key !== null && key === lastSingle;
+    lastSingle = key;
+    if (place < 0 || dragging || !(moved || typedLast)) return;
+    if (!inSight(place)) bringIntoSight(place);
+  }
+
+  /**
+   * Gives the keyboard focus to the page at `place` (or, with -1, to the page the grid's Tab stop
+   * is on) and shows it, as the grid does for a page its arrow keys go to: the grid scrolls by the
+   * least that shows the page, and so does the window. In one column the grid's foot lies under
+   * Save PDF or below the screen, so the grid alone would leave the focus where it can't be seen.
+   * No field is being typed in here, so the window may move.
+   */
+  function focusPage(place) {
+    const buttons = grid ? [...grid.querySelectorAll('.ui-page')] : [];
+    const at = place >= 0 ? Math.min(place, buttons.length - 1) : buttons.findIndex((b) => b.tabIndex === 0);
+    if (!buttons[at]) {
+      // No page to go to: the page count, as after the last Undo.
+      countEl.focus({ preventScroll: true });
+      return;
+    }
+    buttons[at].focus({ preventScroll: true });
+    buttons[at].scrollIntoView({ block: 'nearest' });
+  }
+
+  // -------------------------------------------------------------------------------------------
+  // Selecting pages: taps, the field, Select all
+
+  /**
+   * A page tapped goes into the selection, or out of it. Not while what is typed can't be read:
+   * then the tap selects nothing, leaves the text as it is, and the reason shows (tapped).
+   */
+  function tapped(i) {
+    const ref = pages.pages[i];
+    if (!ref) return;
+    keepOne = false;
+    typedLast = false;
+    if (readPages(typed, pages.length) === null) {
+      showProblem = true;
+    } else {
+      const key = pageKey(ref);
+      const next = new Set(chosen);
+      if (!next.delete(key)) next.add(key);
+      chosen = next;
+    }
     sync();
   }
 
+  /** Every change to the field's text makes the pages it names the selection: none while it can't be read. */
+  function typedPages(text) {
+    typed = text;
+    showProblem = false;
+    keepOne = false;
+    typedLast = true;
+    const list = pages.pages;
+    chosen = new Set((readPages(text, list.length) ?? []).map((place) => pageKey(list[place])));
+    sync();
+  }
+
+  /** Enter (a phone's Done): typing is done. */
+  function doneTyping() {
+    showProblem = true;
+    render();
+    // On a phone, Done also puts the keyboard away, as the app's does; with a real keyboard the
+    // focus stays in the field.
+    if (typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches) pagesInput.blur();
+  }
+
+  /** Forgets what was typed and what it led to, and makes the pages with `keys` the selection. */
+  function choose(keys) {
+    typed = '';
+    showProblem = false;
+    keepOne = false;
+    typedLast = false;
+    chosen = keys;
+    sync();
+  }
+
+  function selectAllOrNone() {
+    const keys = pages.pages.map(pageKey);
+    const all = keys.length > 0 && keys.every((key) => chosen.has(key));
+    choose(all ? new Set() : new Set(keys));
+  }
+
+  function clearPages() {
+    const hadFocus = document.activeElement === clearButton;
+    choose(new Set());
+    // The cross goes with the text: pressed from the keyboard, the focus goes to the field it emptied.
+    if (hadFocus) pagesInput.focus({ preventScroll: true });
+  }
+
+  // -------------------------------------------------------------------------------------------
+  // The bar's buttons
+
   function moveChosen(offset) {
-    const from = indexOfChosen();
+    if (places.length !== 1 || !grid) return;
+    const from = places[0];
     const to = from + offset;
-    if (from < 0 || to < 0 || to >= pages.length || !grid) return;
-    if (grid.move(from, to)) {
-      announce(t('web_page_moved', to + 1, pages.length));
-      // A page moved out of sight with the buttons is scrolled back into it.
-      grid.scrollToIndex(to);
-    }
+    if (to < 0 || to >= pages.length) return;
+    // The grid moves the page (its tiles glide) and tells the list through onMove.
+    if (grid.move(from, to)) announce(t('web_page_moved', to + 1, pages.length));
   }
 
+  /** Turns every selected page, as one change for Undo (rotateChosen). */
   function turnChosen(degrees) {
-    if (chosen != null) pages.rotate(chosen, degrees);
+    pages.rotateKeys(chosen, degrees);
   }
 
+  /**
+   * Takes the selected pages out, as one change for Undo. Not when that would leave no page (every
+   * page selected, or the only page): nothing goes, and the field says a PDF keeps at least one
+   * until not every page is selected (removeChosen).
+   */
   function removeChosen() {
-    const index = indexOfChosen();
-    if (index < 0 || pages.length <= 1) return;
-    const key = chosen;
-    // The page that takes its place is chosen next, so several can go in a row.
-    const after = pages.pages.filter((p) => pageKey(p) !== key);
-    const next = after[index] ?? after[index - 1];
-    chosen = next ? pageKey(next) : null;
-    pages.remove(key);
+    if (!chosen.size) return;
+    handFocusTo = places[0];
+    const removed = pages.removeKeys(chosen);
+    handFocusTo = -1;
+    if (removed) return;
+    keepOne = true;
+    render();
   }
 
   function undo() {
@@ -239,10 +456,9 @@ export async function mount(ctx) {
     pages.undo(new Set([main?.id, ...extras.map((e) => e.id)]));
   }
 
+  /** Back to the PDF's own pages. The pages still selected stay selected (resetToOriginal). */
   function resetPages() {
     pages.resetTo(original);
-    chosen = null;
-    sync();
   }
 
   function openAddMenu() {
@@ -315,15 +531,22 @@ export async function mount(ctx) {
     }
   }
 
-  /** "Pages from a PDF": its pages go after the chosen page, or at the end (prepareInsert). */
+  /**
+   * "Pages from a PDF": its pages go after the last selected page, or at the end. The page is the
+   * one selected when the PDF is asked for, also if the selection changes while it is picked
+   * (prepareInsert).
+   */
   async function addPdf() {
     if (importing || processing || !main) return;
-    const after = chosen != null && pages.indexOf(chosen) >= 0 ? chosen : null;
+    const after = lastChosen();
     const [item] = await pickFiles({ accept: 'pdf', multiple: false });
     if (item) await addPagesOf(item, after);
   }
 
-  /** Opens `item` (asking for its password) and puts its pages after the page `after`, or at the end. */
+  /**
+   * Opens `item` (asking for its password) and puts its pages after the page `after`, or at the
+   * end when there is none or it has gone meanwhile. The pages added are not selected.
+   */
   async function addPagesOf(item, after) {
     if (!item || importing || processing || !alive || !main) return;
     await busyWith(async () => {
@@ -335,20 +558,19 @@ export async function mount(ctx) {
       }
       const input = { id: `p${++seq}`, name: src.name, size: src.size, pageCount: src.pageCount, src, bytes: src.bytes, password: src.password };
       extras = [...extras, input];
-      pages.insert(pagesOf([input]), after, { undoable: true });
+      pages.insert(pagesOf([input]), after ? pageKey(after) : null, { undoable: true });
     });
   }
 
   /**
-   * "Blank page": after the chosen page (or at the end), the size that page shows, sideways when
-   * it is turned a quarter (addBlankPage). Busy while a PDF page's size is read, so asked for
+   * "Blank page": after the last selected page (or at the end), the size that page shows, sideways
+   * when it is turned a quarter (addBlankPage). Busy while a PDF page's size is read, so asked for
    * again meanwhile it adds no second page, and the PDF can't be saved without it.
    */
   async function addBlank() {
     if (importing || processing || !main) return;
     const list = pages.pages;
-    const at = chosen != null ? list.findIndex((p) => pageKey(p) === chosen) : -1;
-    const neighbour = list[at >= 0 ? at : list.length - 1];
+    const neighbour = lastChosen() ?? list[list.length - 1];
     if (!neighbour) return;
     if (isBlank(neighbour)) {
       pages.insertBlank(neighbour, neighbour.width, neighbour.height);
@@ -384,6 +606,7 @@ export async function mount(ctx) {
   // -------------------------------------------------------------------------------------------
   // Saving
 
+  // The pages differ from the PDF's own. A selection alone is nothing to save, or to lose.
   const hasChanges = () => !!main && pages.length > 0 && !samePages(pages.pages, original);
 
   async function saveReorganized() {
@@ -414,13 +637,22 @@ export async function mount(ctx) {
     main = null;
     extras = [];
     original = [];
-    chosen = null;
+    chosen = new Set();
+    places = [];
     chosenSet.clear();
+    typed = '';
+    typedFor = 0;
+    showProblem = false;
+    keepOne = false;
+    typedLast = false;
+    lastSingle = null;
+    followed = { place: -1, key: null };
     pages.clearUndo();
     pages.set([]);
     grid?.destroy();
     grid = null;
     gridSlot.replaceChildren();
+    checkMarks.clear();
     shown = [];
     shownPages = [];
     card = null;
@@ -445,21 +677,39 @@ export async function mount(ctx) {
     if (alive) sync();
   });
 
-  /** Brings the grid, the chosen page and the bar in step with the pages. */
+  /** Brings the selection, the field, the grid and the bar in step with the pages. */
   function sync() {
     const list = pages.pages;
     const keys = list.map(pageKey);
-    const before = [...chosenSet];
+    // The selection follows the pages: those that have gone leave it, and nothing is ever added
+    // to it, so pages Undo or Reset bring back are not selected again (ChosenPages.follow).
+    chosen = following(keys, chosen);
+    places = placesOf(keys, chosen);
+    // Numbers typed for a list of another length name other pages now: the field shows the
+    // selection as ranges instead.
+    if (keys.length !== typedFor) {
+      typed = '';
+      typedFor = keys.length;
+    }
+    // What was typed stays while it names the selected pages; later typing goes on from the text shown.
+    typed = fieldText(typed, places, keys.length);
+    // "Keep at least one page." goes for good once not every page is selected: pages added and
+    // then undone, say, don't bring it back with no Remove pressed again.
+    if (!keys.length || places.length !== keys.length) keepOne = false;
+
+    // The pages whose check box changes.
+    const changed = new Set(chosenSet);
+    for (const place of places) {
+      if (!changed.delete(place)) changed.add(place);
+    }
     chosenSet.clear();
-    const ci = chosen == null ? -1 : keys.indexOf(chosen);
-    if (ci >= 0) chosenSet.add(ci);
+    for (const place of places) chosenSet.add(place);
     if (grid) {
       if (fromGrid) {
         // The grid moves the page itself, and redraws the pages between.
       } else if (keys.length === shown.length && keys.every((k, i) => k === shown[i])) {
-        // The same pages in the same places: only those changed (a turn), and the pages chosen
-        // before and now, are drawn again, so a long PDF stays quick.
-        const changed = new Set([...before, ...chosenSet]);
+        // The same pages in the same places: only those turned, and those selected or let go, are
+        // drawn again, so a long PDF stays quick.
         list.forEach((ref, i) => { if (ref !== shownPages[i]) changed.add(i); });
         grid.refresh(changed);
       } else {
@@ -467,6 +717,8 @@ export async function mount(ctx) {
         // hands it to the page now in its place.
         const tilesBefore = [...grid.querySelectorAll('.ui-page-tile')];
         const focused = tilesBefore.findIndex((tileEl) => tileEl.contains(document.activeElement));
+        const there = new Set(keys);
+        for (const key of checkMarks.keys()) if (!there.has(key)) checkMarks.delete(key);
         grid.setCount(keys.length);
         if (focused >= 0 && keys.length) grid.focusIndex(Math.min(focused, keys.length - 1));
       }
@@ -474,6 +726,9 @@ export async function mount(ctx) {
     shown = keys;
     shownPages = list;
     render();
+    // After a move of the grid's own, once the grid has put the page's tile in its new place.
+    if (fromGrid) queueMicrotask(() => { if (alive) followSingle(); });
+    else followSingle();
   }
 
   function render() {
@@ -485,33 +740,86 @@ export async function mount(ctx) {
     setOff(empty, importing);
     content.hidden = !has;
     const count = pages.length;
-    const countText = tp('page_count', count, count);
-    if (countEl.textContent !== countText) countEl.textContent = countText;
+    const every = count > 0 && places.length === count;
+    selectAll.setLabel(t(every ? 'reorganize_select_none' : 'reorganize_select_all'));
+    selectAll.disabled = count === 0;
     // The last change taken back, the focus goes to the page count beside Undo.
     setDisabled(undoButton, !pages.canUndo, countEl);
-    const index = indexOfChosen();
-    const ref = index >= 0 ? pages.pages[index] : null;
-    actionBar.classList.toggle('is-chosen', !!ref);
-    barButtons.hidden = !ref;
-    barLabel.textContent = ref ? t('pdf_page_number', index + 1) : t('reorganize_choose_page');
-    if (ref) {
-      const n = index + 1;
-      earlier.setLabel(t('move_page_earlier', n));
-      later.setLabel(t('move_page_later', n));
-      turnLeft.setLabel(t('rotate_page_left', n));
-      turnRight.setLabel(t('rotate_page_right', n));
-      removeButton.setLabel(t('remove_page', n));
-      setDisabled(earlier, index === 0, later);
-      setDisabled(later, index === count - 1, earlier);
-      // A PDF keeps at least one page.
-      setDisabled(removeButton, count <= 1, turnRight);
-    }
+    renderField(count, every);
+    renderBar(count);
+    // Written once the bar has handed the focus on (after a Remove): a screen reader then says
+    // the new count after the page the focus went to, rather than having it cut short by that page.
+    setText(countEl, tp('page_count', count, count));
     setOff(addButton, importing || processing);
     // Reset, the focus goes to Add pages beside it.
     setDisabled(resetButton, !hasChanges(), addButton);
     // While busy only marked off, so the focus stays on it (and comes back to it after Cancel).
     save.disabled = !hasChanges();
     setOff(save, importing || processing);
+  }
+
+  /** The Selected pages field: its text, its cross, and its hint or what is wrong in its place. */
+  function renderField(count, every) {
+    // Written only when it differs, so typing keeps its place in the text.
+    if (pagesField.value !== typed) pagesField.setValue(typed);
+    clearButton.hidden = typed === '';
+    selectBox.classList.toggle('has-clear', typed !== '');
+    setText(rangeRoom, t('pdf_pages_range', count));
+    // The one place for what is wrong with the selection. Typed pages that can't be used come
+    // first; "Keep at least one page." shows while every page is still selected.
+    const problem = showProblem ? pagesProblem(typed, count) : null;
+    const now = problem ? t(problem.key, ...problem.args) : keepOne && every ? t('pdf_need_page') : null;
+    if (now !== said) {
+      said = now;
+      pagesField.setError(now);
+    }
+  }
+
+  /** The bar: what is selected, and the buttons for one page or for several. */
+  function renderBar(count) {
+    const any = places.length > 0;
+    const one = places.length === 1;
+    const index = one ? places[0] : -1;
+    const focused = barButtons.contains(document.activeElement) ? document.activeElement : null;
+    actionBar.classList.toggle('is-chosen', any);
+    // Five buttons: reorganize.css makes room for them on the narrowest phones.
+    actionBar.classList.toggle('is-one', one);
+    barButtons.hidden = !any;
+    earlier.hidden = !one;
+    later.hidden = !one;
+    if (one) {
+      const n = index + 1;
+      earlier.setLabel(t('move_page_earlier', n));
+      later.setLabel(t('move_page_later', n));
+      turnLeft.setLabel(t('rotate_page_left', n));
+      turnRight.setLabel(t('rotate_page_right', n));
+      // Also on for the only page: pressed, it says a PDF keeps at least one.
+      removeButton.setLabel(t('remove_page', n));
+      const first = index === 0;
+      const last = index === count - 1;
+      setDisabled(earlier, first, last ? turnLeft : later);
+      setDisabled(later, last, first ? turnLeft : earlier);
+    } else if (any) {
+      turnLeft.setLabel(t('rotate_selected_left'));
+      turnRight.setLabel(t('rotate_selected_right'));
+      removeButton.setLabel(tp('remove_selected_pages', places.length, places.length));
+    }
+    // A button that had the focus and has gone hands it on rather than dropping it to the top of
+    // the page: to the buttons left, or with none left (the pages were removed, or the selected
+    // page went with an Undo) to a page in the grid.
+    if (focused && (!any || focused.hidden)) {
+      if (any) turnLeft.focus({ preventScroll: true });
+      else focusPage(handFocusTo);
+    }
+    // The bar's own text last, for the same reason as the page count: said after a focus handed on.
+    setText(barLabel, !any ? t('reorganize_tap_pages')
+      : one ? t('pdf_page_number', index + 1)
+        : t('reorganize_selected_count', places.length, count));
+  }
+
+  /** Writes `text` into `node` only when it differs, so a live region says it once. */
+  function setText(node, text) {
+    if (node.textContent !== text) node.textContent = text;
   }
 
   /** Turns `b` off or on; the focus it had goes to `other`, as a button turned off can't keep it. */
@@ -568,7 +876,8 @@ export async function mount(ctx) {
         main: main && { id: main.id, name: main.name, pageCount: main.pageCount },
         extras: extras.map((e) => ({ id: e.id, name: e.name, pageCount: e.pageCount })),
         pages: pages.pages,
-        chosen,
+        // The selected pages' keys, in the pages' order.
+        chosen: places.map((place) => pageKey(pages.pages[place])),
         fileName,
         canUndo: pages.canUndo,
       };

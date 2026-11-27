@@ -105,6 +105,7 @@ for (const run of RUNS) {
         await checkFeatureRows(page, `chromium ${width}x800 home`);
       }
       await page.setViewportSize(run.viewport);
+      await checkShortWindows(page, url);
     }
     if (run.browser === 'chromium' && [320, 412, 1280].includes(run.viewport.width)) await checkDarkScreenshots(page, url);
     for (const p of PAGES) await screenshot(context, url, p, run);
@@ -138,7 +139,7 @@ async function checkPage(page, url, p, run, label) {
 }
 
 /**
- * Home's feature groups (7, 5, 4, 3 and 9 cards) leave no row part filled: each row of cards
+ * Home's feature groups (7, 3, 4, 3 and 9 cards) leave no row part filled: each row of cards
  * reaches both edges of its grid, at one, two or three cards to a row.
  */
 async function checkFeatureRows(page, where) {
@@ -222,7 +223,7 @@ async function checkReferrer(page, url, context, label) {
 
 /**
  * Home on a phone, as a visitor scrolls through it: the images it downloads stay small (the
- * screenshots are WebP; as PNGs they were 227 KiB). The hidden hero pictures aren't downloaded.
+ * screenshots are WebP; as PNGs they are 605 KiB). The hidden hero pictures aren't downloaded.
  */
 async function checkHomeBytes(page, url, label) {
   await page.goto(url, { waitUntil: 'load' });
@@ -429,6 +430,48 @@ async function checkLoaded(page, url, where, run) {
       .filter((e) => e.h < 47.5));
     check(!small.length, `${where}: touch targets under 48 px: ${small.map((s) => `"${s.text}" ${s.h.toFixed(0)}px`).join(', ')}`);
   }
+  await checkCoffee(page, where, run);
+}
+
+/**
+ * The "Buy me a coffee" button: an ordinary link to Usugami's page there, in the footer, that
+ * stays at the bottom corner of the window as the page scrolls: round with the cup alone on
+ * phones and in windows under 480 px high, with its words in larger ones, at least 48 px to tap, and clear of the footer's last line
+ * at the end of the page.
+ */
+async function checkCoffee(page, where, run) {
+  const at = (top) => page.evaluate((y) => {
+    scrollTo({ top: y === 'end' ? document.documentElement.scrollHeight : 0, behavior: 'instant' });
+    const a = document.querySelector('a.coffee-float');
+    if (!a) return null;
+    const r = a.getBoundingClientRect();
+    const style = getComputedStyle(a);
+    const root = document.documentElement;
+    return {
+      href: a.getAttribute('href'), target: a.getAttribute('target'), name: a.textContent.trim(), inFooter: !!a.closest('footer'),
+      icon: !!a.querySelector('svg[aria-hidden="true"]'), position: style.position, colors: `${style.color} on ${style.backgroundColor}`,
+      right: Math.round(root.clientWidth - r.right), bottom: Math.round(root.clientHeight - r.bottom),
+      top: r.top, width: r.width, height: r.height, words: a.querySelector('span').getBoundingClientRect().width,
+      // What a tap in its middle reaches.
+      tappable: document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)?.closest('a') === a,
+      footerEnd: document.querySelector('.footer-grid').getBoundingClientRect().bottom,
+    };
+  }, top);
+  const start = await at('start');
+  check(start, `${where}: no "Buy me a coffee" button (a.coffee-float)`);
+  if (!start) return;
+  check(start.href === 'https://buymeacoffee.com/usugami' && start.target === null && start.name === 'Buy me a coffee' && start.icon && start.inFooter,
+    `${where}: the coffee button should be a plain link to https://buymeacoffee.com/usugami in the footer, named "Buy me a coffee" with its cup: ${JSON.stringify(start)}`);
+  check(start.position === 'fixed' && start.right === 16 && start.bottom === 16, `${where}: the coffee button isn't fixed 16 px from the bottom corner (${start.position}, ${start.right}, ${start.bottom})`);
+  check(start.colors === 'rgb(0, 0, 0) on rgb(255, 221, 0)', `${where}: the coffee button should be black on Buy Me a Coffee's yellow: ${start.colors}`);
+  check(start.width >= 47.5 && start.height >= 47.5, `${where}: the coffee button is ${start.width} x ${start.height}, under 48 px`);
+  if (run.viewport.width < 600 || run.viewport.height < 480) check(start.words <= 1 && Math.abs(start.width - start.height) < 0.5, `${where}: on a phone the coffee button should be round, its words hidden (${start.width} x ${start.height}, words ${start.words})`);
+  else check(start.words > 80 && start.width > start.words + 40, `${where}: from 600 x 480 px the coffee button should show its words (${start.width} wide, words ${start.words})`);
+  check(start.tappable, `${where}: something covers the coffee button`);
+  const end = await at('end');
+  check(end.right === 16 && end.bottom === 16 && end.tappable, `${where}: the coffee button moved or is covered at the end of the page (${end.right}, ${end.bottom})`);
+  check(end.footerEnd <= end.top + 0.5, `${where}: the footer's last line (${end.footerEnd}) is under the coffee button (${end.top})`);
+  await page.evaluate(() => scrollTo({ top: 0, behavior: 'instant' }));
 }
 
 /** Phones: the compact menu opens without JavaScript (<details>) and holds the four links. */
@@ -523,8 +566,39 @@ async function checkDarkScreenshots(page, url) {
       await Promise.all([...document.images].map((i) => i.decode().catch(() => {})));
     });
     await page.screenshot({ path: await outPath(`site-${p.name}-chromium-${width}-dark.png`), fullPage: true, caret: 'initial' });
+    const colors = await page.$eval('a.coffee-float', (a) => `${getComputedStyle(a).color} on ${getComputedStyle(a).backgroundColor}`);
+    check(colors === 'rgb(0, 0, 0) on rgb(255, 221, 0)', `${p.name} dark ${width}: the coffee button should be black on Buy Me a Coffee's yellow in the dark theme too: ${colors}`);
   }
   await page.emulateMedia({ colorScheme: 'light' });
+}
+
+/**
+ * Short windows: under 480 px high (a phone held sideways, a laptop zoomed to 200%) the coffee
+ * button is round, with the cup alone; and the Privacy page's sticky section list never has an
+ * entry under it (the list stops being sticky in windows too short to hold it above the button).
+ */
+async function checkShortWindows(page, url) {
+  const sizes = [{ width: 740, height: 400 }, { width: 683, height: 384 }, { width: 1280, height: 552 }, { width: 1280, height: 600 }, { width: 1280, height: 640 }, { width: 1080, height: 620 }];
+  for (const size of sizes) {
+    await page.setViewportSize(size);
+    await page.goto(url + 'privacy/', { waitUntil: 'load' });
+    const where = `chromium ${size.width}x${size.height} privacy`;
+    for (const y of [800, 1500, 2600]) {
+      const r = await page.evaluate((top) => {
+        scrollTo({ top, behavior: 'instant' });
+        const a = document.querySelector('a.coffee-float').getBoundingClientRect();
+        if (!document.querySelector('.doc-toc a')) return { width: a.width, height: a.height, under: ['(no section list on this page)'] };
+        const under = [...document.querySelectorAll('.doc-toc a')].filter((l) => {
+          const b = l.getBoundingClientRect();
+          return b.width && b.left < a.right && b.right > a.left && b.top < a.bottom && b.bottom > a.top;
+        }).map((l) => l.textContent.trim());
+        return { width: a.width, height: a.height, under };
+      }, y);
+      check(!r.under.length, `${where} at ${y}: section links under the coffee button: ${r.under.join(', ')}`);
+      if (size.height < 480) check(Math.abs(r.width - 56) < 0.5 && Math.abs(r.height - 56) < 0.5, `${where}: in a window under 480 px high the coffee button should be round (${r.width} x ${r.height})`);
+    }
+  }
+  await page.setViewportSize({ width: 1280, height: 800 });
 }
 
 // ---------- Content ----------
@@ -563,6 +637,8 @@ function checkContent() {
   for (const [name, html] of Object.entries(pages)) {
     const links = hrefs(part(html, /<footer[\s\S]*?<\/footer>/));
     for (const l of [SOURCE, NOTICES, 'https://github.com/Nath-Goa/usugami']) check(links.includes(l), `${name}: the footer doesn't link to ${l}`);
+    // The "Buy me a coffee" button at the bottom corner of every page: a link, once.
+    check(hrefs(html).filter((l) => /buymeacoffee\.com/.test(l)).join() === 'https://buymeacoffee.com/usugami', `${name}: needs one link to https://buymeacoffee.com/usugami (the coffee button)`);
     // Links to other sites don't tell them that the visitor came from Usugami.
     check(/<meta name="referrer" content="no-referrer">/.test(part(html, /<head>[\s\S]*?<\/head>/)), `${name}: no <meta name="referrer" content="no-referrer"> in the head`);
   }
@@ -633,7 +709,7 @@ function checkContent() {
     for (const l of ['app/', 'download/', 'privacy/', SOURCE, NOTICES]) check(links.includes(l), `home: no link to ${l}`);
     const text = pageText(main);
     for (const words of ['Scan document', 'Images to PDF', 'Word to PDF', 'PowerPoint to PDF', 'Excel to PDF', 'EPUB to PDF', 'Merge PDF',
-      'Split PDF', 'Reorganize PDF', 'Delete pages', 'Rotate PDF', 'Edit PDF', 'Sign PDF', 'Add page numbers', 'Add watermark', 'Compress PDF',
+      'Split PDF', 'Reorganize PDF', 'Edit PDF', 'Sign PDF', 'Add page numbers', 'Add watermark', 'Compress PDF',
       'Redact PDF', 'Flatten PDF', 'Text recognition (OCR)', 'Recent files', 'Share to Usugami', 'never uploaded', 'never leave your device',
       'Usugami watermark', 'Off unless you turn it on']) {
       check(text.includes(words), `home: doesn't say "${words}"`);
@@ -658,7 +734,7 @@ function checkContent() {
   // on Home: it opens the tool that tool's page opens, and every tool page links to it.
   {
     const toolIds = new Set([...readFileSync(join(root, 'site', 'app', 'js', 'core', 'tools.js'), 'utf8').matchAll(/^\s*id: '([a-z-]+)'/gm)].map((m) => m[1]));
-    check(toolIds.has('merge') && toolIds.size >= 18, `tool pages: couldn't read the web app's tools (${[...toolIds].join(', ')})`);
+    check(toolIds.has('merge') && toolIds.size >= 16, `tool pages: couldn't read the web app's tools (${[...toolIds].join(', ')})`);
     for (const t of Object.values(TOOL_PAGES)) {
       if (t.variantOf === undefined) {
         check(pages.home.includes(`<h4 id="f-${t.card}"><a class="feature-link" href="${t.slug}/">`), `home: the feature card f-${t.card} should link to ${t.slug}/`);

@@ -3,7 +3,9 @@
 //
 // Fields:
 //   id        route: #/tool/<id>
-//   title, detail, keywords   string keys (keywords: hidden comma-separated words for Home's search)
+//   title, detail, keywords   string keys (keywords: hidden comma-separated words for Home's search).
+//             Home shows a detail and reads keywords through tWeb, so a web_ twin of the key
+//             stands in where the web app differs from the Android app (web_search_keywords_compress)
 //   icon      icon name in core/icons.js
 //   module    the tool's screen module, relative to site/app/js/
 //   accepts   the kind of file the tool opens: 'pdf', 'image', 'docx', 'pptx', 'xlsx', 'epub'
@@ -54,14 +56,6 @@ export const TOOLS = {
     id: 'reorganize', title: 'tool_reorganize', detail: 'tool_reorganize_detail', keywords: 'search_keywords_reorganize',
     icon: 'grid_view', module: 'tools/reorganize/index.js', accepts: 'pdf',
   },
-  'delete-pages': {
-    id: 'delete-pages', title: 'tool_delete_pages', detail: 'tool_delete_pages_detail', keywords: 'search_keywords_delete_pages',
-    icon: 'delete', module: 'tools/delete-pages/index.js', accepts: 'pdf',
-  },
-  rotate: {
-    id: 'rotate', title: 'tool_rotate', detail: 'tool_rotate_detail', keywords: 'search_keywords_rotate',
-    icon: 'rotate_right', module: 'tools/rotate/index.js', accepts: 'pdf',
-  },
   edit: {
     id: 'edit', title: 'tool_edit', detail: 'tool_edit_detail', keywords: 'search_keywords_edit',
     icon: 'edit_note', module: 'tools/edit/index.js', accepts: 'pdf',
@@ -95,10 +89,17 @@ export const TOOLS = {
 /** Home's sections in order, each a heading over its tools (Scan document sits above them). */
 export const SECTIONS = [
   { id: 'create', heading: 'home_section_create', tools: ['images', 'word', 'powerpoint', 'excel', 'epub'] },
-  { id: 'organize', heading: 'home_section_organize', tools: ['merge', 'split', 'reorganize', 'delete-pages', 'rotate'] },
+  { id: 'organize', heading: 'home_section_organize', tools: ['merge', 'split', 'reorganize'] },
   { id: 'edit', heading: 'home_section_edit', tools: ['edit', 'sign', 'page-numbers', 'watermark'] },
   { id: 'optimize', heading: 'home_section_optimize', tools: ['compress', 'redact', 'flatten'] },
 ];
+
+/**
+ * Tools the web app had under another id: their old addresses (#/tool/rotate, kept in bookmarks and
+ * linked from older pages) lead to the tool that does their work now. Rotate PDF and Delete pages
+ * became part of Reorganize PDF, as in the Android app.
+ */
+export const MOVED_TOOLS = { rotate: 'reorganize', 'delete-pages': 'reorganize' };
 
 /** The tools that work on PDFs, for "Choose a tool" (PDFs shared to or opened with the app). */
 export const PDF_TOOLS = SECTIONS.flatMap((s) => s.tools).filter((id) => TOOLS[id].accepts === 'pdf');

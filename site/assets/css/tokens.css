@@ -42,6 +42,12 @@
      PdfThumbnail fills its box with Color.White. Not redefined for dark mode, on purpose. */
   --paper: #ffffff;
 
+  /* The "Buy me a coffee" button (at the bottom corner of the pages and of the web app's screens,
+     and in the web app's Donate): Buy Me a Coffee's yellow with black words, in both themes. Not
+     redefined for dark mode, on purpose. */
+  --coffee: #ffdd00;
+  --on-coffee: #000000;
+
   --font: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Helvetica Neue", Arial,
     "Noto Sans Devanagari", "Nirmala UI", sans-serif;
   --font-mono: ui-monospace, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", Menlo, Consolas, monospace;

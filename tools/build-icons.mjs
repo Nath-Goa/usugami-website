@@ -37,7 +37,7 @@ const ANDROID_ICONS = [
   'picture_as_pdf', 'policy', 'redo', 'remove', 'remove_circle_outline', 'restart_alt', 'rotate_left',
   'rotate_right', 'save_as', 'search', 'share', 'slideshow', 'sort', 'south', 'splitscreen', 'square',
   'table_chart', 'text_fields', 'undo', 'visibility_off', 'west', 'brightness_medium',
-  'keyboard_arrow_down',
+  'keyboard_arrow_down', 'volunteer_activism',
 ];
 
 // The Android app's Icons.Outlined ones, from the outlined set, by these names.

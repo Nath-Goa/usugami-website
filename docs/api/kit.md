@@ -373,9 +373,9 @@ decoded images until the PDF is closed.
 | `thumbnail(i, cssWidth, { signal })` | `Promise<Node>` (a canvas or img); asked for only when the page comes within 600 px of the screen, aborted and let go when it is far again |
 | `label(i)` | text under the page (default its number) |
 | `tileLabel(i)` | its name for screen readers (default "Page 3"); with `reorderable`, described by the hidden hint "To move it, press Ctrl and an arrow key, or drag it." (hidden, so the list holds only its items, and a grid whose pages can't move says nothing of moving them) |
-| `selectable`, `selected: Set<number>`, `onToggle(i)` | tapping a page (or Space/Enter) calls `onToggle`; change the set there. `selectable: true`: any number chosen, the grid a `list` of `role=checkbox` pages (`aria-checked`). **`selectable: 'single'`**: one page chosen at a time (Reorganize's): the grid is a `listbox` of `role=option` pages (`aria-selected`), the tiles `role=none`; arrow keys (and Home/End) move the focus, Space or Enter chooses, Ctrl+arrows move the page; keep at most one page in the set (the page chosen before is drawn again too). A listbox holds only its options, so there are no move buttons in this mode (`moveButtons` is ignored). |
+| `selectable`, `selected: Set<number>`, `onToggle(i)` | tapping a page (or Space/Enter) calls `onToggle`; change the set there. `selectable: true`: any number chosen, the grid a `list` of `role=checkbox` pages (`aria-checked`). **`selectable: 'single'`**: one page chosen at a time (no tool asks for it today; Reorganize PDF did until it took any number of pages): the grid is a `listbox` of `role=option` pages (`aria-selected`), the tiles `role=none`; arrow keys (and Home/End) move the focus, Space or Enter chooses, Ctrl+arrows move the page; keep at most one page in the set (the page chosen before is drawn again too). A listbox holds only its options, so there are no move buttons in this mode (`moveButtons` is ignored). |
 | `onActivate(i)` | a tap in a grid that isn't selectable |
-| `selectedStyle` | `'primary'` (3 px accent frame, Reorganize) or `'delete'` (error frame, faded, a delete sign: Delete pages) |
+| `selectedStyle` | `'primary'` (3 px accent frame: Split PDF, Reorganize PDF) or `'delete'` (error frame, faded, a delete sign; no tool asks for it since Reorganize PDF took over Delete pages) |
 | `reorderable`, `onMove(from, to)` | called for each step of a move (as the app moves pages live while dragging); return `false` to refuse |
 | `onMoveStart()`, `onMoveEnd(from, to)` | around a drag (for one undo step per drag) |
 | `rotation(i)` | degrees clockwise, the picture turned (the short way, animated) and fitted |
@@ -399,7 +399,7 @@ Methods: `el.refresh(indexes?)` (labels, names, selection, rotations, badges and
 the pages given, a number or a list/Set of them, or of all when omitted), `el.setCount(n)`
 (rebuilds the tiles; thumbnails come from the cache), `el.setSelected(set)`, `el.reload(i?)` (draws
 again), `el.focusIndex(i)`, `el.scrollToIndex(i)`, `el.move(from, to)`, `el.destroy()`, `el.count`.
-A tile redraw touches only what changed (its icon nodes, such as Delete pages' delete sign, are
+A tile redraw touches only what changed (its icon nodes, such as the `'delete'` look's sign, are
 made once and kept), so a refresh of thousands of pages where little changed is quick; call
 `el.refresh([i, j])` after a tap that changes two pages. Each tile element (`.ui-page-tile`) also
 has `.tile.update()`, which redraws that one page.

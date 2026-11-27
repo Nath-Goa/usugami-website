@@ -1922,7 +1922,7 @@ html.ui-modal-open {
   color: var(--primary);
 }
 
-/* Delete pages: a page marked fades behind a delete sign, framed in the error colour. */
+/* The 'delete' look: a page marked fades behind a delete sign, framed in the error colour. */
 .ui-pagegrid--delete .ui-page-delete-sign {
   display: inline-grid;
   place-items: center;

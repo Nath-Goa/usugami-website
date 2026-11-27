@@ -138,17 +138,19 @@ await test('search folds words and finds tools as ToolSearch does', async () => 
     ['Images to PDF', 'JPGs and PNGs to PDF, with text recognition', 'photo, picture, JPEG, scan, camera, gallery'],
     ['Merge PDF', 'Combine files and arrange individual pages', 'join, combine, append, put together'],
     ['Split PDF', 'Extract pages or split into smaller files', 'separate, cut, divide, extract'],
-    ['Delete pages', "Remove the pages you don't need", 'remove, erase, discard'],
+    ['Reorganize PDF', 'Move, turn, delete and add pages', 'reorder, rearrange, rotate, turn, flip, delete, remove, erase, discard'],
     ['Add page numbers', 'Number pages at the top or bottom', 'numbering, pagination, footer, header'],
     ['Compress PDF', 'Shrink images, keep text sharp', 'shrink, reduce size, smaller, optimize, file size'],
   ];
   const find = (list, q) => search(list, q, (x) => x[0], (x) => `${x[1]} ${x[2]}`).map((x) => x[0]);
   eq(find(english, 'join'), ['Merge PDF'], 'keyword');
   eq(find(english, 'Put Together'), ['Merge PDF'], 'two keywords');
-  eq(find(english, 'need'), ['Delete pages'], 'detail');
+  // Words for turning and removing pages find Reorganize PDF.
+  for (const word of ['rotate', 'turn', 'delete', 'remove']) eq(find(english, word), ['Reorganize PDF'], word);
   eq(find(english, 'zebra'), [], 'none');
   eq(find(english, 'images'), ['Images to PDF', 'Compress PDF'], 'by name first');
-  eq(find(english, 'page'), ['Delete pages', 'Add page numbers', 'Merge PDF', 'Split PDF'], 'by name, then the rest in order');
+  eq(find(english, 'page'), ['Add page numbers', 'Merge PDF', 'Split PDF', 'Reorganize PDF'], 'by name, then the rest in order');
+  eq(find(english, 'pdf'), ['Images to PDF', 'Merge PDF', 'Split PDF', 'Reorganize PDF', 'Compress PDF'], 'every tool named PDF, in order');
   const french = [
     ['Images en PDF', 'JPG et PNG en PDF, avec reconnaissance de texte', 'photo, scanner, numériser, appareil photo, galerie'],
     ['Fusionner des PDF', 'Combiner des fichiers et organiser les pages', 'assembler, combiner, joindre, réunir, regrouper'],
@@ -450,6 +452,18 @@ await test('search finds tools by name, keyword and accent-free text, and Back c
     await page.goBack();
     await page.waitForFunction(() => document.querySelector('#home-search').value === '');
     assert(await page.isVisible('.home-sections'), 'sections back');
+    // Turning and deleting pages are Reorganize PDF's work now, as in the app: its words find it.
+    for (const word of ['rotate', 'turn', 'delete', 'remove', 'sideways']) {
+      await type(word);
+      eq(await results(), ['Reorganize PDF'], `"${word}" finds Reorganize PDF`);
+    }
+    // The app's words for what the web app can't do yet find nothing (Compress PDF has no Black and
+    // white here: its keywords are the web's own, web_search_keywords_compress), and its words for
+    // a card or passport find Scan document, which scans them as pages.
+    await type('grayscale');
+    eq(await results(), [], 'no tool promises grayscale');
+    await type('passport');
+    eq(await results(), ['Scan document'], 'a passport is scanned');
     // Escape clears it too.
     await type('rotate');
     await page.press('#home-search', 'Escape');
@@ -516,6 +530,26 @@ await test('routes, Back, files handed over, and the unsaved-work question', asy
     await page.goto(url + 'app/#/nowhere');
     await onScreen(page, 'home');
     eq(await hashOf(page), '#/', 'unknown address');
+    // The addresses of Rotate PDF and Delete pages, whose work Reorganize PDF took over, lead to
+    // it, and Back from there doesn't come round to it again.
+    for (const old of ['rotate', 'delete-pages']) {
+      await page.goto(url + 'app/#/tool/' + old + '?x=1');
+      await onScreen(page, 'tool', 'reorganize');
+      eq(await hashOf(page), '#/tool/reorganize?x=1', `#/tool/${old} leads to Reorganize PDF`);
+      eq(await page.evaluate(() => [window.__tool.id, window.__tool.params.x]), ['reorganize', '1'], 'the tool opened, with the address\'s parameters');
+      // Followed again while Reorganize PDF shows (a bookmark): no second entry of the same screen.
+      const mounted = await page.evaluate(() => window.__tool.mounted);
+      const length = await page.evaluate(() => history.length);
+      await page.goto(url + 'app/#/tool/' + (old === 'rotate' ? 'delete-pages' : 'rotate'));
+      await page.waitForFunction(() => location.hash === '#/tool/reorganize?x=1');
+      await page.waitForTimeout(300);
+      eq([await hashOf(page), await page.evaluate(() => window.__tool.mounted)], ['#/tool/reorganize?x=1', mounted], 'the same screen, under its own address');
+      // The entry gone back over stays ahead (Forward); Back from the screen's own leaves it.
+      eq(await page.evaluate(() => history.length), length + 1, 'one entry gone back over');
+      await page.goBack();
+      await onScreen(page, 'home');
+    }
+    eq(await page.evaluate(async () => { const { parsePath } = await import('./js/core/router.js'); return [parsePath('/tool/rotate')?.path, parsePath('/tool/delete-pages')?.id, parsePath('/tool/nothing')]; }), ['/tool/reorganize', 'reorganize', null], 'parsePath');
     // Opened straight at an address (a new tab), the back arrow leads up.
     const tab = await context.newPage();
     await tab.goto(url + 'app/#/settings/about/licenses');
@@ -553,7 +587,7 @@ await test('Settings: Appearance changes the theme at once and is kept; Language
     await page.click('.ui-topbar button[aria-label="Settings"]');
     await onScreen(page, 'settings');
     const items = await page.$$eval('.settings-list .ui-list-title', (els) => els.map((e) => e.textContent.trim()));
-    eq(items, ['Language', 'Appearance', 'Source code on GitHub (opens in a new tab)', 'About Usugami'], 'rows');
+    eq(items, ['Language', 'Appearance', 'Source code on GitHub (opens in a new tab)', 'Donate', 'About Usugami'], 'rows');
     await page.click('.ui-list-main:has-text("Appearance")');
     await page.waitForSelector('dialog[open] [role="listbox"]');
     eq(await page.$$eval('dialog[open] [role="option"]', (els) => els.map((e) => [e.textContent, e.getAttribute('aria-selected')])),
@@ -611,6 +645,200 @@ await test('Settings: Appearance changes the theme at once and is kept; Language
       assert((res.headers()['content-type'] ?? '').startsWith('text/'), `${href} is served as text, not ${res.headers()['content-type']}`);
     }
   }, { browser: BROWSER });
+});
+
+await test('Donate: the steps and the Buy me a coffee button, GitHub Sponsors on a page of its own, and Back', async () => {
+  await withPage(async (page, url) => {
+    await openApp(page, url);
+    await page.click('.ui-topbar button[aria-label="Settings"]');
+    await onScreen(page, 'settings');
+    eq(await page.textContent('.ui-list-main:has-text("Donate") .ui-list-detail'), 'Buy Me a Coffee', 'the row names where');
+    await page.click('.ui-list-main:has-text("Donate")');
+    await onScreen(page, 'donate');
+    eq(await hashOf(page), '#/settings/donate', 'address');
+    eq(await page.title(), 'Donate – Usugami', 'the tab names the screen');
+    eq(await page.textContent('.donate-intro'), common.donate_intro, 'intro');
+    const steps = () => page.$$eval('.donate-step', (els) => els.map((e) => [e.querySelector('.donate-step-number').textContent, e.querySelector('.donate-step-text').textContent]));
+    eq(await steps(), [['1', common.donate_coffee_step_open], ['2', common.donate_coffee_step_amount], ['3', common.donate_coffee_step_message], ['4', common.donate_coffee_step_pay]], 'four steps');
+    eq(await page.textContent('.donate-step-address'), 'buymeacoffee.com/usugami', 'the address the button opens');
+    // The button is a link of the page's own, in Buy Me a Coffee's colours: nothing comes from its site.
+    const link = (sel) => page.$eval(sel, (a) => [a.tagName, a.href, a.target, a.rel, a.textContent.trim(), a.querySelector('svg')?.dataset.icon]);
+    eq(await link('.donate-coffee'), ['A', 'https://buymeacoffee.com/usugami', '_blank', 'noopener noreferrer', 'Buy me a coffee (opens in a new tab)', 'coffee'], 'the Buy me a coffee button');
+    eq(await page.$$eval('#app a[href]', (els) => els.length), 1, 'one link, in the first step');
+    for (const scheme of ['light', 'dark']) {
+      await page.emulateMedia({ colorScheme: scheme });
+      eq(await page.$eval('.donate-coffee', (a) => [getComputedStyle(a).backgroundColor, getComputedStyle(a).color]), ['rgb(255, 221, 0)', 'rgb(0, 0, 0)'], `yellow with black words in ${scheme}`);
+    }
+    await page.emulateMedia({ colorScheme: 'light' });
+    assert(await page.$eval('.donate-coffee', (a) => a.getBoundingClientRect().height >= 48), 'at least 48 px to tap');
+    eq(await page.textContent('.donate-thanks'), 'Thank you!', 'thanks');
+    eq(await page.$$eval('script[src], link[href]:not([rel="canonical"]), img[src], iframe', (els) => els.map((e) => e.src || e.href).filter((u) => !u.startsWith(location.origin))), [], 'nothing from another site');
+    // The other way to donate, quieter, with steps of its own.
+    eq(await page.$eval('.donate-other', (b) => [b.tagName, b.classList.contains('ui-btn--text'), b.textContent]), ['BUTTON', true, common.donate_github_instead], 'the way to GitHub Sponsors is a text button');
+    await page.click('.donate-other');
+    await onScreen(page, 'sponsors');
+    eq(await hashOf(page), '#/settings/donate/github', 'address');
+    eq(await page.textContent('.ui-topbar-title'), 'GitHub Sponsors', 'title');
+    eq(await page.textContent('.donate-intro'), common.donate_github_intro, 'intro');
+    eq(await steps(), [['1', common.donate_github_step_open], ['2', common.donate_github_step_sponsor], ['3', common.donate_github_step_amount], ['4', common.donate_github_step_pay]], 'four steps');
+    eq(await page.textContent('.donate-step-address'), 'github.com/Nath-Goa/usugami', 'the page with the Sponsor button');
+    eq(await link('.donate-open'), ['A', 'https://github.com/Nath-Goa/usugami', '_blank', 'noopener noreferrer', 'Open GitHub (opens in a new tab)', 'open_in_new'], 'Open GitHub');
+    eq(await page.$$eval('.donate-other', (els) => els.length), 0, 'no way on from GitHub Sponsors');
+    // Back from GitHub Sponsors is Donate, and back from Donate is Settings.
+    await page.click('.ui-topbar-nav');
+    await onScreen(page, 'donate');
+    await page.goBack();
+    await onScreen(page, 'settings');
+    eq(await hashOf(page), '#/settings', 'back in Settings');
+    // With the keyboard: Enter on the row, then on the way to GitHub Sponsors.
+    await page.focus('.ui-list-main:has-text("Donate")');
+    await page.keyboard.press('Enter');
+    await onScreen(page, 'donate');
+    await page.focus('.donate-other');
+    await page.keyboard.press('Enter');
+    await onScreen(page, 'sponsors');
+    // Opened straight at its address (a new tab), the back arrow leads up.
+    const tab = await page.context().newPage();
+    await tab.goto(url + 'app/#/settings/donate/github');
+    await onScreen(tab, 'sponsors');
+    await tab.click('.ui-topbar-nav');
+    await onScreen(tab, 'donate');
+    eq(await hashOf(tab), '#/settings/donate', 'up to Donate');
+    await tab.click('.ui-topbar-nav');
+    await onScreen(tab, 'settings');
+    await tab.close();
+  }, { browser: BROWSER });
+});
+
+/** Where the floating "Buy me a coffee" button is and what it says, or null while it is hidden. */
+const coffeeFloat = (page) => page.evaluate(() => {
+  const a = document.querySelector('a.coffee-float');
+  if (!a || a.hidden || getComputedStyle(a).display === 'none') return null;
+  const r = a.getBoundingClientRect();
+  const words = a.querySelector('.ui-btn-label').getBoundingClientRect();
+  const style = getComputedStyle(a);
+  const root = document.documentElement;
+  return {
+    href: a.href, target: a.target, rel: a.rel, name: a.textContent.trim(), icon: a.querySelector('svg')?.dataset.icon,
+    position: style.position, colors: [style.backgroundColor, style.color],
+    right: Math.round(root.clientWidth - r.right), bottom: Math.round(root.clientHeight - r.bottom),
+    top: r.top, left: r.left, width: Math.round(r.width), height: Math.round(r.height), wordsWidth: Math.round(words.width),
+    // What a tap in its middle reaches.
+    tappable: document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)?.closest('a') === a,
+    marked: root.classList.contains('has-coffee-float'),
+  };
+});
+
+await test('Buy me a coffee stays at the bottom corner of the app\'s own screens, and keeps out of the tools and of Donate', async () => {
+  await withPage(async (page, url) => {
+    await fakeTools(page);
+    await openApp(page, url);
+    for (let i = 0; i < 30; i++) await addRecent(page, `Scan_${String(i).padStart(2, '0')}.pdf`, 1000);
+    // On a phone: a round button with the cup alone, its words still its name.
+    const home = await coffeeFloat(page);
+    assert(home, 'shown on Home');
+    eq([home.href, home.target, home.rel, home.name, home.icon], ['https://buymeacoffee.com/usugami', '_blank', 'noopener noreferrer', 'Buy me a coffee (opens in a new tab)', 'coffee'], 'an ordinary link to Usugami\'s page');
+    eq([home.position, home.right, home.bottom, home.width, home.height], ['fixed', 16, 16, 56, 56], 'round, 16 px from the bottom corner');
+    eq(home.colors, ['rgb(255, 221, 0)', 'rgb(0, 0, 0)'], 'Buy Me a Coffee\'s yellow with a black cup');
+    assert(home.wordsWidth <= 1, `the words are hidden on a phone (${home.wordsWidth} px)`);
+    assert(home.tappable && home.marked, 'nothing covers it, and the page knows it shows');
+    eq(await page.evaluate(() => [...document.querySelectorAll('a[href], button')].filter((e) => e.getClientRects().length).pop()?.className), 'coffee-float', 'the last stop for Tab');
+    eq(await page.$$eval('script[src], link[href]:not([rel="canonical"]), img[src], iframe', (els) => els.map((e) => e.src || e.href).filter((u) => !u.startsWith(location.origin))), [], 'nothing from another site');
+    // It stays as the screen scrolls, and the end of each screen's content clears it.
+    for (const [hash, route] of [['#/', 'home'], ['#/recent', 'recent'], ['#/settings', 'settings'], ['#/settings/about', 'about'], ['#/settings/about/licenses', 'licenses']]) {
+      await page.goto(url + 'app/' + hash);
+      await onScreen(page, route);
+      await page.evaluate(() => scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' }));
+      const at = await coffeeFloat(page);
+      assert(at, `shown on ${route}`);
+      eq([at.right, at.bottom, at.tappable], [16, 16, true], `${route}: still at the corner at the end of the screen`);
+      const contentEnd = await page.evaluate(() => {
+        const main = document.querySelector('#app [data-main]');
+        return main.getBoundingClientRect().bottom - parseFloat(getComputedStyle(main).paddingBottom);
+      });
+      assert(contentEnd <= at.top + 0.5, `${route}: its content ends at ${contentEnd}, under the button (top ${at.top})`);
+    }
+    // A control reached with Tab isn't left under it: the last row of Recent files.
+    await page.goto(url + 'app/#/recent');
+    await onScreen(page, 'recent');
+    await page.evaluate(() => scrollTo({ top: 0, behavior: 'instant' }));
+    const lastRow = await page.evaluate(async () => {
+      const buttons = [...document.querySelectorAll('#app [data-main] button')];
+      const last = buttons[buttons.length - 1];
+      last.focus();
+      // WebKit scrolls to what took the focus a frame later.
+      for (let i = 0; i < 3; i++) await new Promise((r) => requestAnimationFrame(r));
+      const r = last.getBoundingClientRect();
+      return { top: r.top, bottom: r.bottom, right: r.right, focused: document.activeElement === last };
+    });
+    const onRecent = await coffeeFloat(page);
+    assert(lastRow.bottom <= onRecent.top || lastRow.right <= onRecent.left, `the focused row's button (${JSON.stringify(lastRow)}) is under the button (${onRecent.top}, ${onRecent.left})`);
+    // A snackbar shows above it on a phone.
+    await page.evaluate(async () => (await import('./js/core/ui.js')).snackbar('A message'));
+    await page.waitForSelector('.ui-snackbar.is-shown');
+    await page.waitForTimeout(400);
+    const snack = await page.$eval('.ui-snackbar', (n) => n.getBoundingClientRect().bottom);
+    assert(snack <= onRecent.top, `the snackbar (bottom ${snack}) lies over the button (top ${onRecent.top})`);
+    await page.evaluate(() => document.querySelectorAll('.ui-snackbar').forEach((n) => n.dismiss?.()));
+    // Not where files are being worked on, nor where it leads, and back again afterwards.
+    const hiddenOn = async (where) => eq([await coffeeFloat(page), await page.evaluate(() => document.documentElement.classList.contains('has-coffee-float'))], [null, false], `hidden on ${where}`);
+    for (const [path, route, tool] of [['/tool/split', 'tool', 'split'], ['/settings/donate', 'donate'], ['/settings/donate/github', 'sponsors']]) {
+      await go(page, path);
+      await onScreen(page, route, tool);
+      await hiddenOn(path);
+    }
+    // A PDF shared to the app: Choose a tool.
+    await receiveOn(page, [{ name: 'Report.pdf', type: 'application/pdf', bytes: await makePdf() }]);
+    await onScreen(page, 'choose');
+    await hiddenOn('Choose a tool');
+    await go(page, '/settings');
+    await onScreen(page, 'settings');
+    assert(await coffeeFloat(page), 'back on Settings');
+    // Under a dialog it can't be reached.
+    await page.click('.ui-list-main:has-text("Appearance")');
+    await page.waitForSelector('dialog[open] [role="listbox"]');
+    eq((await coffeeFloat(page)).tappable, false, 'under the dialog');
+    await page.click('dialog[open] button:has-text("Cancel")');
+    await page.waitForSelector('dialog[open]', { state: 'detached' });
+    if (!quick) {
+      for (const scheme of ['light', 'dark']) {
+        await page.emulateMedia({ colorScheme: scheme });
+        await page.goto(url + 'app/#/');
+        await onScreen(page, 'home');
+        await page.waitForTimeout(400);
+        await saveOutput(`shell-coffee-phone-${scheme}.png`, await page.screenshot());
+      }
+    }
+  }, { viewport: PHONE, browser: BROWSER });
+  // On a wider window: the whole button, with its words, and a snackbar passes beside it.
+  await withPage(async (page, url) => {
+    await openApp(page, url);
+    const home = await coffeeFloat(page);
+    assert(home, 'shown on Home');
+    eq([home.position, home.right, home.bottom, home.tappable], ['fixed', 16, 16, true], 'at the bottom corner');
+    assert(home.wordsWidth > 80 && home.width > home.wordsWidth + 40 && home.height >= 48, `the cup and its words (${home.width} x ${home.height}, words ${home.wordsWidth})`);
+    await page.evaluate(async () => (await import('./js/core/ui.js')).snackbar('A message'));
+    await page.waitForSelector('.ui-snackbar.is-shown');
+    await page.waitForTimeout(400);
+    const snack = await page.$eval('.ui-snackbar', (n) => { const r = n.getBoundingClientRect(); return { right: r.right, bottom: Math.round(document.documentElement.clientHeight - r.bottom) }; });
+    assert(snack.right <= home.left && snack.bottom === 16, `the snackbar passes beside it, at its usual height (${JSON.stringify(snack)}, button from ${home.left})`);
+    if (!quick) {
+      await page.evaluate(() => document.querySelectorAll('.ui-snackbar').forEach((n) => n.dismiss?.()));
+      await page.waitForTimeout(400);
+      await saveOutput('shell-coffee-desktop-light.png', await page.screenshot());
+    }
+  }, { viewport: DESKTOP, browser: BROWSER });
+  // Between the two, a snackbar would reach it: it shows above.
+  await withPage(async (page, url) => {
+    await openApp(page, url);
+    const home = await coffeeFloat(page);
+    assert(home.wordsWidth > 80 && home.height >= 48, 'the whole button from 600 px');
+    await page.evaluate(async () => (await import('./js/core/ui.js')).snackbar('A message'));
+    await page.waitForSelector('.ui-snackbar.is-shown');
+    await page.waitForTimeout(400);
+    const snack = await page.$eval('.ui-snackbar', (n) => n.getBoundingClientRect().bottom);
+    assert(snack <= home.top, `the snackbar (bottom ${snack}) lies over the button (top ${home.top})`);
+  }, { viewport: { width: 768, height: 800 }, browser: BROWSER });
 });
 
 await test('Recent files: added, listed newest first (at most 50), removed and cleared', async () => {
@@ -746,7 +974,7 @@ await test('files shared to the app: PDFs to Choose a tool, images and documents
     eq(await page.textContent('.ui-file-name'), 'Report.pdf', 'file listed');
     await page.waitForFunction(() => /1 page · /.test(document.querySelector('.ui-file-detail')?.textContent ?? ''));
     const one = await page.$$eval('.choose-tools section', (els) => els.map((s) => Array.from(s.querySelectorAll('.ui-card-title'), (c) => c.textContent)));
-    eq(one, [['Merge PDF', 'Split PDF', 'Reorganize PDF', 'Delete pages', 'Rotate PDF'], ['Edit PDF', 'Sign PDF', 'Add page numbers', 'Add watermark'], ['Compress PDF', 'Redact PDF', 'Flatten PDF']], 'every PDF tool');
+    eq(one, [['Merge PDF', 'Split PDF', 'Reorganize PDF'], ['Edit PDF', 'Sign PDF', 'Add page numbers', 'Add watermark'], ['Compress PDF', 'Redact PDF', 'Flatten PDF']], 'every PDF tool');
     // A tool opened from here gets the PDFs, and goes back here.
     await page.click('.choose-tools .ui-card-main:has-text("Split PDF")');
     await onScreen(page, 'tool', 'split');
@@ -878,7 +1106,7 @@ await test('the service worker registers, serves the app offline, and receives s
       await context.setOffline(true);
       await page.reload();
       await page.waitForSelector('html[data-ready="true"]', { timeout: 20000 });
-      eq(await page.$$eval('.home-sections .ui-card', (els) => els.length), 17, 'Home offline in Firefox');
+      eq(await page.$$eval('.home-sections .ui-card', (els) => els.length), 15, 'Home offline in Firefox');
     } finally {
       await browser.close();
       await server.close();
@@ -895,7 +1123,7 @@ await test('the service worker registers, serves the app offline, and receives s
     await page.reload();
     await page.waitForSelector('html[data-ready="true"]', { timeout: 20000 });
     await onScreen(page, 'home');
-    eq(await page.$$eval('.home-sections .ui-card', (els) => els.length), 17, 'Home offline');
+    eq(await page.$$eval('.home-sections .ui-card', (els) => els.length), 15, 'Home offline');
     await page.click('.ui-topbar button[aria-label="Settings"]');
     await onScreen(page, 'settings');
     await context.setOffline(false);
@@ -930,7 +1158,8 @@ await test('the service worker after a deploy: one version\'s code only, the too
   if (BROWSER !== 'chromium') return;
   // Two versions of the site, served by a small server in front of the site's: sw.js's VERSION
   // and a marker in some files differ. (Playwright's routing doesn't see a service worker's own
-  // requests, so it can't stand in for them.)
+  // requests, so it can't stand in for them.) Version b's Split PDF also imports a module version
+  // a didn't have, and version a still had Rotate PDF, which Reorganize PDF has since taken over.
   let version = 'a';
   const marked = ['js/screens/settings.js', 'js/tools/split/index.js', 'js/core/output.js'];
   const { startServer } = await import('../tools/serve.mjs');
@@ -938,11 +1167,20 @@ await test('the service worker after a deploy: one version\'s code only, the too
   const site = await startServer({ prefix: 'usugami-website' });
   const front = createServer(async (req, res) => {
     try {
+      const path = new URL(req.url, 'http://x').pathname;
+      const own = path.endsWith('/app/js/tools/split/new-in-b.js') ? (version === 'b' ? 'export const b = 1;\n' : null)
+        : path.endsWith('/app/js/tools/rotate/index.js') ? (version === 'a' ? 'export async function mount() {}\n' : null)
+          : undefined;
+      if (own !== undefined) {
+        res.writeHead(own === null ? 404 : 200, { 'content-type': 'text/javascript', 'cache-control': 'no-cache' });
+        res.end(own ?? '');
+        return;
+      }
       const upstream = await fetch(new URL(req.url, site.url).href);
       let body = Buffer.from(await upstream.arrayBuffer());
-      const path = new URL(req.url, 'http://x').pathname;
       if (path.endsWith('/app/sw.js')) body = Buffer.from(body.toString('utf8').replace("const VERSION = 'dev';", `const VERSION = '${version}';`));
       else if (marked.some((m) => path.endsWith('/app/' + m))) body = Buffer.from(body.toString('utf8') + `\n// BUILD-${version}\n`);
+      if (version === 'b' && path.endsWith('/app/js/tools/split/index.js')) body = Buffer.from(body.toString('utf8') + "import './new-in-b.js';\n");
       const headers = { 'content-type': upstream.headers.get('content-type') ?? 'application/octet-stream', 'cache-control': 'no-cache' };
       if (upstream.headers.get('location')) headers.location = upstream.headers.get('location');
       res.writeHead(upstream.status, headers);
@@ -967,8 +1205,14 @@ await test('the service worker after a deploy: one version\'s code only, the too
     await page.waitForSelector('html[data-ready="true"]');
     await go(page, '/settings');
     await onScreen(page, 'settings');
-    await page.evaluate(() => fetch('js/tools/split/index.js').then((r) => r.text()));
-    await waitKept(page, ['js/tools/split/index.js']);
+    // Split PDF is opened, as a visitor would; Rotate PDF's code is only fetched (this site's own
+    // router already leads its address to Reorganize PDF).
+    await go(page, '/tool/split');
+    await page.waitForSelector('#app .screen[data-tool="split"] .ui-empty');
+    await go(page, '/settings');
+    await onScreen(page, 'settings');
+    await page.evaluate(() => fetch('js/tools/rotate/index.js').then((r) => r.text()));
+    await waitKept(page, ['js/tools/split/index.js', 'locales/en/split.js', 'js/tools/rotate/index.js']);
     const before = await page.evaluate(async () => (await caches.keys()).sort());
     assert(before.includes('usugami-shell-a') && before.includes('usugami-code-a'), 'version a kept: ' + before);
     // Version b is published: the next visit installs it.
@@ -982,6 +1226,10 @@ await test('the service worker after a deploy: one version\'s code only, the too
     }
     const code = await page.evaluate(async () => (await (await caches.open('usugami-code-b')).keys()).map((r) => new URL(r.url).pathname));
     assert(code.some((p) => p.endsWith('/js/tools/split/index.js')), 'the tool used before is fetched again for b: ' + code.join(', '));
+    // What it imports now is kept with it; Rotate PDF's visitor gets Reorganize PDF and all it loads.
+    const wanted = ['js/tools/split/new-in-b.js', 'js/tools/reorganize/index.js', 'js/tools/reorganize/reorganize.css',
+      'js/tools/merge/merge.css', 'js/tools/merge/page-list.js', 'js/engine/page-choice.js', 'locales/en/reorganize.js'];
+    eq(wanted.filter((p) => !code.some((c) => c.endsWith('/app/' + p))), [], 'kept for b with what it imports');
     const runtimeCode = await page.evaluate(async () => (await (await caches.open('usugami-runtime')).keys()).map((r) => r.url).filter((u) => /\/app\/(js|css|locales)\//.test(u)));
     eq(runtimeCode, [], 'no code in the runtime cache');
     // Offline, every file comes from version b.
@@ -990,6 +1238,16 @@ await test('the service worker after a deploy: one version\'s code only, the too
     await page.waitForSelector('html[data-ready="true"]', { timeout: 20000 });
     const markers = await page.evaluate((list) => Promise.all(list.map((p) => fetch(p).then((r) => r.text()).then((t) => t.match(/BUILD-(\w)/)?.[1] ?? null))), marked);
     eq(markers, ['b', 'b', 'b'], 'offline: all of version b');
+    // Both tools open offline: Split PDF with its new module, and Rotate PDF's old address.
+    for (const [path, tool] of [['/tool/split', 'split'], ['/tool/rotate', 'reorganize']]) {
+      await go(page, path);
+      await onScreen(page, 'tool', tool);
+      const screen = `#app .screen[data-tool="${tool}"]`;
+      await page.waitForSelector(`${screen} .ui-empty, ${screen} .shell-problem`);
+      eq(await page.$eval(screen, (s) => s.querySelector('.shell-problem')?.textContent ?? ''), '', `${tool} opens offline`);
+      await go(page, '/');
+      await onScreen(page, 'home');
+    }
     await context.setOffline(false);
   } finally {
     await browser.close();
@@ -1341,7 +1599,7 @@ await test('the service worker keeps what is fetched on first use: text recognit
       await context.setOffline(true);
       await page.reload();
       await page.waitForSelector('html[data-ready="true"]', { timeout: 20000 });
-      eq(await page.$$eval('.home-sections .ui-card', (els) => els.length), 17, 'Home offline after one visit');
+      eq(await page.$$eval('.home-sections .ui-card', (els) => els.length), 15, 'Home offline after one visit');
     }, { serviceWorkers: 'allow', browser: BROWSER });
     return;
   }
@@ -1711,7 +1969,7 @@ await test('no horizontal scrolling at 320 px on any shell screen, light and dar
   await withPage(async (page, url) => {
     await openApp(page, url);
     await addRecent(page, 'A very long file name that goes on and on without any spaces_at_all_1234567890.pdf', 5);
-    for (const [hash, route] of [['#/', 'home'], ['#/recent', 'recent'], ['#/settings', 'settings'], ['#/settings/about', 'about'], ['#/settings/about/licenses', 'licenses']]) {
+    for (const [hash, route] of [['#/', 'home'], ['#/recent', 'recent'], ['#/settings', 'settings'], ['#/settings/about', 'about'], ['#/settings/about/licenses', 'licenses'], ['#/settings/donate', 'donate'], ['#/settings/donate/github', 'sponsors']]) {
       await page.goto(url + 'app/' + hash);
       await onScreen(page, route);
       await page.waitForTimeout(150);
@@ -1740,7 +1998,7 @@ if (!quick) {
         for (let i = 0; i < 4; i++) await addRecent(page, i === 3 ? 'Usugami_PDFs.zip' : `Scan_2026110${i}.pdf`, 1000 * (i + 1) ** 3, i === 3 ? 'application/zip' : 'application/pdf');
         for (const scheme of ['light', 'dark']) {
           await page.emulateMedia({ colorScheme: scheme });
-          for (const [hash, route] of [['#/', 'home'], ['#/recent', 'recent'], ['#/settings', 'settings'], ['#/settings/about', 'about'], ['#/settings/about/licenses', 'licenses']]) {
+          for (const [hash, route] of [['#/', 'home'], ['#/recent', 'recent'], ['#/settings', 'settings'], ['#/settings/about', 'about'], ['#/settings/about/licenses', 'licenses'], ['#/settings/donate', 'donate'], ['#/settings/donate/github', 'sponsors']]) {
             await page.goto(url + 'app/' + hash);
             await onScreen(page, route);
             await page.waitForTimeout(400);

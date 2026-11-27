@@ -1,5 +1,5 @@
-/* The screen Split PDF, Delete pages and Rotate PDF share (frame.js): the app's PdfToolScreen
-   column, its sections opening and closing as pdfSectionEnter and pdfSectionExit. */
+/* The screen around Split PDF's options (frame.js): the app's PdfToolScreen column, its sections
+   opening and closing as pdfSectionEnter and pdfSectionExit. */
 
 .onepdf {
   /* The column the main button ends at on wide screens (the kit reads it): .page--narrow's content,
@@ -47,14 +47,6 @@
   font-size: 1rem;
   font-weight: 500;
   line-height: 1.5rem;
-}
-
-/* bodySmall in onSurfaceVariant */
-.onepdf-hint {
-  margin: 0;
-  color: var(--on-surface-variant);
-  font-size: 0.75rem;
-  line-height: 1rem;
 }
 
 /* A section that opens and closes: its content's height and opacity move together. */

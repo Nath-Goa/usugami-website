@@ -1,6 +1,6 @@
 // Settings (SettingsScreen.kt): the language the app shows, its appearance (as the device is set,
-// light or dark), its source code on GitHub, and About. Language and Appearance open a dialog of
-// choices, applied at once and saved.
+// light or dark), its source code on GitHub, how to donate, and About. Language and Appearance
+// open a dialog of choices, applied at once and saved.
 import { h } from '../core/dom.js';
 import { t, getLanguage, setLanguage, LANGUAGES } from '../core/i18n.js';
 import { getSetting, setSetting, onSettingChange } from '../core/settings.js';
@@ -136,6 +136,7 @@ export async function mount(ctx) {
     listItem({ icon: 'language', title: t('settings_language'), detail: nativeName(language()), onClick: chooseLanguage }),
     appearance,
     externalRow({ icon: 'code', title: t('settings_github'), detail: t('web_source_detail'), href: WEBSITE_SOURCE_URL }),
+    listItem({ icon: 'volunteer_activism', title: t('settings_donate'), detail: t('settings_donate_detail'), onClick: () => ctx.navigate('/settings/donate') }),
     listItem({ icon: 'info_outline', title: t('about'), detail: t('settings_about_detail'), onClick: () => ctx.navigate('/settings/about') }));
   ctx.root.append(
     topBar({ title: t('settings'), onBack: () => ctx.back() }),

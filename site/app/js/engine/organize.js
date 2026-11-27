@@ -1,20 +1,21 @@
-// Split PDF, Merge PDF, Reorganize PDF, Delete pages and Rotate PDF (the app's PdfToolsEngine.kt,
-// with the choices of PdfToolsViewModel.kt). The PDFs made have no password. Pages left out are
-// really gone (see cleanup.js), and the pages kept keep their bookmarks, links, form fields and labels.
+// Split PDF, Merge PDF and Reorganize PDF (pages moved, turned, removed or added): the app's
+// PdfToolsEngine.kt, with the choices of PdfToolsViewModel.kt. The PDFs made have no password. Pages
+// left out are really gone (see cleanup.js), and the pages kept keep their bookmarks, links, form
+// fields and labels.
 import {
   PDFArray, PDFDict, PDFName, PDFNumber, PDFRef, PDFString, PDFHexString, PDFNull,
 } from '../lib/pdf-lib.js';
 import { UserError, PasswordError, CancelledError, checkCancelled } from '../core/errors.js';
 import { loadPdf, savePdf, createPdf } from './pdf-common.js';
 import {
-  parsePageSelection, parseRanges, fixedChunks, pagesToDelete, PageSelectionError, defaultName, partSuffix,
+  parsePageSelection, parseRanges, fixedChunks, PageSelectionError, defaultName, partSuffix,
 } from './page-selection.js';
 // File names as the app makes them (FileNames.kt, ported by the shell), so every tool names its files
 // alike. The names these tools give their PDFs are page-selection.js's (defaultName, partSuffix).
 import { sanitizeName as sanitize, withSuffixes, uniqueName as unique } from '../core/names.js';
 import {
   nm, resolve, dictOf, arrayOf, nameOf, numberOf, textOf, ticker, MAX_DEPTH,
-  readPages, repairPageTree, setPages, rotationOf, boxesOf, resourcesOf, inherited, annotationsOf,
+  readPages, repairPageTree, setPages, removePages, rotationOf, boxesOf, resourcesOf, inherited, annotationsOf,
   treePairs, withExplicitDestination, Copier, copyPage, newPage, drawnOnly, fieldsElsewhere,
   dropRemovedPages, recountOutline,
 } from './cleanup.js';
@@ -941,9 +942,16 @@ export function mergePdfs(inputs, options = {}, hooks = {}) {
 
 /**
  * Reorganize PDF: `input` with its pages as `plan` lists them: its own pages, pages of `extraInputs`
- * (other PDFs the user added) and blank pages, each turned by its `rotation` more. Pages left out are
- * gone as Delete pages removes them. The PDF's bookmarks, form, tags and document details are kept;
- * an added PDF's come along with its pages, as in Merge. Each page keeps its label.
+ * (other PDFs the user added) and blank pages, each turned by its `rotation` more. Pages left out
+ * are really gone: their bookmarks, form fields, tags and the pictures only they drew go too, and
+ * links to them lead nowhere. The PDF's bookmarks, form, tags and document details are kept; an added PDF's come
+ * along with its pages, as in Merge. Each page keeps its label.
+ *
+ * While `plan` lists only the PDF's own pages in the order they have there (some turned, some left
+ * out, none moved or added) and its page tree lists each page once, the PDF is saved in place: the
+ * page tree stays as it is, a turned page's /Rotate is all that changes of it, a page not turned
+ * isn't touched, and the pages left out are taken out of the tree. Anything else lays the pages
+ * out again, flat under the tree's root, each with what it inherited.
  * @param {{ name: string, bytes: Uint8Array, password?: string, id?: any }} input
  * @param {Array<object> | { pages: Array<object>, fileName?: string }} plan
  *   The pages in order: `{ page, rotation? }` for the PDF's own page `page` (zero-based),
@@ -961,154 +969,129 @@ export function reorganizePdf(input, plan, extraInputs = [], hooks = {}) {
     if (!Array.isArray(refs) || !refs.length) throw new UserError('pdf_need_page');
     const extras = extraInputs ?? [];
     extras.forEach(checkInput);
-    const which = (ref) => {
+    // Where each page comes from: 'blank', -1 for the PDF itself, or the place of an added PDF.
+    const from = refs.map((ref) => {
       if (ref.blank) return 'blank';
       if (ref.input === undefined || ref.input === null || (input.id !== undefined && ref.input === input.id)) return -1;
       const i = sourceIndex(extras, ref.input);
       if (i < 0) throw new Error(`No PDF ${ref.input} among those added`);
       return i;
-    };
-    const used = [...new Set(refs.map(which).filter((w) => w !== 'blank' && w >= 0))].sort((a, b) => a - b);
+    });
+    const used = [...new Set(from.filter((w) => w !== 'blank' && w >= 0))].sort((a, b) => a - b);
     const step = progress(hooks, used.length + 3);
     const doc = await open(input, tick);
-    const ctx = doc.context;
     const own = repairPageTree(doc).pages;
-    const sources = new Map([[-1, own]]);
-    // Each PDF's own page labels, read before an extra one is joined (see merge).
-    const ownLabels = labelsOf(doc, own);
-    const labels = ownLabels ? labelsByPage(own, ownLabels) : null;
     step();
-    if (used.length) {
-      const appender = new Appender(doc);
-      for (const i of used) {
-        const extra = await open(extras[i], tick);
-        const extraLabels = labelsOf(extra, readPages(extra).pages);
-        const added = await appender.append(extra, tick);
-        sources.set(i, added);
-        if (labels && extraLabels) labelsByPage(added, extraLabels, labels);
-        step();
-      }
-      appender.finish();
+    if (inOwnOrder(refs, from) && eachOnce(own)) {
+      await turnAndRemove(doc, own, refs, tick);
+    } else {
+      await rearrange(doc, own, refs, from, used.map((i) => [i, extras[i]]), tick, step);
     }
-    const before = readPages(doc).pages;
-    const placed = new Set();
-    const order = [];
-    for (const ref of refs) {
-      await tick();
-      const from = which(ref);
-      checkTurn(ref.rotation ?? 0);
-      if (from === 'blank') {
-        if (!(ref.width > 0 && ref.height > 0)) throw new Error('A blank page needs a size');
-        const page = newPage(ctx);
-        page.set(nm('MediaBox'), ctx.obj([0, 0, ref.width, ref.height]));
-        page.set(nm('Resources'), PDFDict.withContext(ctx));
-        turn(ctx, page, ref.rotation ?? 0);
-        order.push({ ref: ctx.register(page), dict: page });
-        continue;
-      }
-      const list = sources.get(from);
-      if (!Number.isInteger(ref.page) || ref.page < 0 || ref.page >= list.length) throw new Error(`No page ${ref.page}`);
-      const page = list[ref.page];
-      if (placed.has(page)) throw new Error('A page can be placed once');
-      placed.add(page);
-      turn(ctx, page.dict, ref.rotation ?? 0);
-      order.push(page);
-    }
-    setPages(doc, order);
-    await dropRemovedPages(doc, before.map((p) => p.dict), tick);
-    if (labels) restoreLabels(doc, labels);
     step();
     const name = sanitize(plan?.fileName ?? defaultName('reorganize', input), 'Reorganized');
     const bytes = await savePdf(doc);
     step();
-    return output(name, bytes, order.length, [input, ...used.map((i) => extras[i])]);
+    // Counted from the PDF saved, not taken from the list (the app gives doc.numberOfPages): the
+    // count then says what the file holds, whatever the list asked for.
+    return output(name, bytes, readPages(doc).pages.length, [input, ...used.map((i) => extras[i])]);
   });
+}
+
+/** Whether `refs` are pages of the PDF itself only (see `from` in reorganizePdf), in the order they have in it. */
+function inOwnOrder(refs, from) {
+  return from.every((w) => w === -1)
+    && refs.every((ref, i) => Number.isInteger(ref.page) && (i === 0 || refs[i - 1].page < ref.page));
 }
 
 /**
- * Delete pages: `input` without `pages`, which must leave at least one page. Their bookmarks, form
- * fields, tags, links to them and pictures only they drew go too, so nothing of them stays in the
- * file. The pages left keep their labels.
- * @param {{ name: string, bytes: Uint8Array, password?: string }} input
- * @param {number[] | string | { pages: number[] | string, fileName?: string }} pages
- *   Zero-based page indexes, or the pages as typed ("2,5-7"). `fileName` without ".pdf"
- *   (default: defaultName('delete-pages', input)).
- * @param {{ onProgress?: (done: number, total: number) => void, signal?: AbortSignal }} [hooks]
- * @returns {Promise<{ name: string, bytes: Uint8Array, type: string, pageCount: number }>}
+ * Whether the page tree lists each of `pages` once. Only a damaged one lists a page twice, and
+ * such a page would be taken out of the tree everywhere it is listed, not only where the user chose.
  */
-export function deletePages(input, pages, hooks = {}) {
-  return guarded(async () => {
-    const tick = ticker(hooks.signal);
-    const options = Array.isArray(pages) || typeof pages === 'string' ? { pages } : pages ?? {};
-    const step = progress(hooks, 3);
-    const doc = await open(input, tick);
-    const all = repairPageTree(doc).pages;
-    let doomed;
-    if (typeof options.pages === 'string') doomed = pagesToDelete(options.pages, all.length);
-    else {
-      if (!Array.isArray(options.pages) || !options.pages.length) throw new UserError('pdf_invalid_pages');
-      doomed = [...new Set(options.pages)].sort((a, b) => a - b);
-      if (doomed.some((p) => !Number.isInteger(p) || p < 0 || p >= all.length)) throw new PageSelectionError('OUT_OF_RANGE', all.length);
-      if (doomed.length >= all.length) throw new PageSelectionError('ALL_PAGES', all.length);
-    }
-    step();
-    const ownLabels = labelsOf(doc, all);
-    const labels = ownLabels ? labelsByPage(all, ownLabels) : null;
-    const gone = new Set(doomed);
-    const removed = doomed.map((p) => all[p].dict);
-    setPages(doc, all.filter((_, i) => !gone.has(i)));
-    await tick();
-    await dropRemovedPages(doc, removed, tick);
-    if (labels) restoreLabels(doc, labels);
-    step();
-    const name = sanitize(options.fileName ?? defaultName('delete-pages', input), 'Pages_deleted');
-    const bytes = await savePdf(doc);
-    step();
-    return output(name, bytes, all.length - doomed.length, [input]);
-  });
+function eachOnce(pages) {
+  return new Set(pages.map((p) => p.dict)).size === pages.length;
 }
 
-/** Rotations as given: an object or Map of page index to degrees, [[index, degrees]], or [{ page, rotation }]. */
-function rotationEntries(rotations) {
-  if (rotations instanceof Map) return [...rotations.entries()];
-  if (Array.isArray(rotations)) {
-    return rotations.map((r) => (Array.isArray(r) ? r : [r.page, r.rotation ?? r.degrees]));
+/**
+ * Reorganize's in-place path (the app's turnAndRemove): the pages of `doc` (`all`) that `refs`
+ * leaves out are taken out of its page tree, their bookmarks and form fields with them (links to
+ * them lead nowhere), and the pages it turns get their /Rotate changed. Nothing else of a page or of the page
+ * tree changes: its nesting, and the sizes, crop boxes and turns pages inherit from it, stay. The
+ * pages left keep their labels.
+ */
+async function turnAndRemove(doc, all, refs, tick) {
+  const ctx = doc.context;
+  const kept = new Map();
+  for (const ref of refs) {
+    if (ref.page < 0 || ref.page >= all.length) throw new Error(`No page ${ref.page}`);
+    checkTurn(ref.rotation ?? 0);
+    kept.set(ref.page, ref);
   }
-  return Object.entries(rotations ?? {}).map(([k, v]) => [Number(k), v]);
+  const removed = all.filter((_, index) => !kept.has(index)).map((p) => p.dict);
+  // Read before pages go, given back once they have. With no page gone, the labels are left as they are.
+  const ownLabels = removed.length ? labelsOf(doc, all) : null;
+  const labels = ownLabels ? labelsByPage(all, ownLabels) : null;
+  for (const [index, ref] of kept) {
+    await tick();
+    // A page not turned keeps its dictionary as it is: turn() changes nothing for no turn.
+    turn(ctx, all[index].dict, ref.rotation ?? 0);
+  }
+  if (!removed.length) return;
+  removePages(doc, removed);
+  await tick();
+  await dropRemovedPages(doc, removed, tick);
+  if (labels) restoreLabels(doc, labels);
 }
 
 /**
- * Rotate PDF: pages turned clockwise by the degrees given (a multiple of 90; negative turns left),
- * on top of the turn they already have. Only how each page is shown changes; its content is left
- * exactly as it is.
- * @param {{ name: string, bytes: Uint8Array, password?: string }} input
- * @param {object | Map | Array | { rotations: object | Map | Array, fileName?: string }} rotations
- *   Page index (zero-based) to degrees, as `{ 0: 90, 3: -90 }`, a Map, `[[0, 90]]` or `[{ page: 0, rotation: 90 }]`.
- *   `fileName` without ".pdf" (default: defaultName('rotate', input)).
- * @param {{ onProgress?: (done: number, total: number) => void, signal?: AbortSignal }} [hooks]
- * @returns {Promise<{ name: string, bytes: Uint8Array, type: string, pageCount: number }>}
+ * Reorganize's other path, for pages moved or added (the app's rearrange): the PDF's own pages
+ * (`own`), those of the PDFs added (`extras`, as [place, input]) and blank ones laid out flat in
+ * `refs`' order (see setPages), each turned as it says, and the pages left out dropped with their
+ * bookmarks and form fields (links to them lead nowhere). `step` is called once for each PDF added.
  */
-export function rotatePdf(input, rotations, hooks = {}) {
-  return guarded(async () => {
-    const tick = ticker(hooks.signal);
-    const options = rotations && !(rotations instanceof Map) && !Array.isArray(rotations) && 'rotations' in rotations
-      ? rotations : { rotations };
-    const step = progress(hooks, 2);
-    const doc = await open(input, tick);
-    const ctx = doc.context;
-    const pages = repairPageTree(doc).pages;
-    for (const [index, degrees] of rotationEntries(options.rotations)) {
-      await tick();
-      if (!Number.isInteger(index) || index < 0 || index >= pages.length) throw new Error(`No page ${index}`);
-      checkTurn(degrees);
-      turn(ctx, pages[index].dict, degrees);
+async function rearrange(doc, own, refs, from, extras, tick, step) {
+  const ctx = doc.context;
+  const sources = new Map([[-1, own]]);
+  // Each PDF's own page labels, read before an extra one is joined (see merge).
+  const ownLabels = labelsOf(doc, own);
+  const labels = ownLabels ? labelsByPage(own, ownLabels) : null;
+  if (extras.length) {
+    const appender = new Appender(doc);
+    for (const [i, input] of extras) {
+      const extra = await open(input, tick);
+      const extraLabels = labelsOf(extra, readPages(extra).pages);
+      const added = await appender.append(extra, tick);
+      sources.set(i, added);
+      if (labels && extraLabels) labelsByPage(added, extraLabels, labels);
+      step();
     }
-    step();
-    const name = sanitize(options.fileName ?? defaultName('rotate', input), 'Rotated');
-    const bytes = await savePdf(doc);
-    step();
-    return output(name, bytes, pages.length, [input]);
-  });
+    appender.finish();
+  }
+  const before = readPages(doc).pages;
+  const placed = new Set();
+  const order = [];
+  for (const [index, ref] of refs.entries()) {
+    await tick();
+    checkTurn(ref.rotation ?? 0);
+    if (from[index] === 'blank') {
+      if (!(ref.width > 0 && ref.height > 0)) throw new Error('A blank page needs a size');
+      const page = newPage(ctx);
+      page.set(nm('MediaBox'), ctx.obj([0, 0, ref.width, ref.height]));
+      page.set(nm('Resources'), PDFDict.withContext(ctx));
+      turn(ctx, page, ref.rotation ?? 0);
+      order.push({ ref: ctx.register(page), dict: page });
+      continue;
+    }
+    const list = sources.get(from[index]);
+    if (!Number.isInteger(ref.page) || ref.page < 0 || ref.page >= list.length) throw new Error(`No page ${ref.page}`);
+    const page = list[ref.page];
+    if (placed.has(page)) throw new Error('A page can be placed once');
+    placed.add(page);
+    turn(ctx, page.dict, ref.rotation ?? 0);
+    order.push(page);
+  }
+  setPages(doc, order);
+  await dropRemovedPages(doc, before.map((p) => p.dict), tick);
+  if (labels) restoreLabels(doc, labels);
 }
 
 /**

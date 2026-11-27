@@ -20,8 +20,9 @@ cases; don't reinvent them.
 ## Rules
 
 - **No outside requests.** No CDNs, outside fonts, analytics, trackers or cookies. Every file the
-  site uses is served from `site/`. Links to other sites (GitHub, F-Droid, Obtainium) are fine as
-  ordinary `<a href>` links. Every HTML page starts its `<head>` (right after `<meta charset>`)
+  site uses is served from `site/`. Links to other sites (GitHub, F-Droid, Obtainium, Buy Me a
+  Coffee) are fine as ordinary `<a href>` links: the "Buy me a coffee" button is such a link, drawn
+  by the site's own CSS, never Buy Me a Coffee's script. Every HTML page starts its `<head>` (right after `<meta charset>`)
   with a `Content-Security-Policy` `<meta>` from `default-src 'self'` that names no other host,
   so the browser blocks anything else. `node tools/check-site.mjs --require-csp` (as CI runs it)
   checks this, and prints the hash to put in `script-src` when an inline script changes.
@@ -60,12 +61,12 @@ site/app/
   js/main.js              boot
   js/lib/                 vendor wrappers (done)
   js/core/                app framework: dom, i18n, settings, router, ui, icons, files, pdfdoc,
-                          pagegrid, output, batch, recent, names, search, errors, tools
-  js/screens/             home, settings, recent files, choose a tool
+                          pagegrid, output, batch, recent, names, search, errors, tools, coffee
+  js/screens/             home, settings, donate, recent files, choose a tool
   js/engine/              processing without UI (may use canvas/OffscreenCanvas):
     pdf-common.js         loadPdf / savePdf / needsPassword / createPdf / pruneUnreferenced (done)
     page-selection.js     "1,3,5-8" and "1-3;5;7-9" parsing (PdfPageSelection.kt)
-    organize.js           split, merge, reorganize, delete pages, rotate
+    organize.js           split, merge, reorganize (which also turns and removes pages)
     cleanup.js            really removing what deleted pages used (PageCleanup.kt, XObjectCleanup.kt)
     compress.js, flatten.js, redact.js, stamps.js (page numbers, watermark), edit.js, sign.js
     ocr.js                text recognition → invisible text layer (PdfOcr.kt)

@@ -15,7 +15,7 @@ What the user gets, as in the app:
   in the corner as the page is shown**, also on turned or cropped pages; Helvetica Bold (a standard
   font, nothing embedded), dark grey (0.2) at 30% opacity: small and light grey unless changed.
   Every page gets it, also pages a tool leaves as they were (the original Compress PDF keeps, pages
-  Rotate PDF only turns).
+  Reorganize PDF only turns).
 - The **arrow** on the switch's row opens **Size** (0–100%: barely visible up to starting at the
   page's middle) and **Opacity** (10–100%: faint to solid), with the first page showing the mark as
   they move (faint while it is off). The PDFs change once a slider is let go.
@@ -195,4 +195,4 @@ grey, gone once off); the result screen at 412 × 915 and 1280 × 800 in the thr
 arrow, sliders, preview, remembered after a reload, saved, shared and zipped bytes with the mark,
 the PDFs as made once off); cancelling, a failure, a result shown again (each row's size, line
 and own Save of the marked version), a change in another tab;
-Rotate PDF in the app with the mark on. Compress PDF's part is in `tests/batch-ui.test.mjs`.
+Reorganize PDF in the app turning a page with the mark on. Compress PDF's part is in `tests/batch-ui.test.mjs`.

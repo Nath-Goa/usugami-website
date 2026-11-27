@@ -1,25 +1,31 @@
-# Organize engines: Split, Merge, Reorganize, Delete pages, Rotate
+# Organize engines: Split, Merge, Reorganize
 
 Files: `site/app/js/engine/page-selection.js`, `site/app/js/engine/organize.js`,
 `site/app/js/engine/cleanup.js`. Tests: `tests/organize.test.mjs`.
 
-Ported from the app's `PdfPageSelection.kt`, `PdfToolsEngine.kt` (split, merge, reorganize,
-deletePages, rotate), `PageCleanup.kt`, `XObjectCleanup.kt`, `PageLabeling.kt`, `FileNames.kt` and
-the choices of `PdfToolsViewModel.kt` (runSplit, runMerge, runReorganize, runDeletePages,
-runRotate, defaultName, addBlankPage).
+Ported from the app's `PdfPageSelection.kt`, `PdfToolsEngine.kt` (split, merge, and reorganize with
+its two ways of saving, turnAndRemove and rearrange), `PageCleanup.kt`, `XObjectCleanup.kt`,
+`PageLabeling.kt`, `FileNames.kt` and the choices of `PdfToolsViewModel.kt` (runSplit, runMerge,
+runReorganize, defaultName, addBlankPage).
+
+Reorganize PDF is also where pages are turned and removed: it took over from Rotate PDF and Delete
+pages, as in the app (its commits 640285a6 and 7db36467). Their engines `rotatePdf` and
+`deletePages`, `pagesToDelete`, the `'ALL_PAGES'` problem and the names
+`defaultName('rotate' | 'delete-pages')` are gone; `reorganizePdf`, below, does their work.
 
 What every engine here does, as the app does:
 
 - Opens its PDFs with `loadPdf(bytes, { password })`; the PDFs it makes have **no password**
   (`passwordRemoved: true` on the result when a PDF it was made from had one: show
   `pdf_password_removed`, "The new PDF has no password.").
-- Pages left out (Delete pages, Reorganize, Merge's page mode, the other pages of a Split) are
+- Pages left out (Reorganize, Merge's page mode, the other pages of a Split) are
   **really gone**: their text, pictures only they drew, form fields, comments, bookmarks and tags
   aren't left hidden in the file. Links to them stay but lead nowhere.
 - Pages kept keep their bookmarks, links (also those between pages kept), form fields, comments
   and labels (the page numbers viewers show, such as "iv").
 - A PDF keeps at least one page.
-- Rotation only changes how a page is shown (`/Rotate`); its content stays byte for byte.
+- Rotation only changes how a page is shown (`/Rotate`, added to the turn the page has, also one it
+  inherits from the page tree); its content stays byte for byte.
 - Damaged page trees are read the way viewers read them (a page counted once, in order; loops and
   miscounts are mended). Damaged or hostile files fail with a `UserError`, never hang: loops are
   read once, nesting is bounded, a stream inflating past 128 MB is taken for unreadable.
@@ -57,12 +63,12 @@ Also `defaultName(tool, input)` and `partSuffix(index, pages)` (see organize.js 
 screens import from here, light, before the engine has loaded.
 
 All throw `PageSelectionError` (a `UserError`: show `t(e.key, ...e.args)`), whose `problem` is one of
-`'FORMAT' | 'RANGES_FORMAT' | 'OUT_OF_RANGE' | 'REVERSED' | 'CHUNK_SIZE' | 'ALL_PAGES'` and
+`'FORMAT' | 'RANGES_FORMAT' | 'OUT_OF_RANGE' | 'REVERSED' | 'CHUNK_SIZE'` and
 `pageCount` the PDF's page count. A `pageCount` below 1 throws `UserError('pdf_invalid_pages')`.
 
 ### parsePageSelection(text, pageCount) → number[]
 Pages typed like "5,1,3-4" in the order typed, each once (Split's "Selected pages", Page numbers'
-pages to skip).
+pages to skip and, through engine/page-choice.js, Reorganize's "Selected pages").
 ```js
 parsePageSelection('5,1,3-4,3', 6)   // [4, 0, 2, 3]
 parsePageSelection('7', 6)           // throws: problem 'OUT_OF_RANGE', key 'pdf_pages_range', args [6]
@@ -75,12 +81,6 @@ parseRanges('1-2;5;3-4', 6)   // [[0, 1], [4], [2, 3]]
 parseRanges('1-3,5', 6)       // throws 'RANGES_FORMAT' (pdf_ranges_format)
 ```
 
-### pagesToDelete(text, pageCount) → number[]
-Sorted, each once; naming every page throws `'ALL_PAGES'` (`pdf_need_page`).
-```js
-pagesToDelete('5-7,2,6', 10)   // [1, 4, 5, 6]
-```
-
 ### fixedChunks(pageCount, pagesPerFile) → number[][]
 Split's "Fixed chunks". `pagesPerFile` may be the text typed ("5", read like Kotlin's
 `toIntOrNull`); anything not from 1 to `pageCount` throws `'CHUNK_SIZE'` (`pdf_pages_chunk`).
@@ -90,8 +90,9 @@ fixedChunks(3, '4')   // throws 'CHUNK_SIZE', args [3]
 ```
 
 ### formatPages(pages) → string, formatPagesInOrder(pages) → string
-Zero-based pages written as people type them. `formatPages` sorts (Delete pages' field from taps),
-`formatPagesInOrder` keeps the order (Split's selection, where tapping adds at the end).
+Zero-based pages written as people type them. `formatPages` sorts (Reorganize's "Selected pages"
+field, written from the pages tapped), `formatPagesInOrder` keeps the order (Split's selection,
+where tapping adds at the end).
 ```js
 formatPages([6, 1, 4, 5])               // '2,5-7'
 formatPagesInOrder([9, 0, 1, 2, 4])     // '10,1-3,5'
@@ -154,43 +155,61 @@ Saves `input` with the pages `plan` lists, in order. `plan` is the list itself o
 - `{ blank: true, width, height, rotation? }`: a blank page of that size in points
   ("Add pages" → "Blank page"; see `blankPageAfter`)
 
-Each page may be listed once. Pages left out are gone as Delete pages removes them. The PDF's
-bookmarks, form, tags and details stay; an added PDF's come along with its pages, as in Merge.
+`rotation` is degrees clockwise, added to the turn the page has (a multiple of 90; negative turns
+left; 0 or left out for a page not turned). Each page may be listed once, and the list is every
+page the new PDF has: a page not listed is removed. The PDF's bookmarks, form, tags and details
+stay; an added PDF's come along with its pages, as in Merge. The result's `pageCount` is counted
+from the PDF saved, as `countPages` counts (the app gives `doc.numberOfPages`); it equals the
+list's length.
 ```js
+// Pages moved, a page of another PDF and a blank page added: laid out again.
 await reorganizePdf(main, { pages: [{ page: 2, rotation: 90 }, { input: 'x7', page: 0 }, blankPageAfter(size, 0)], fileName: 'Report_reorganized' }, [extra], hooks);
+// Page 2 of four removed, page 4 turned left: saved in place.
+await reorganizePdf(main, [{ page: 0 }, { page: 2 }, { page: 3, rotation: -90 }]);
 ```
-Errors: no page `pdf_need_page`.
 
-### deletePages(input, pages, hooks) → Promise<OutputFile>
-`input` without `pages`: zero-based indexes, or the text typed ("2,5-7"), or
-`{ pages, fileName }` (default `defaultName('delete-pages', input)`).
-```js
-await deletePages(input, '2,5-7', hooks);
-await deletePages(input, { pages: [1, 4], fileName: 'Report_pages_deleted' }, hooks);
-```
-Errors: every page `pdf_need_page`; pages typed wrongly or not in the PDF: the
-`PageSelectionError`s above; an empty list `pdf_invalid_pages`.
+It saves in one of two ways, as the app's `reorganize` does, and the list alone decides which:
 
-### rotatePdf(input, rotations, hooks) → Promise<OutputFile>
-Turns pages clockwise by degrees (a multiple of 90; negative turns left) on top of their turn.
-`rotations`: `{ 0: 90, 3: -90 }`, a `Map`, `[[0, 90]]`, `[{ page: 0, rotation: 90 }]`, or
-`{ rotations, fileName }` (default `defaultName('rotate', input)`). Turns for one page add up.
-```js
-await rotatePdf(input, { rotations: { 0: 90, 2: 180 }, fileName: 'Report_rotated' }, hooks);
-```
+- **In place** (the app's `turnAndRemove`), when the list holds only the PDF's own pages, in the
+  order they have in it, each once (some turned, some left out, none moved, none added), and the
+  PDF's page tree lists each page once.
+  - The page tree is kept as it is, with its nesting and with what pages inherit from it (size,
+    crop box, turn, resources).
+  - A turned page gets `/Rotate` = its own turn (inherited too) plus `rotation`, modulo 360, and
+    nothing else of it changes. A page not turned is not touched at all.
+  - Pages left out are taken out of the tree where they stand (`removePages`; a part of the tree
+    left without pages stays, empty) and cleaned up (`dropRemovedPages`): their form fields,
+    bookmarks, tags and the pictures only they drew go, and links to them stay but lead nowhere.
+    Page labels are then written again so that each page kept keeps its own.
+  - With no page left out nothing is cleaned up and the labels are not rewritten: `/Rotate`
+    entries are all that changes.
+- **Laid out again** (the app's `rearrange`), for anything else: a page moved, a page of
+  `extraInputs` or a blank page in the list, or a damaged PDF whose page tree lists a page twice
+  (taking it out where it stands would take out both).
+  - The `extraInputs` the list uses are joined on as Merge joins them.
+  - The pages are laid flat under the tree's root in the list's order, each first given the size,
+    crop box, turn and resources it inherited (`setPages`).
+  - Pages left out are cleaned up the same way, and labels are written again.
+
+Either way a damaged page tree is mended first (`repairPageTree`). Both ways show the same pages;
+they differ in how much of the file is left as it was. To turn or remove pages and change nothing
+else, list the pages kept in the PDF's own order.
+
+Errors: no page (an empty list, or no list) `pdf_need_page`. A list that can't be used is a
+mistake of the caller's, not something the user typed, and fails with `pdf_process_failed`: a
+page that isn't in its PDF, a page listed twice, a turn that isn't a multiple of 90, an `input`
+that is none of `extraInputs`, a blank page without a size.
 
 ### defaultName(tool, input) → string
 The name the tool's PDF gets unless another is typed (no extension), as the view model's
-`defaultName`: `tool` is `'split' | 'merge' | 'reorganize' | 'delete-pages' | 'rotate'`, `input`
+`defaultName`: `tool` is `'split' | 'merge' | 'reorganize'` (any other throws), `input`
 `{ name, pageCount }` (the first PDF). Defined in page-selection.js (with `partSuffix`), which
 loads without pdf-lib, so a screen can show the name before this engine has loaded; organize.js
 exports both too.
 ```js
 defaultName('split', { name: 'Report.pdf', pageCount: 12 })   // 'Report_split' (room left for '_12_12-12')
 defaultName('merge')                                          // 'Merged_PDF'
-defaultName('delete-pages', { name: 'Report.pdf' })           // 'Report_pages_deleted'
 defaultName('reorganize', { name: 'Report.pdf' })             // 'Report_reorganized'
-defaultName('rotate', { name: 'Report.pdf' })                 // 'Report_rotated'
 ```
 
 ### partSuffix(index, pages) → string
@@ -238,9 +257,14 @@ Lower-level pieces, for engines that also remove or copy pages:
 - `setPages(doc, pages)`: makes `pages` the document's pages, in order, under the root, each first
   given what it inherited (size, crop, turn, resources). A catalog without a proper page tree gets
   one; without a catalog it throws `pdf_import_failed`.
-- `dropRemovedPages(doc, removedPageDicts, tick)`: after taking pages out of the tree, cuts what
-  still leads to them (fields, bookmarks, tags, pictures only they drew, every other reference).
-  `tick = ticker(signal)`.
+- `removePages(doc, removedPageDicts)`: takes pages out of the page tree where they stand, for a
+  sound tree (after `repairPageTree`) that lists each page once: each leaves the `/Kids` that
+  lists it, and every part of the tree above it counts that many pages fewer. Nothing else changes
+  (the nesting stays, and the pages left still inherit what they inherited); a part of the tree
+  left without pages stays, empty. Use it rather than `setPages` when no page moves.
+- `dropRemovedPages(doc, removedPageDicts, tick)`: after taking pages out of the tree (with
+  `removePages` or `setPages`), cuts what still leads to them (fields, bookmarks, tags, pictures
+  only they drew, every other reference). `tick = ticker(signal)`.
 - `drawnBy(ctx, page, set)`, `emptyUnused(doc, drawn, keptPageDicts, tick)`,
   `drawnOnly(ctx, page, resources)`, `collect(ctx, start, set)`: XObjectCleanup's helpers.
 - `Copier(srcContext, destContext, { redirect, transform })` and `copyPage(copier, page, destRef, parentRef, { resources })`:

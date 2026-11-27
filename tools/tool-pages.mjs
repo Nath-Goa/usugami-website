@@ -11,12 +11,14 @@
 //   slug        the page's address: usugami.com/<slug>/
 //   card        Home's feature card, id="f-<card>" (its name links here; its icon is used)
 //   variantOf   instead of card, on a page about one kind of file a tool takes (JPG to PDF, for
-//               Images to PDF): the id of that tool's page. The page takes its icon and group and
-//               follows it in More PDF tools and the sitemap; Home has no card for it. It says
-//               what the tool does with that kind of file, not the tool's page over again
+//               Images to PDF) or one of its jobs that people search for by name (Rotate PDF
+//               pages and Delete PDF pages, for Reorganize PDF): the id of that tool's page. The
+//               page takes its icon and group and follows it in More PDF tools and the sitemap;
+//               Home has no card for it. It says what the tool does with that kind of file or
+//               for that job, not the tool's page over again
 //   opens       the tool (id) the page's button opens in the web app: ../app/#/tool/<id>
 //   name        the tool's name, as the web app and Home show it (for a variant, what it
-//               converts: JPG to PDF)
+//               converts or does: JPG to PDF, Rotate PDF pages)
 //   button      the button's text when "Open <the opened tool's name>" would read badly (a name
 //               that starts with a verb, such as Add watermark); never a label the tool itself shows
 //   title       <title> and og:title, ending in ": Usugami" (at most 65 characters)
@@ -452,97 +454,109 @@ const PAGES = [
     opens: 'reorganize',
     name: 'Reorganize PDF',
     title: 'Rearrange PDF pages in your browser, no uploads: Usugami',
-    description: 'Rearrange PDF pages for free in your browser: reorder, turn or remove pages, and add a blank page or another PDF’s pages. Nothing is uploaded.',
+    description: 'Rearrange PDF pages for free in your browser: move, turn or delete pages, and add a blank page or another PDF’s pages. Nothing is uploaded.',
     h1: 'Rearrange PDF pages',
-    lead: 'Reorganize PDF shows your PDF’s pages in a grid. Drag them into a new order, turn or remove them, and add a blank page or the pages of another PDF before you save.',
+    lead: 'Reorganize PDF shows your PDF’s pages in a grid. Drag them into a new order, select pages to turn or remove them, and add a blank page or the pages of another PDF before you save.',
     howToHeading: 'How to rearrange PDF pages',
     steps: [
       { title: 'Choose your PDF', html: 'Press <strong>Choose PDF</strong> and pick the PDF (on a computer you can also drop it on that card). If it has a password, Usugami asks for it.' },
-      { title: 'Move, turn or remove pages', html: 'Drag a page to its new place; on a touch screen, long-press it first. Or tap a page to choose it, then use the buttons above the grid to move it earlier or later, turn it left or right, or remove it.' },
-      { title: 'Add pages where you need them', html: 'Press <strong>Add pages</strong>, then <strong>Pages from a PDF</strong> or <strong>Blank page</strong>. The new pages go after the chosen page, or at the end when no page is chosen.' },
+      { title: 'Select pages', html: 'Tap the pages you want to change: each one you select shows a check mark. You can also type them in <strong>Selected pages</strong>, such as <code>2,5-7</code>, or press <strong>Select all</strong>. The bar above the pages counts them, as in “Selected: 3 of 12”.' },
+      { title: 'Move, turn or remove them', html: 'The buttons on that bar turn the selected pages left or right, or remove them. With one page selected, two more buttons move it earlier or later. You can also drag any page to its new place; on a touch screen, long-press it first.' },
+      { title: 'Add pages where you need them', html: 'Press <strong>Add pages</strong>, then <strong>Pages from a PDF</strong> or <strong>Blank page</strong>. The new pages go after the last selected page, or at the end when no page is selected.' },
       { title: 'Save the new PDF', html: 'Check the <strong>File name</strong> and press <strong>Save PDF</strong>. Then press <strong>Save to Downloads</strong> or <strong>Open</strong>; <strong>Share</strong> and <strong>Save as…</strong> also show where your browser offers them.' },
     ],
     featuresHeading: 'What you can do with Reorganize PDF',
     features: [
-      'Every page shows in a grid, turned the way it will be saved. Tap a page to choose it; tap it again to let it go.',
+      'Every page shows in a grid, turned the way it will be saved. Tap a page to select it, and tap it again to let it go. <strong>Select all</strong> takes every page, and then reads <strong>Select none</strong>.',
+      '<strong>Selected pages</strong> takes page numbers counted from 1, with commas between them and a hyphen for a range: <code>2,5-7</code> selects pages 2, 5, 6 and 7. The field and the pages stay in step, whichever you use.',
+      'Turn the selected pages left or right, a quarter turn at a time, or remove them all at once. A PDF keeps at least one page: with every page selected, nothing is removed and Usugami says “Keep at least one page.”',
       'With a keyboard, Ctrl or ⌘ and the arrow keys move a page too.',
-      'Turn the chosen page left or right, a quarter turn at a time, or remove it. The page that takes its place is chosen next, so you can remove several in a row.',
-      '<strong>Pages from a PDF</strong> adds every page of another PDF after the chosen page, or at the end. On a computer, dropping or pasting a PDF on the screen does the same.',
+      '<strong>Pages from a PDF</strong> adds every page of another PDF after the last selected page, or at the end. On a computer, dropping or pasting a PDF on the screen does the same.',
       '<strong>Blank page</strong> adds an empty page the same size as the page before it, lying sideways if you turned that page a quarter turn.',
       '<strong>Undo</strong> takes back one change at a time, up to 50, and <strong>Reset pages</strong> brings back the PDF’s own pages.',
+      'Pages you only turn are otherwise left exactly as they were: only the way each is shown changes, not its text, images or quality.',
       'The pages you keep still have their bookmarks, links, form fields and page labels (such as “iv”). An added PDF’s bookmarks and form fields come along with its pages.',
       'The new PDF is named after yours, such as <code>Report_reorganized.pdf</code>, and you can change the <strong>File name</strong> before you save.',
     ],
     faq: [
-      { q: 'Can I add a blank page to a PDF?', a: 'Yes. Tap the page the blank page should follow, then press <strong>Add pages</strong> and <strong>Blank page</strong>. It takes that page’s size; with no page chosen, it goes at the end, the size of the last page.' },
-      { q: 'Can I turn all the pages at once here?', a: 'Not in Reorganize PDF, which turns the chosen page a quarter turn at a time. To turn every page at once, use Rotate PDF and the buttons beside <strong>All pages</strong>.' },
+      { q: 'Can I add a blank page to a PDF?', a: 'Yes. Select the page the blank page should follow, then press <strong>Add pages</strong> and <strong>Blank page</strong>. It takes that page’s size; with no page selected, it goes at the end, the size of the last page.' },
+      { q: 'Can I turn all the pages at once?', a: 'Yes. Press <strong>Select all</strong>, then one of the two turn buttons on the bar above the pages. Every page turns a quarter turn, and <strong>Undo</strong> takes it back in one step.' },
       { q: 'Are removed pages really gone from the file?', a: 'Yes. Their text, the pictures only they used, their form fields and comments aren’t left hidden in the new PDF.' },
       { q: 'Can I reorganize a password-protected PDF?', a: 'Yes. Usugami asks for the password when you open it. The new PDF has no password, and the result screen tells you so.' },
     ],
   },
   {
+    // Delete pages was a tool of its own until Reorganize PDF took it over (as in the Android app):
+    // this page keeps its address for search, and opens Reorganize PDF.
     id: 'delete-pages',
     slug: 'delete-pdf-pages',
-    card: 'delete',
-    opens: 'delete-pages',
-    name: 'Delete pages',
-    button: 'Delete pages from a PDF',
+    variantOf: 'reorganize',
+    opens: 'reorganize',
+    name: 'Delete PDF pages',
     title: 'Delete PDF pages in your browser, no uploads: Usugami',
-    description: 'Delete PDF pages for free in your browser: tap the pages or type numbers like 2,5-7, then save the PDF without them. Nothing is uploaded.',
+    description: 'Delete PDF pages for free in your browser: tap the pages or type numbers like 2,5-7, remove them all at once, then save. Nothing is uploaded.',
     h1: 'Delete PDF pages',
-    lead: 'Delete pages takes the pages you don’t need out of a PDF. Tap them in the page grid or type their numbers, see how many will go, then save the new PDF.',
+    lead: 'Reorganize PDF takes the pages you don’t need out of a PDF. Select them in the page grid or type their numbers, see how many are selected, remove them, then save the new PDF.',
     howToHeading: 'How to delete pages from a PDF',
     steps: [
       { title: 'Choose your PDF', html: 'Press <strong>Choose PDF</strong> and pick the PDF (on a computer you can also drop it on that card). If it has a password, Usugami asks for it.' },
-      { title: 'Mark the pages to delete', html: 'Tap each page to delete in the grid, or type them in <strong>Pages to delete</strong>, such as <code>2,5-7</code>. The pages you tap fill in the field, and the line below it counts them, as in “To delete: 4 of 12”.' },
-      { title: 'Save the new PDF', html: 'Check the <strong>File name</strong> and press <strong>Delete pages</strong>. Then press <strong>Save to Downloads</strong> or <strong>Open</strong>; <strong>Share</strong> and <strong>Save as…</strong> also show where your browser offers them.' },
+      { title: 'Select the pages to delete', html: 'Tap each page to delete in the grid, or type them in <strong>Selected pages</strong>, such as <code>2,5-7</code>. The pages you tap fill in the field, and the bar above the grid counts them, as in “Selected: 4 of 12”.' },
+      { title: 'Remove them', html: 'Press the remove button on that bar (the bin). The pages leave the grid at once, and <strong>Undo</strong> brings them back if you change your mind.' },
+      { title: 'Save the new PDF', html: 'Check the <strong>File name</strong> and press <strong>Save PDF</strong>. Then press <strong>Save to Downloads</strong> or <strong>Open</strong>; <strong>Share</strong> and <strong>Save as…</strong> also show where your browser offers them.' },
     ],
-    featuresHeading: 'What you can do with Delete pages',
+    featuresHeading: 'What Reorganize PDF does when you delete pages',
     features: [
-      'Type page numbers counted from 1, separated by commas, with a hyphen for a range: <code>2,5-7</code> deletes pages 2, 5, 6 and 7. Spaces and order don’t matter.',
-      'Or tap pages in the grid. Each page you mark fades behind a delete sign, and the field fills in for you, with runs written as ranges.',
-      'A PDF keeps at least one page: with every page marked, Usugami says “Keep at least one page.”',
-      'If Usugami can’t use the numbers you typed, it says why when you press <strong>Delete pages</strong>, for example “Write ranges from low to high, such as 3-8.”',
+      'Type page numbers counted from 1, separated by commas, with a hyphen for a range: <code>2,5-7</code> selects pages 2, 5, 6 and 7. Spaces and order don’t matter.',
+      'Or tap pages in the grid. Each page you select shows a check mark, and the field fills in for you, with runs written as ranges.',
+      'One press removes every selected page, and one <strong>Undo</strong> brings them all back.',
+      'A PDF keeps at least one page: with every page selected, nothing is removed and Usugami says “Keep at least one page.”',
+      'If Usugami can’t use the numbers you typed, it says why once you have finished typing, for example “Write ranges from low to high, such as 3-8.”',
+      'Deleted pages are really gone: their text, the pictures only they used, their form fields and bookmarks aren’t left hidden in the file.',
       'The pages you keep still have their bookmarks, links, form fields and page labels (such as “iv”).',
-      'The new PDF is named after yours, such as <code>Report_pages_deleted.pdf</code>, and you can change the <strong>File name</strong> first.',
+      'The new PDF is named after yours, such as <code>Report_reorganized.pdf</code>, and you can change the <strong>File name</strong> first.',
     ],
     faq: [
-      { q: 'How do I delete several pages at once?', a: 'Mark them all before you save: tap each one in the grid, or type a list such as <code>2,5-7</code> in <strong>Pages to delete</strong>. Usugami removes them all in one go and makes one new PDF.' },
-      { q: 'Can I delete every page of a PDF?', a: 'No. A PDF needs at least one page, so leave at least one page unmarked.' },
+      { q: 'How do I delete several pages at once?', a: 'Select them all first: tap each one in the grid, or type a list such as <code>2,5-7</code> in <strong>Selected pages</strong>. Then press the remove button once, and Usugami takes them all out together.' },
+      { q: 'Can I delete every page of a PDF?', a: 'No. A PDF needs at least one page, so leave at least one page unselected.' },
       { q: 'Are deleted pages really removed from the file?', a: 'Yes. Their text, the pictures only they used, their form fields and comments aren’t left hidden in the new PDF.' },
       { q: 'Can I delete pages from a password-protected PDF?', a: 'Yes. Usugami asks for the password when you choose the PDF. The new PDF has no password, and the result screen tells you so.' },
     ],
   },
   {
+    // Rotate PDF was a tool of its own until Reorganize PDF took it over (as in the Android app):
+    // this page keeps its address for search, and opens Reorganize PDF.
     id: 'rotate',
     slug: 'rotate-pdf',
-    card: 'rotate',
-    opens: 'rotate',
-    name: 'Rotate PDF',
+    variantOf: 'reorganize',
+    opens: 'reorganize',
+    name: 'Rotate PDF pages',
     title: 'Rotate PDF pages in your browser, no uploads: Usugami',
-    description: 'Rotate PDF pages for free in your browser: turn one page or every page left or right, then save. Text and images stay as they were. Nothing is uploaded.',
+    description: 'Rotate PDF pages for free in your browser: turn one page, several or all of them left or right, then save. Text and images stay as they were.',
     h1: 'Rotate PDF pages',
-    lead: 'Rotate PDF turns pages the right way up. Turn single pages left or right, or every page at once, then save the PDF. Only the way each page is shown changes.',
+    lead: 'Reorganize PDF turns pages the right way up. Select one page, several or all of them, turn them left or right and watch them turn, then save the PDF. Only the way each page is shown changes.',
     howToHeading: 'How to rotate PDF pages',
     steps: [
       { title: 'Choose your PDF', html: 'Press <strong>Choose PDF</strong> and pick the PDF (on a computer you can also drop it on that card). If it has a password, Usugami asks for it.' },
-      { title: 'Turn the pages', html: 'Use the rotate left and rotate right buttons beside a page to turn just that page, or the ones beside <strong>All pages</strong> to turn every page. <strong>Reset pages</strong> turns them all back.' },
-      { title: 'Save the rotated PDF', html: 'Check the <strong>File name</strong> and press <strong>Rotate PDF</strong>. Then press <strong>Save to Downloads</strong> or <strong>Open</strong>; <strong>Share</strong> and <strong>Save as…</strong> also show where your browser offers them.' },
+      { title: 'Select the pages to turn', html: 'Tap the pages in the grid, type them in <strong>Selected pages</strong> (such as <code>2,5-7</code>), or press <strong>Select all</strong> to turn the whole PDF.' },
+      { title: 'Turn them', html: 'Press the rotate left or rotate right button on the bar above the pages. Every selected page turns a quarter turn; press again to turn further. <strong>Reset pages</strong> turns them all back.' },
+      { title: 'Save the rotated PDF', html: 'Check the <strong>File name</strong> and press <strong>Save PDF</strong>. Then press <strong>Save to Downloads</strong> or <strong>Open</strong>; <strong>Share</strong> and <strong>Save as…</strong> also show where your browser offers them.' },
     ],
-    featuresHeading: 'What you can do with Rotate PDF',
+    featuresHeading: 'What Reorganize PDF does when you rotate pages',
     features: [
-      'Each page shows in a list with its own rotate left and rotate right buttons, and its picture turns as you press them.',
-      'The two buttons beside <strong>All pages</strong> turn every page left or right at once.',
-      'Under each page number, “Turned right”, “Upside down” or “Turned left” shows how you turned it.',
-      'A page that is already sideways shows that way in the list, and your turn adds to it.',
+      'Each page’s picture turns as you press, so the grid shows the pages as they will be saved.',
+      'One press turns every selected page: one page, a few, or all of them after <strong>Select all</strong>.',
+      'A page that is already sideways shows that way in the grid, and your turn adds to it.',
+      'Pages you only turn are otherwise left exactly as they were: only the way each is shown changes, not its text, images or quality.',
+      '<strong>Undo</strong> takes back one press at a time, and <strong>Reset pages</strong> turns every page back.',
       'If your PDF has a password, the new PDF has none, and the result screen tells you so.',
-      'The new PDF is named after yours, such as <code>Report_rotated.pdf</code>, and you can change the <strong>File name</strong> first.',
+      'The new PDF is named after yours, such as <code>Report_reorganized.pdf</code>, and you can change the <strong>File name</strong> first.',
     ],
     faq: [
-      { q: 'Can I rotate just one page of a PDF?', a: 'Yes. Each page has its own buttons to turn it left or right, and the other pages stay as they are.' },
-      { q: 'Does rotating a PDF lower its quality?', a: 'No. Rotate PDF only changes how each page is shown. The text and images on each page are left exactly as they were.' },
-      { q: 'What if a page is already turned?', a: 'Your turn adds to the one it has. The list shows each page as it looks, and its picture turns with each press, so turn it until it’s the right way up.' },
-      { q: 'Can I rotate pages and change their order at the same time?', a: 'Yes, in Reorganize PDF. There you can turn pages one at a time, move or remove them, and add new ones.' },
+      { q: 'Can I rotate just one page of a PDF?', a: 'Yes. Select that page alone and press a turn button. The other pages stay as they are.' },
+      { q: 'How do I rotate every page at once?', a: 'Press <strong>Select all</strong>, then the rotate left or rotate right button. All the pages turn together.' },
+      { q: 'Does rotating a PDF lower its quality?', a: 'No. Turning only changes how each page is shown. The text and images on each page are left exactly as they were.' },
+      { q: 'What if a page is already turned?', a: 'Your turn adds to the one it has. The grid shows each page as it looks, and its picture turns with each press, so turn it until it’s the right way up.' },
+      { q: 'Can I rotate pages and change their order at the same time?', a: 'Yes. Reorganize PDF also moves and removes pages and adds new ones, all before one save.' },
     ],
   },
   {

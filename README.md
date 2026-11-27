@@ -22,8 +22,9 @@ site/                   the website as it is served
   index.html            Home
   download/             Download
   privacy/              Privacy
-  merge-pdf/ ...        one page per tool (19) and three for kinds of image (jpg-to-pdf/,
-                        png-to-pdf/, heic-to-pdf/), written by tools/build-tool-pages.mjs
+  merge-pdf/ ...        one page per tool (17), three for kinds of image (jpg-to-pdf/,
+                        png-to-pdf/, heic-to-pdf/) and two for jobs of Reorganize PDF
+                        (rotate-pdf/, delete-pdf-pages/), written by tools/build-tool-pages.mjs
   404.html              page for addresses that don't exist
   robots.txt, sitemap.xml   for search engines (the sitemap is written with the tool pages)
   assets/               the pages' CSS (tokens.css: colours, light and dark) and images

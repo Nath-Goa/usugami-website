@@ -8,7 +8,8 @@
 //   as shown, light grey; gone once taken off;
 // - the result screen's switch (core/output.js, core/result-mark.js) at phone and desktop width:
 //   off at first, its sliders and preview, remembered after a reload, the PDFs saved and shared with
-//   the mark, the files as made again once it is off; and Rotate PDF in the app with the mark on.
+//   the mark, the files as made again once it is off; and Reorganize PDF in the app, turning a
+//   page with the mark on.
 //   node tests/mark.test.mjs           everything (Chromium, Firefox and WebKit)
 //   node tests/mark.test.mjs --quick   Chromium only
 import { readFile } from 'node:fs/promises';
@@ -897,30 +898,32 @@ await test('result screen: cancelling, a failure, a result shown again (chromium
 });
 
 // ---------------------------------------------------------------------------------------------
-// In the app: Rotate PDF with the mark on. Every page gets it, also those it only turns or leaves
-// as they were; a PDF marked before isn't marked twice.
+// In the app: Reorganize PDF with the mark on, turning one page (which Rotate PDF did before
+// Reorganize PDF took its work over). Every page gets the mark, also those it only turns or
+// leaves as they were; a PDF marked before isn't marked twice.
 
-await test('Rotate PDF with the mark on (chromium)', async () => {
+await test('Reorganize PDF turning a page, with the mark on (chromium)', async () => {
   await withPage(async (page, url) => {
     await page.goto(url + 'app/');
     await page.waitForSelector('html[data-ready="true"]', { timeout: 30000 });
     await page.evaluate(() => localStorage.setItem('usugami.settings', JSON.stringify({ language: 'en', 'mark.on': true, 'mark.size': 40 })));
     const input = await markPdf(base, new MarkStyle({ size: 90, opacity: 80 }));
-    await page.goto(url + 'app/#/tool/rotate');
+    await page.goto(url + 'app/#/tool/reorganize');
     await page.reload();
     await page.waitForSelector('html[data-ready="true"]', { timeout: 30000 });
-    await page.waitForSelector('#app .screen[data-tool="rotate"]:not([aria-busy]) .ui-empty', { timeout: 20000 });
+    await page.waitForSelector('#app .screen[data-tool="reorganize"]:not([aria-busy]) .ui-empty', { timeout: 20000 });
     const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.click('.ui-empty')]);
     await chooser.setFiles({ name: 'Marked.pdf', mimeType: 'application/pdf', buffer: Buffer.from(input) });
-    await page.waitForSelector('.rotate-card', { timeout: 20000 });
-    await page.click('.rotate-card:nth-of-type(1) .ui-icon-btn[aria-label="Rotate page 1 right"]');
+    // Page 1 selected alone, then turned with the bar's button.
+    await page.click('.reorganize-grid .ui-page[aria-label="Page 1"]', { timeout: 20000 });
+    await page.click('.reorganize-bar .ui-icon-btn[aria-label="Rotate page 1 right"]');
     await page.click('.ui-bottombar .ui-btn');
     await page.waitForSelector('.ui-result .ui-mark', { timeout: 30000 });
     await page.waitForFunction(() => !document.querySelector('.ui-mark-working .ui-progress') && !document.querySelector('.ui-result-actions .ui-btn').disabled, null, { timeout: 30000 });
     eq(await page.getAttribute('.ui-mark [role="switch"]', 'aria-checked'), 'true', 'the switch is on');
     const [dl] = await Promise.all([page.waitForEvent('download'), page.click('.ui-result-actions >> text=Save to Downloads')]);
     const out = await readFile(await dl.path());
-    const parts = await checkMarked(out, new MarkStyle({ size: 40 }), 'rotated');
+    const parts = await checkMarked(out, new MarkStyle({ size: 40 }), 'turned');
     eq(parts.map((p) => p.frame.rotation), [90, 90, 0], 'page 1 turned, the others as they were');
     await page.evaluate(HELPERS);
     eq((await page.evaluate((d) => window.__mk.read(d), b64(out))).map((p) => p.marks.length), [1, 1, 1], 'once on each page, not twice');
