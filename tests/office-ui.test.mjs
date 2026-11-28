@@ -974,8 +974,13 @@ async function testSharedAndProgress(page, url, { touch }) {
   eq(await page.textContent('dialog.ui-dialog--progress .ui-dialog-title'), say('creating_pdfs'), 'progress: "Creating and compressing PDFs…"');
   await page.waitForFunction((label) => document.querySelector('dialog.ui-dialog--progress .ui-progress-label')?.textContent === label, say('batch_progress', 3, 3), { timeout: 60000, polling: 50 });
   eq(await page.textContent('dialog.ui-dialog--progress .ui-progress-detail'), 'Long.docx', 'progress: the file being converted');
-  await page.waitForFunction(() => /\d/.test(document.querySelector('dialog.ui-dialog--progress .office-progress-step:not([hidden])')?.textContent ?? ''), null, { timeout: 60000, polling: 50 });
-  ok(/^Page \d+$/.test(await page.textContent('dialog.ui-dialog--progress .office-progress-step')), 'progress: the page being drawn');
+  // The text checked is the one waited for: read again, it may already have moved on.
+  const step = await page.waitForFunction(() => {
+    const text = document.querySelector('dialog.ui-dialog--progress .office-progress-step:not([hidden])')?.textContent ?? '';
+    return /\d/.test(text) && text;
+  }, null, { timeout: 60000, polling: 50 });
+  const stepText = await step.jsonValue();
+  ok(/^Page \d+$/.test(stepText), `progress: the page being drawn ("${stepText}")`);
   await checkProgressLayout(page, { many: true });
   if (!QUICK) await page.screenshot({ path: join(shots, `progress-${touch ? 'phone' : 'desktop'}.png`) });
   eq((await handleState(page)).processing, true, 'converting');
