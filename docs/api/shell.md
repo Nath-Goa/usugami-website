@@ -372,7 +372,8 @@ Each exports `mount(ctx)`. Also exported, for reuse:
 - `sponsors.js` (`GitHubSponsorsScreen`): the other way, in four steps, the first with "Open
   GitHub" to `ANDROID_SOURCE_URL`: the app's repository, whose Sponsor button the second step
   names (its `.github/FUNDING.yml` lists both ways), as in the app.
-- `about.js`: `APP_VERSION` (`'1.0.0'`), `ANDROID_SOURCE_URL`, `appIcon()`. The name under the
+- `about.js`: `APP_VERSION` (`'4.0.0'`, the version of the Android app the web app follows: change
+  it with each release the web app catches up with), `ANDROID_SOURCE_URL`, `appIcon()`. The name under the
   icon is `about_edition_name_standard` ("Usugami™"), the one place in the app where the name
   carries the trademark sign, as on the Android app's About screen. About links the
   website's source code and its third-party notices as ordinary links (new tab), as the

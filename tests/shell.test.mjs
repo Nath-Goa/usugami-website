@@ -623,7 +623,7 @@ await test('Settings: Appearance changes the theme at once and is kept; Language
     // About and its links.
     await page.click('.ui-list-main:has-text("About Usugami")');
     await onScreen(page, 'about');
-    assert((await page.textContent('.about-header')).includes('Version 1.0.0'), 'version');
+    assert((await page.textContent('.about-header')).includes('Version 4.0.0'), 'version: the Android app\'s it follows');
     const links = await page.$$eval('#app a[href]', (els) => els.map((a) => [a.textContent.replace(' (opens in a new tab)', '').trim(), new URL(a.href).pathname.replace(/^\/usugami-website/, '') || a.href, a.target]));
     const hrefs = Object.fromEntries(links.map(([text, href]) => [text.split(/\s{2,}|(?<=[a-z])(?=github)/)[0], href]));
     assert(Object.values(hrefs).includes('/privacy/'), 'privacy policy ../privacy/: ' + JSON.stringify(links));

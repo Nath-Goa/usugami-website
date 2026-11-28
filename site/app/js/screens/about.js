@@ -6,8 +6,8 @@ import { icon } from '../core/icons.js';
 import { topBar, listItem } from '../core/ui.js';
 import { externalRow, WEBSITE_SOURCE_URL, WEBSITE_NOTICES_URL } from './settings.js';
 
-/** The web app's version, shown on About. */
-export const APP_VERSION = '1.0.0';
+/** The web app's version, shown on About: the version of the Android app it follows. */
+export const APP_VERSION = '4.0.0';
 
 /** Where the Android app's source code is published (AboutScreen.SOURCE_CODE_URL). */
 export const ANDROID_SOURCE_URL = 'https://github.com/Nath-Goa/usugami';
