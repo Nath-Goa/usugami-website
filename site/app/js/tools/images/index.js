@@ -1,27 +1,34 @@
-// Scan document and Images to PDF (the app's editor, crop screen, Create PDF sheet and result, as
-// UsugamiApp.kt routes "images"): one module for both tools. ctx.params.start === 'scan' starts a
-// scan with ctx.files from Home's Scan document card: uploaded images go through the crop screen one
-// after another; a photo (ctx.params.camera) goes through it with Take another and Done. Without
-// files, or as Images to PDF, the editor shows, taking images picked, dropped, pasted or shared.
+// Scan document and Images to PDF (the app's editor, a scan's screens, the crop screen, the Create
+// PDF sheet and the result, as UsugamiApp.kt routes "images"): one module for both tools.
+// ctx.params.start === 'scan' starts a scan with ctx.files from Home's Scan document card: a photo
+// (ctx.params.camera) joins the scan's Photos, where Take another and Done follow; uploaded images go
+// through the crop screen one after another. Either way the scan then has one Filters screen for all
+// its pages, and Save puts them in the editor. Without files, or as Images to PDF, the editor shows,
+// taking images picked, dropped, pasted or shared; its own Take photo starts the same kind of scan.
 //
 // The inner screens are history steps, so the browser's Back (a phone's Back) goes back as the
-// app's does: from Filters to Crop page, from Crop page to the editor (a photo just taken is
-// discarded, a scan stops), from the result to the editor.
+// app's does: from the result to the editor; from a page's Filters to its Crop page, and from there
+// to the editor; and on a scan's screens, which are one step above the editor, as each screen's own
+// back arrow (the photos ask before they go; an image goes back to the one before; Filters goes back
+// to the last image).
 import { h, ensureCss } from '../../core/dom.js';
 import { loadStrings, t } from '../../core/i18n.js';
 import { snackbar, alertDialog } from '../../core/ui.js';
 import { pickFiles } from '../../core/files.js';
 import { showResult } from '../../core/output.js';
 import { IMAGE_ACCEPT } from '../../engine/images/image-type.js';
-import { ImagesModel } from './model.js';
+import { ImagesModel, scanPlace } from './model.js';
 import { createEditor } from './editor.js';
 import { createCropScreen, createScanWaiting } from './crop-screen.js';
+import { createScanPhotos } from './scan-photos.js';
+import { createScanLooks } from './scan-looks.js';
 import { openConvertSheet, convert, preloadConvert } from './convert.js';
 import { forgetPreviews, clearPreviews } from './preview.js';
 
 /** How deep each inner screen is in the browser's history above the tool (sheet: Create PDF's). */
-const STEP_DEPTH = { crop: 1, waiting: 1, result: 1, sheet: 1, filters: 2 };
+const STEP_DEPTH = { crop: 1, waiting: 1, result: 1, sheet: 1, photos: 1, looks: 1, filters: 2 };
 const depthOf = (step) => (step == null ? 0 : STEP_DEPTH[step] ?? 1);
+
 
 /** Whether Home's Take photo opened the tool (its photo then goes through the crop screen as a photo). */
 const fromCamera = (params) => ['1', 'true', true].includes(params?.camera) || params?.source === 'camera';
@@ -64,15 +71,17 @@ export async function mount(ctx) {
 
   const addPhotos = () => pickFiles({ accept: 'image', multiple: true }).then((files) => { if (!destroyed) model.addImages(files); });
   const addFiles = () => pickFiles({ accept: IMAGE_ACCEPT, multiple: true }).then((files) => { if (!destroyed) model.addImages(files); });
-  /** Opens the camera app (a picker on computers) for a photo, added and cropped when it comes back. Call from a click. */
+  /**
+   * Opens the camera app (a picker on computers) for the scan's next photo, a scan starting with it
+   * if none is going on; the photo joins the scan's Photos when it comes back. Once per tap: not
+   * while the camera is open. Call from a click.
+   */
   const takePhoto = () => {
+    if (model.cameraOpen || !model.startScan()) return;
     model.cameraOpen = true;
     model.changed();
     pickFiles({ accept: 'image', capture: 'environment' }).then((files) => {
-      if (destroyed) return;
-      model.cameraOpen = false;
-      if (files.length) model.addPhoto(files[0]);
-      else model.changed();
+      if (!destroyed) model.photoTaken(files[0] ?? null);
     });
   };
 
@@ -104,8 +113,9 @@ export async function mount(ctx) {
   // ---- Making the PDF ----
 
   function openSheet() {
-    // Not while a PDF is being made, nor while a photo's crop screen is opening.
-    if (model.converting || model.openingCrop || !model.items.length || model.pending > 0) return;
+    // Not while a PDF is being made, nor while a page's crop screen is opening, nor once a scan has
+    // started, whose photos are to be cropped first.
+    if (model.converting || model.openingCrop || model.scan || !model.items.length || model.pending > 0) return;
     if (sheet?.open) return;
     const opened = openConvertSheet(model, async (choice) => {
       sheet = null;
@@ -142,8 +152,25 @@ export async function mount(ctx) {
   function wanted() {
     if (result) return { kind: 'result', key: 'result' };
     if (model.crop) return { kind: 'crop', key: `crop:${model.crop.opened}` };
-    if (model.scan) return { kind: 'waiting', key: 'waiting' };
+    const scan = model.scan;
+    if (scan?.stage === 'photos') return { kind: 'photos', key: 'photos' };
+    if (scan?.stage === 'looks') return { kind: 'looks', key: 'looks' };
+    // Cropping, the next image awaited (still being added, or its page looked for).
+    if (scan) return { kind: 'waiting', key: `waiting:${scanPlace(scan)}` };
     return { kind: 'editor', key: 'editor' };
+  }
+
+  /**
+   * Where a screen is in a scan, to slide the later one in over the earlier: its stage, then the
+   * image among the scan's (null for a screen that isn't a scan's).
+   */
+  function scanPosition(s) {
+    if (!s) return null;
+    if (s.kind === 'photos') return [0, 0];
+    if (s.kind === 'looks') return [2, 0];
+    if (s.kind === 'waiting') return [1, s.place];
+    if (s.kind === 'crop' && s.crop.staged) return [1, s.place];
+    return null;
   }
 
   function make(w) {
@@ -161,22 +188,41 @@ export async function mount(ctx) {
       const crop = createCropScreen({
         model,
         session,
-        scan: () => (session.queued ? model.scan : null),
-        // The images of the scan still being added are pages too: Apply to all pages reaches them.
-        pageCount: () => model.items.length + (session.queued ? model.scan?.coming ?? 0 : 0),
+        scan: () => (session.staged ? model.scan : null),
+        pageCount: () => model.items.length,
         onStep: () => syncHistory(),
         actions: {
           done: (choices) => model.finishCrop(choices),
-          // A second tap, once the first has closed the screen, opens no second camera.
-          takeAnother: (choices) => { if (model.finishCrop(choices)) takePhoto(); },
           close: () => model.closeCrop(),
+          back: () => model.scanBack(),
+          discard: () => model.discardScanPhoto(),
+          stop: () => model.stopScanCropping(),
         },
       });
-      return { ...w, el: crop.el, crop, update: () => crop.update(), focus: () => crop.focus(), destroy: () => crop.destroy() };
+      const place = session.staged && model.scan ? model.scan.pages.indexOf(session.itemId) + 1 : 0;
+      return { ...w, el: crop.el, crop, place, update: () => crop.update(), focus: () => crop.focus(), back: () => crop.back(), destroy: () => crop.destroy() };
     }
     if (w.kind === 'waiting') {
-      const waiting = createScanWaiting({ scan: () => model.scan, onClose: () => model.closeCrop() });
-      return { ...w, el: waiting.el, update: () => waiting.update(), focus: () => waiting.focus(), destroy: () => waiting.destroy() };
+      const waiting = createScanWaiting({ scan: () => model.scan, onBack: () => model.scanBack(), onStop: () => model.stopScanCropping() });
+      return {
+        ...w, el: waiting.el, place: scanPlace(model.scan), update: () => waiting.update(), focus: () => waiting.focus(), back: () => model.scanBack(), destroy: () => waiting.destroy(),
+      };
+    }
+    if (w.kind === 'photos') {
+      const photos = createScanPhotos({
+        model,
+        actions: {
+          takePhoto: () => takePhoto(),
+          done: () => model.cropScan(),
+          remove: (id) => model.remove(id),
+          discard: () => model.discardScan(),
+        },
+      });
+      return { ...w, el: photos.el, update: () => photos.update(), focus: () => photos.focus(), back: () => photos.back(), destroy: () => photos.destroy() };
+    }
+    if (w.kind === 'looks') {
+      const looks = createScanLooks({ model, actions: { back: () => model.scanLooksBack(), save: () => model.saveScan() } });
+      return { ...w, el: looks.el, update: () => looks.update(), focus: () => looks.focus(), back: () => looks.back(), destroy: () => looks.destroy() };
     }
     const box = h('div', { class: 'images-result' });
     const shown = showResult(box, {
@@ -206,10 +252,16 @@ export async function mount(ctx) {
     if (prev?.kind === 'editor') editorScroll = editor.el.classList.contains('is-empty') ? 0 : window.scrollY;
     prev?.destroy();
     const next = make(w);
-    const forward = depth(next) >= depth(prev);
+    // A scan's later stage, or later image, comes in over the one before, and the one before comes
+    // back from the other side; elsewhere a deeper screen comes over. The image awaited takes the
+    // place of its wait without a slide.
+    const from = scanPosition(prev);
+    const to = scanPosition(next);
+    const awaited = prev?.kind === 'waiting' && next.kind === 'crop' && from && to && from[1] === to[1];
+    const forward = from && to ? (to[0] - from[0] || to[1] - from[1]) >= 0 : depth(next) >= depth(prev);
     screen = next;
     ctx.root.replaceChildren(next.el);
-    if (prev) {
+    if (prev && !awaited) {
       next.el.classList.remove('images-in-forward', 'images-in-back');
       void next.el.offsetWidth;
       next.el.classList.add(forward ? 'images-in-forward' : 'images-in-back');
@@ -227,17 +279,21 @@ export async function mount(ctx) {
 
   function render() {
     if (destroyed) return;
+    // Once the camera and the scan's screens have closed, the scan from Home is over: with a page,
+    // the editor is as it always is; with none, once nothing is still being added, back to Home,
+    // straight from the scan's screen rather than by way of the empty editor (the photos discarded,
+    // the last photo removed or discarded, cropping stopped before an image came, nothing that
+    // could be read).
+    if (scanFromHome && !leaving && !model.scanUnderWay()) {
+      if (model.items.length) scanFromHome = false;
+      else if (model.pending === 0) { leave(); return; }
+    }
+    if (leaving && screen && screen.kind !== 'editor') return;
     const w = wanted();
     if (!screen || screen.key !== w.key) show(w);
     else screen.update();
     if (sheet) {
       if (w.kind !== 'editor' || !model.items.length) { sheet.close(); sheet = null; } else sheet.update();
-    }
-    // Once the camera and the crop screen have closed, the scan from Home is over: with a page, the
-    // editor is as it always is; with none, once nothing is still being added, back to Home.
-    if (scanFromHome && !leaving && !model.scanUnderWay()) {
-      if (model.items.length) scanFromHome = false;
-      else if (model.pending === 0) { leave(); return; }
     }
     if (!unwinding) syncHistory();
   }
@@ -292,7 +348,12 @@ export async function mount(ctx) {
     }
   }
 
-  /** The browser's Back (or Forward) moved between the tool's steps. */
+  /**
+   * The browser's Back (or Forward) moved between the tool's steps. Each step gone back over is the
+   * Back of the screen showing then, as the app's Back: the result goes, a page's Filters goes back
+   * to Crop page and Crop page to the editor, the sheet closes; a scan's screen does what its back
+   * arrow does, and stays a step above the editor while the scan goes on.
+   */
   function onStep(step) {
     const d = depthOf(step);
     if (expect != null && d === expect) {
@@ -301,13 +362,13 @@ export async function mount(ctx) {
       wake?.();
       return;
     }
+    const lost = actual - d;
     actual = d;
     expect = null;
     wake?.();
-    // Back: each screen above goes back as the app's Back does.
     unwinding = true;
     try {
-      for (let guard = 0; guard < 4 && depth(screen) > d; guard++) {
+      for (let k = 0; k < Math.min(lost, 4) && depth(screen) > 0; k++) {
         const s = screen;
         if (s.kind === 'result') result = null;
         else if (s.kind === 'crop' && s.crop.step === 'filters') s.crop.setStep('crop');
@@ -316,7 +377,8 @@ export async function mount(ctx) {
           const open = sheet;
           sheet = null;
           open?.close();
-        } else model.closeCrop();
+        } else if (s.back) s.back();
+        else model.closeCrop();
         render();
       }
     } finally {
@@ -330,7 +392,8 @@ export async function mount(ctx) {
   if (ctx.params?.start === 'scan' && ctx.files?.length) {
     scanFromHome = true;
     if (fromCamera(ctx.params)) {
-      model.newScan();
+      // Home's Take photo: the camera has given its photo, the scan's first.
+      model.startScan();
       model.addPhoto(ctx.files[0]);
     } else {
       model.scanImages(ctx.files);
@@ -345,9 +408,6 @@ export async function mount(ctx) {
   return {
     unmount() {
       destroyed = true;
-      // Images left behind (the router's Discard, on Back or a link) go, and the next document starts
-      // afresh, as after the app's confirmDiscard (clearAll): its first photo starts on Enhanced.
-      if (!discarded && (model.items.length > 0 || model.pending > 0)) model.newScan();
       life.abort();
       model.dispose();
       sheet?.close();

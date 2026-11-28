@@ -393,8 +393,9 @@ Each exports `mount(ctx)`. Also exported, for reuse:
 - `home.js`: "/" goes to the search field only while no control has the focus (the page, or the
   heading the router focused): a "/" typed or spoken on a card stays there (WCAG 2.1.4). Back from
   a tool opened from a card focuses that card (`restoreFocus`). Take photo opens the camera (a picker on computers) and goes to
-  `navigate('/tool/scan', { files, params: { camera: '1' } })`, the app's photo flow (Discard
-  photo, Take another, Done); Upload images goes to `navigate('/tool/scan', { files })`. The
+  `navigate('/tool/scan', { files, params: { camera: '1' } })`, the scan's Photos screen (Take
+  another, Done), then Crop page for each photo and one Filters screen; Upload images goes to
+  `navigate('/tool/scan', { files })`, which starts at Crop page (docs/api/images-ui.md). The
   picker opens within the tap (files.js is imported up front: mobile Safari opens no picker after
   an await).
 - `choose.js`: opens the shared PDFs with a `signal` its unmount aborts, so leaving takes a password

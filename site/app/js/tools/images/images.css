@@ -610,9 +610,11 @@
   white-space: normal;
 }
 
+/* Side by side, a label breaking between its words if it must (in a 320 px column, say); stacked,
+   the main one last, once a word would break. */
 .images-step-button-row.has-two .images-step-button {
   flex: 1 1 calc(50% - 6px);
-  min-width: max-content;
+  min-width: min-content;
 }
 
 .images-step-button .ui-btn-label {
@@ -622,6 +624,40 @@
 /* Next's arrow comes after its label. */
 .images-step-button.has-icon-after > .icon {
   margin-inline: 0 -8px;
+}
+
+/* A very short window (a window zoomed to 400 %: under 421 px tall) with the controls under the
+   picture: the step scrolls whole rather than squeeze the picture to nothing and cut off its
+   buttons. The picture keeps its 140 px, the controls show whole after it, and the buttons stay in
+   sight at the step's foot (the panel's parts laid out in the step itself, so they can stick). */
+@media (max-height: 420px) {
+  .images-step:not(.is-wide) {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scroll-padding-block-end: 72px;
+  }
+
+  .images-step:not(.is-wide) > *,
+  .images-step:not(.is-wide) > .images-scan-main > *,
+  .images-step:not(.is-wide) .images-step-controls {
+    flex: none;
+  }
+
+  .images-step:not(.is-wide) > .images-step-panel {
+    display: contents;
+  }
+
+  .images-step:not(.is-wide) .images-step-controls {
+    overflow: visible;
+  }
+
+  .images-step:not(.is-wide) .images-step-buttons {
+    position: sticky;
+    inset-block-end: 0;
+    z-index: 1;
+    padding-block-end: calc(var(--space-2) + env(safe-area-inset-bottom, 0px));
+    background: var(--surface);
+  }
 }
 
 .images-crop-hint {
@@ -838,31 +874,56 @@
   font-weight: 700;
 }
 
-/* Brightness and contrast: 0 in the middle, filled from the middle to the thumb either way. */
+/* Brightness and contrast: 0 in the middle, filled from the middle to the thumb either way. The name
+   and value over the slider and its reset button; on a scan's Filters, while there is room
+   (fitSliders: the slider keeps at least 160 px), the name, slider, value and reset on one line. */
 .images-adjust {
+  display: grid;
+  grid-template-areas:
+    "label value ."
+    "input input reset";
+  grid-template-columns: minmax(0, 1fr) auto var(--touch);
+  align-items: center;
+  column-gap: var(--space-1);
+  padding-top: var(--space-1);
   padding-inline: var(--space-4) var(--space-1);
 }
 
-.images-adjust-head {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--space-3);
-  padding-top: var(--space-1);
-  padding-inline-end: 52px;
+.images-adjust-label,
+.images-adjust-value {
   font-size: 0.875rem;
   font-weight: 500;
   line-height: 1.25rem;
 }
 
+.images-adjust-label {
+  grid-area: label;
+  min-width: 0;
+}
+
 .images-adjust-value {
+  grid-area: value;
   color: var(--on-surface-variant);
   font-variant-numeric: tabular-nums;
 }
 
-.images-adjust-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
+.images-adjust-input {
+  grid-area: input;
+}
+
+.images-adjust-reset {
+  grid-area: reset;
+}
+
+.images-adjust.is-inline {
+  grid-template-areas: "label input value reset";
+  grid-template-columns: var(--label-width, 96px) minmax(0, 1fr) calc(var(--value-width, 32px) + var(--space-2)) var(--touch);
+  column-gap: 0;
+  padding-top: 0;
+}
+
+.images-adjust.is-inline .images-adjust-value {
+  text-align: end;
 }
 
 .images-adjust-input {
@@ -972,6 +1033,414 @@
   font-size: 1rem;
   line-height: 1.5rem;
   text-align: center;
+}
+
+/* ---- A scan's Photos (ScanPhotosScreen.kt) ----
+   The photos in a grid, three to a row on a phone (at least 96 px each, 12 px apart, 16 px from the
+   edges), the hint as its first row; Take another and Done at the foot. On a wide screen the grid
+   fills the start side and a 320 px column holds the hint and the buttons. */
+
+.images-photos {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.images-photos.is-wide {
+  flex-direction: row;
+}
+
+.images-photos-area {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.images-photos-hint {
+  margin: 0;
+  padding: var(--space-2) var(--space-4);
+  color: var(--on-surface-variant);
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  text-align: center;
+  /* In lines of about the same length, rather than a last word alone. */
+  text-wrap: balance;
+}
+
+.images-photos.is-wide .images-photos-hint {
+  text-align: start;
+}
+
+.images-photos.is-wide .images-photos-hint-item {
+  display: none;
+}
+
+.images-photos-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: var(--space-3);
+  padding: 0 var(--space-4) var(--space-4);
+}
+
+.images-photos.is-wide .images-photos-grid {
+  padding-top: var(--space-4);
+}
+
+/* A computer's screen is far larger than a phone's held sideways: the photos are as large as the
+   editor's pages there. */
+@media (min-width: 840px) and (min-height: 600px) {
+  .images-photos-grid {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  }
+}
+
+.images-photos-grid[hidden],
+.images-photos-empty[hidden] {
+  display: none;
+}
+
+/* With no photo: a dashed page outline with a camera, in the room left. */
+.images-photos-empty {
+  display: grid;
+  flex: 1;
+  place-items: center;
+  padding: var(--space-4);
+}
+
+.images-photos-outline {
+  display: grid;
+  place-items: center;
+  width: 88px;
+  height: 112px;
+  border: 1.5px dashed var(--outline);
+  border-radius: var(--radius-m);
+  color: var(--primary);
+}
+
+/* A photo's tile: the photo as taken on white paper, its number at the top start, ✕ at the top end. */
+.images-photo {
+  position: relative;
+  aspect-ratio: 3 / 4;
+  border: 1px solid var(--outline-variant);
+  border-radius: var(--radius-m);
+  background: var(--surface-low);
+}
+
+.images-photo-picture {
+  position: absolute;
+  inset: var(--space-2);
+  display: grid;
+  place-items: center;
+  container-type: size;
+}
+
+.images-photo-paper {
+  --ratio: 0.75;
+  display: grid;
+  place-items: center;
+  width: min(100cqw, calc(100cqh * var(--ratio)));
+  aspect-ratio: var(--ratio);
+  overflow: hidden;
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--outline-variant);
+}
+
+.images-photo-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  opacity: 0;
+  transition: opacity var(--ui-short);
+}
+
+.images-photo-paper.has-picture .images-photo-canvas {
+  opacity: 1;
+}
+
+.images-photo-number,
+.images-scan-page-number {
+  position: absolute;
+  top: var(--space-1);
+  inset-inline-start: var(--space-1);
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  background: var(--primary);
+  color: var(--on-primary);
+  font-size: 0.75rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  line-height: 1rem;
+  text-align: center;
+  pointer-events: none;
+}
+
+/* The ring of a photo still being added, on the paper. */
+.images-photo-ring {
+  border-color: color-mix(in srgb, var(--primary) 20%, var(--paper));
+  border-top-color: var(--primary);
+}
+
+/* ✕, on a disc of the screen's surface over the photo: 48 px to tap. */
+.images-photo-remove {
+  position: absolute;
+  top: 0;
+  inset-inline-end: 0;
+  color: var(--on-surface);
+}
+
+.images-photo-remove::after {
+  inset: 6px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.images-photos-side {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  padding-bottom: calc(var(--space-2) + env(safe-area-inset-bottom, 0px));
+}
+
+.images-photos.is-wide .images-photos-side {
+  width: 320px;
+  padding-top: var(--space-2);
+  padding-inline-end: env(safe-area-inset-right, 0px);
+}
+
+.images-photos.is-wide .images-photos-side > .images-photos-hint {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* ---- A scan's Filters (ScanLooksScreen.kt) ----
+   The page large; under it the scan's pages, the looks, the sliders and the switch (at most 60 % of
+   the height together with Save, only the controls scrolling past that); on a wide screen a 320 px
+   column beside the page, with the pages under it. */
+
+.images-scan-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.images-scan-main > .images-step-area {
+  flex: 1;
+}
+
+.images-scan-looks-step > .images-step-panel {
+  max-height: 60%;
+}
+
+.images-scan-looks-step.is-wide > .images-step-panel {
+  max-height: none;
+  padding-top: var(--space-2);
+}
+
+.images-scan-looks-step.is-wide .images-scan-main {
+  padding-bottom: calc(var(--space-2) + env(safe-area-inset-bottom, 0px));
+}
+
+/* Beside the column the page gives way before the row under it, as in the app (in a short window,
+   the row whole under a smaller page). */
+.images-scan-looks-step.is-wide .images-scan-main > .images-step-area {
+  min-height: 0;
+}
+
+.images-scan-controls {
+  padding-top: var(--space-1);
+}
+
+/* While the page shown is still being cropped. */
+.images-scan-cropping {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  padding: var(--space-4);
+}
+
+.images-scan-cropping[hidden],
+.images-filter-canvas[hidden] {
+  display: none;
+}
+
+.images-scan-cropping-text {
+  margin: 0;
+  color: var(--on-surface-variant);
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  text-align: center;
+}
+
+/* The scan's pages: a row that scrolls sideways; each tile 64 px tall (more with larger text, up to
+   half as tall again), as wide as its page (0.7 to 1.5 times its height). */
+.images-scan-pages {
+  display: flex;
+  flex: none;
+  gap: var(--space-2);
+  overflow-x: auto;
+  padding: var(--space-1) var(--space-4);
+  scrollbar-width: thin;
+}
+
+.images-scan-pages[hidden],
+.images-scan-same[hidden] {
+  display: none;
+}
+
+.images-scan-page {
+  --aspect: 0.707;
+  --tile: clamp(64px, 4rem, 96px);
+  position: relative;
+  display: grid;
+  flex: none;
+  place-items: center;
+  /* At least 48 px wide, to tap. */
+  width: clamp(max(var(--touch), calc(var(--tile) * 0.7)), calc(12px + (var(--tile) - 12px) * var(--aspect)), calc(var(--tile) * 1.5));
+  height: var(--tile);
+  margin: 0;
+  padding: 6px;
+  border: 1px solid var(--outline-variant);
+  border-radius: var(--radius-m);
+  background: var(--surface-highest);
+  cursor: pointer;
+  transition: background-color 120ms linear, border-color 120ms linear;
+}
+
+.images-scan-page.is-selected {
+  padding: 5px;
+  border: 2px solid var(--primary);
+  background: var(--primary-container);
+}
+
+.images-scan-page:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) {
+  .images-scan-page:hover {
+    border-color: var(--outline);
+  }
+}
+
+.images-scan-page-paper {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--outline-variant);
+}
+
+.images-scan-page-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  object-fit: contain;
+}
+
+.images-scan-page-number {
+  top: 3px;
+  inset-inline-start: 3px;
+  min-width: 18px;
+  padding: 1px 6px;
+}
+
+.images-scan-page-ring {
+  position: absolute;
+}
+
+.images-spinner--tiny {
+  width: 20px;
+  height: 20px;
+  border-width: 2px;
+}
+
+.images-scan-same {
+  padding-inline: var(--space-4) var(--space-3);
+}
+
+/* ---- Contrast themes (Windows' forced colours) ----
+   Fills and shadows are dropped there: the tiles and the outline keep borders in the system's
+   colours, what is chosen shows in its highlight colour, and the rings turn. */
+
+@media (forced-colors: active) {
+  .images-photo,
+  .images-scan-page,
+  .images-photo-paper,
+  .images-scan-page-paper,
+  .images-photo-number,
+  .images-scan-page-number {
+    border: 1px solid CanvasText;
+  }
+
+  .images-photos-outline {
+    border-color: CanvasText;
+  }
+
+  .images-scan-page.is-selected {
+    padding: 4px;
+    border: 3px solid Highlight;
+  }
+
+  .images-look.is-selected .images-look-sample {
+    border-color: Highlight;
+  }
+
+  .images-scan-page:focus-visible,
+  .images-look:focus-visible {
+    outline: 2px solid CanvasText;
+    outline-offset: 2px;
+  }
+
+  .images-spinner {
+    forced-color-adjust: none;
+    border-color: GrayText;
+    border-top-color: Highlight;
+  }
+
+  /* The sliders' track (a gradient) and thumb would go: drawn in the system's colours. */
+  .images-adjust-input {
+    forced-color-adjust: none;
+  }
+
+  .images-adjust-input::-webkit-slider-runnable-track {
+    border: 1px solid CanvasText;
+    background: Canvas;
+  }
+
+  .images-adjust-input::-moz-range-track {
+    border: 1px solid CanvasText;
+    background: Canvas;
+  }
+
+  .images-adjust-input::-webkit-slider-thumb {
+    background: Highlight;
+  }
+
+  .images-adjust-input::-moz-range-thumb {
+    background: Highlight;
+  }
+
+  .images-adjust-input:focus-visible {
+    outline: 2px solid CanvasText;
+    outline-offset: 2px;
+  }
 }
 
 /* ---- The Create PDF sheet ---- */

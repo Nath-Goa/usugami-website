@@ -21,7 +21,7 @@ const dir = dirname(fileURLToPath(import.meta.url));
 const SECONDS = {
   'batch-ui.test.mjs': 150, 'compress.test.mjs': 260, 'docx.test.mjs': 55, 'edit.test.mjs': 105,
   'epub.test.mjs': 90, 'flatten.test.mjs': 27, 'harness.test.mjs': 85, 'images-detect.test.mjs': 90,
-  'images-looks.test.mjs': 42, 'images-ui.test.mjs': 225, 'kit.test.mjs': 215, 'mark.test.mjs': 115,
+  'images-looks.test.mjs': 42, 'images-ui.test.mjs': 180, 'kit.test.mjs': 215, 'mark.test.mjs': 115,
   'ocr.test.mjs': 125, 'office-core.test.mjs': 68, 'office-ui.test.mjs': 135, 'organize-ui-a.test.mjs': 105,
   'organize-ui-b.test.mjs': 180, 'organize.test.mjs': 15, 'pptx.test.mjs': 33, 'redact-ui.test.mjs': 70,
   'redact.test.mjs': 65, 'shell.test.mjs': 67, 'sign.test.mjs': 62, 'site.test.mjs': 80,

@@ -37,8 +37,8 @@ Values are the app's enum names in lower case. Labels are strings.xml keys (Engl
 | Compression | `recommended` compression_recommended "Recommended" (150 dpi, JPEG 75), `less` compression_less "Less" (200 dpi, 85), `extreme` compression_extreme "Extreme" (100 dpi, 55) |
 | One PDF | `merge: true` (default) merge_on_summary, `false` merge_off_summary: one PDF per image, named after it |
 
-The app's defaults: A4, Portrait, No margin, Recommended, one PDF. A new scan starts on Enhanced
-(the screen's choice, not the engine's).
+The app's defaults: A4, Portrait, No margin, Recommended, one PDF. Every page of a scan starts on
+Enhanced on the scan's Filters screen (the model's choice, `SCAN_LOOK`, not the engine's).
 
 ## `buildImagesPdf(pages, settings?, hooks?)` — build-pdf.js
 

@@ -1,8 +1,10 @@
-// Scan document and Images to PDF (js/tools/images/): the editor, Crop page, Filters, the Create PDF
-// sheet and the result, driven as a person would: by touch at phone size (360 px) and by mouse,
-// keyboard, drag-and-drop and paste at desktop size (1366 px), in Chromium, with a shorter run in
-// Firefox and WebKit. The PDFs made are read back: page counts and sizes, how each image is stored,
-// what the pages show (rendered and sampled), names, and the text OCR added (pdf.js).
+// Scan document and Images to PDF (js/tools/images/): the editor, a scan's Photos, Crop page and
+// Filters (the app's 4.0.0 scan, ported from its ScanFlowDeviceTest, ScanPhotosAndFiltersDeviceTest,
+// ScanDeviceTest and CropDeviceTest where a browser can do what they do), a page cropped again, the
+// Create PDF sheet and the result, driven as a person would: by touch at phone size (360 px) and by
+// mouse, keyboard, drag-and-drop and paste at desktop size (1366 px), in Chromium, with a shorter run
+// in Firefox and WebKit. The PDFs made are read back: page counts and sizes, how each image is
+// stored, what the pages show (rendered and sampled), names, and the text OCR added (pdf.js).
 //
 //   node tests/images-ui.test.mjs            everything
 //   node tests/images-ui.test.mjs --quick    Chromium only, no screenshots of every screen in dark
@@ -220,6 +222,85 @@ const handleBox = async (page, i) => {
   const b = await page.locator('.images-crop-handle').nth(i).boundingBox();
   return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
 };
+
+// A scan's screens: its Photos, Crop page for each image, and its one Filters screen.
+
+/** Waits for the scan's Photos screen to show `n` photos, none still being added. */
+async function photosReady(page, n) {
+  await page.waitForFunction((n) => !!document.querySelector('.images-scan-photos') &&
+    document.querySelectorAll('.images-photo:not(.is-coming)').length === n &&
+    !document.querySelector('.images-photo.is-coming') &&
+    [...document.querySelectorAll('.images-photo-paper')].every((p) => p.classList.contains('has-picture')), n, { timeout: 30000 });
+  await page.waitForTimeout(250);
+}
+
+/** The photos' names for a screen reader, and their Remove buttons', in order. */
+const photoLabels = (page) => page.$$eval('.images-photo', (els) => els.map((e) => [
+  e.querySelector('[role="img"]')?.getAttribute('aria-label'), e.querySelector('.images-photo-remove')?.getAttribute('aria-label')]));
+
+/** Waits for the scan's Filters with the page shown large and its looks drawn; returns the subtitle. */
+async function looksReady(page) {
+  await page.waitForSelector('.images-scan-looks', { timeout: 30000 });
+  await page.waitForFunction(() => {
+    const area = document.querySelector('.images-scan-looks .images-filter-area');
+    const canvas = document.querySelector('.images-scan-looks .images-filter-canvas');
+    const samples = [...document.querySelectorAll('.images-scan-looks .images-look-canvas')];
+    const tiles = [...document.querySelectorAll('.images-scan-page')];
+    return area?.getAttribute('aria-busy') === 'false' && canvas.width > 0 && samples.every((c) => c.width > 0) &&
+      tiles.every((t) => !t.classList.contains('is-cropping') && t.querySelector('canvas').width > 0);
+  }, null, { timeout: 60000 });
+  await page.waitForTimeout(250);
+  return page.$eval('.images-scan-looks .ui-topbar-subtitle', (e) => (e.hidden ? null : e.textContent));
+}
+
+/** The scan's pages in Filters' row: each one's name, `*` after the one shown. */
+const pageTiles = (page) => page.$$eval('.images-scan-page', (els) => els.map((e) => e.getAttribute('aria-label') + (e.getAttribute('aria-checked') === 'true' ? '*' : '')));
+
+/** Shows the scan's page `n` large on Filters, and waits for it. */
+async function showPage(page, n) {
+  await page.locator('.images-scan-page').nth(n - 1).click();
+  await looksReady(page);
+}
+
+/** Whether the look chosen shows whole in its row (scrolled into view along it). */
+const lookInView = (page) => page.evaluate(() => {
+  const chosen = document.querySelector('.images-look[aria-checked="true"]').getBoundingClientRect();
+  const row = document.querySelector('.images-looks').getBoundingClientRect();
+  return chosen.left >= row.left - 1 && chosen.right <= row.right + 1;
+});
+
+/** The slide a screen came in with (images-in-forward or -back), and whether it moves: a name and a time. */
+const slideOf = (page, selector) => page.$eval(selector, (e) => {
+  const s = getComputedStyle(e);
+  return { slide: [...e.classList].find((c) => c.startsWith('images-in-')) ?? null, moves: s.animationName !== 'none' && parseFloat(s.animationDuration) > 0 };
+});
+
+/** Whether `selector` shows in the window, and is what a tap at its middle reaches (nothing over it). */
+const inSight = (page, selector) => page.$eval(selector, (e) => {
+  const r = e.getBoundingClientRect();
+  const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+  return r.top >= 0 && r.left >= 0 && r.bottom <= innerHeight + 0.5 && r.right <= innerWidth + 0.5 && !!hit && (e === hit || e.contains(hit));
+});
+
+/** The buttons in the top bar, by name. */
+const barButtons = (page) => page.$$eval('.ui-topbar button', (els) => els.map((e) => e.getAttribute('aria-label')));
+
+/** The Same filter for all pages switch. */
+const sameSwitch = (page) => page.locator('.images-scan-same .ui-switch');
+
+/** The mean brightness (0–255) of the scan's page `n` in Filters' row, as drawn. */
+const tileMean = (page, n) => page.$eval(`.images-scan-page:nth-child(${n}) canvas`, (c) => {
+  const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+  let sum = 0;
+  for (let k = 0; k < d.length; k += 4) sum += d[k] + d[k + 1] + d[k + 2];
+  return sum / (d.length / 4) / 3;
+});
+
+/** Opens the picker of `selector` and waits until it is open: the chooser, to answer later. */
+async function openChooser(page, selector) {
+  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.locator(selector).first().click()]);
+  return chooser;
+}
 
 async function touch(page) {
   const client = await page.context().newCDPSession(page);
@@ -462,16 +543,18 @@ await test('editor on a phone: add, sort, reorder by touch and keyboard, rotate,
 }, { viewport: PHONE }));
 
 // ---------------------------------------------------------------------------------------------
-// Scan document from Home at phone size: three images one after another, a corner dragged by
-// touch, looks, sliders, Apply to all pages, then a merged PDF read back.
+// Scan document from Home at phone size: three images picked, each cropped in turn with Next (a
+// corner dragged by touch on the first), then one Filters screen for all of them: every page on
+// Enhanced at first, a page given its own look, Same filter for all pages; Save, then a merged PDF
+// read back.
 
-await test('scan on a phone: Upload images, crop each in turn, looks, apply to all, one PDF', () => withPage(async (page, url) => {
+await test('scan on a phone: Upload images, Next on each image, one Filters screen for all, Save, one PDF', () => withPage(async (page, url) => {
   await openApp(page, url, '#/');
   await choose(page, '.scan-card button:has-text("Upload images")', [asPng('Receipt.png', photo), asPng('Letter.png', photo), asPng('Note.png', red)]);
   eq(await cropReady(page), 'Page 1 of 3', 'first image of the scan');
   eq(await page.$eval('.images-crop h1', (e) => e.textContent), 'Crop page', 'Crop page title');
   eq(await hintText(page), 'Usugami found the page. Drag the corners or sides to adjust it.', 'the page was found');
-  eq(await page.$eval('.images-crop .ui-topbar-nav', (e) => e.getAttribute('aria-label')), 'Stop cropping', 'close button of a scan');
+  eq(await barButtons(page), ['Back', 'Stop cropping', 'Rotate left', 'Rotate right'], 'the bar of an image picked: Back, Stop cropping, Rotate left and right');
   await shots2(page, 'phone-crop');
   await noSidewaysScroll(page, 'crop');
 
@@ -499,7 +582,6 @@ await test('scan on a phone: Upload images, crop each in turn, looks, apply to a
   await page.locator('[aria-label="Move right"]').click();
   const stepped = await handleBox(page, 0);
   ok(stepped.x > moved.x && Math.abs(stepped.y - moved.y) < 0.5, 'Move right moved the corner right');
-  // The bottom side, by its middle handle.
   const bottom = await handleBox(page, 6);
   await fingers.drag(bottom, { x: bottom.x, y: bottom.y - 30 }, { steps: 8 });
   await page.waitForTimeout(150);
@@ -515,7 +597,6 @@ await test('scan on a phone: Upload images, crop each in turn, looks, apply to a
   await page.waitForTimeout(150);
   eq(await hintText(page), "The corners don't make a page: put each one on a corner of the page.", 'not a page');
   ok(await stepButton(page, 'Next').isDisabled(), 'Next off while the corners make no page');
-  // Reset puts them back on the page found.
   await page.locator('.images-crop-resets .ui-btn:has-text("Reset")').click();
   eq(await hintText(page), 'Usugami found the page. Drag the corners or sides to adjust it.', 'Reset puts the corners on the page');
   ok(!(await stepButton(page, 'Next').isDisabled()), 'Next on again');
@@ -525,30 +606,67 @@ await test('scan on a phone: Upload images, crop each in turn, looks, apply to a
   ok(whole.x < found.x - 20 && whole.y < found.y - 20, 'Whole image puts the corners on the picture corners');
   await page.locator('.images-crop-resets .ui-btn:has-text("Reset")').click();
   await fingers.detach();
-
-  // Rotate right turns the picture and the corners; left turns it back.
   await page.locator('.images-crop .ui-topbar [aria-label="Rotate right"]').click();
   await page.waitForTimeout(100);
   await page.locator('.images-crop .ui-topbar [aria-label="Rotate left"]').click();
 
+  // Next on each image, the last too: no Filters step between them, no Done.
+  eq(await page.$$eval('.images-step-buttons .ui-btn', (els) => els.map((e) => e.textContent.trim())), ['Next'], 'Next alone on an image of a scan');
   await stepButton(page, 'Next').click();
-  await filtersReady(page);
-  eq(await page.$eval('.images-crop h1', (e) => e.textContent), 'Filters', 'Filters title');
-  eq(await chosenLook(page), 'enhanced', 'a new scan starts on Enhanced');
-  ok(await page.$eval('.images-all-pages', (e) => !e.hidden), 'Apply to all pages offered');
-  await shots2(page, 'phone-filters');
-  await noSidewaysScroll(page, 'filters');
-
-  // Back on Filters goes back to Crop page with the corners kept (the browser's Back too).
-  await page.goBack();
-  await cropReady(page);
-  eq(await page.$eval('.images-crop h1', (e) => e.textContent), 'Crop page', 'Back went to Crop page');
+  eq(await cropReady(page), 'Page 2 of 3', 'second image');
   await stepButton(page, 'Next').click();
-  await filtersReady(page);
+  eq(await cropReady(page), 'Page 3 of 3', 'third image');
+  eq(await hintText(page), 'Drag the corners or sides onto the edges of the page.', 'no page found on a plain picture');
+  eq(await page.$$eval('.images-step-buttons .ui-btn', (els) => els.map((e) => e.textContent.trim())), ['Next'], 'Next on the last image too');
+  await page.locator('.images-crop-resets .ui-btn:has-text("Whole image")').click();
+  await stepButton(page, 'Next').click();
 
-  // Grayscale, brighter by the keyboard; contrast held at 0 near the middle when dragged.
-  await page.locator('.images-look[data-look="grayscale"]').click();
-  eq(await chosenLook(page), 'grayscale', 'Grayscale chosen');
+  // One Filters screen for the scan: the first page shown, the pages in a row, every page on Enhanced.
+  eq(await looksReady(page), 'Page 1 of 3', 'Filters says which page shows');
+  eq(await page.$eval('.images-scan-looks h1', (e) => e.textContent), 'Filters', 'Filters title');
+  eq(await pageTiles(page), ['Page 1*', 'Page 2', 'Page 3'], 'the pages in a row, the first shown');
+  eq(await page.$$eval('.images-scan-looks .images-look-title', (els) => els.length), 0, 'no Look heading over the looks');
+  eq(await page.$$eval('.images-scan-looks .images-all-pages', (els) => els.length), 0, 'no Apply to all pages on a scan');
+  eq(await chosenLook(page), 'enhanced', 'page 1 starts on Enhanced');
+  eq(await sameSwitch(page).getAttribute('aria-checked'), 'false', 'Same filter for all pages starts off');
+  eq(await page.$$eval('.images-step-buttons .ui-btn', (els) => els.map((e) => e.textContent.trim())), ['Save'], 'Save at the foot');
+  ok(await page.$eval('.images-scan-same', (e) => e.textContent.includes('Same filter for all pages')), 'the switch is named');
+  await shots2(page, 'phone-scan-filters');
+  await noSidewaysScroll(page, 'Filters');
+  // The row, the controls and Save take at most 60 % of the height, Save in sight.
+  const panel = await page.$eval('.images-scan-panel', (e) => e.getBoundingClientRect().height / window.innerHeight);
+  ok(panel <= 0.61, `the controls take at most 60 % of the height (${panel.toFixed(2)})`);
+  const save = await stepButton(page, 'Save').boundingBox();
+  ok(save.y + save.height <= PHONE.height, 'Save in sight');
+  ok(await page.$eval('.images-adjust', (e) => e.classList.contains('is-inline')), 'at 360 px a slider shares its line with its name');
+  for (const n of [2, 3]) {
+    await showPage(page, n);
+    eq(await chosenLook(page), 'enhanced', `page ${n} starts on Enhanced`);
+  }
+
+  // A page's own look: page 2 in Grayscale, the others as they were.
+  await showPage(page, 2);
+  eq(await pageTiles(page), ['Page 1', 'Page 2*', 'Page 3'], 'page 2 chosen');
+  eq(await page.$eval('.images-scan-looks .ui-topbar-subtitle', (e) => e.textContent), 'Page 2 of 3', 'the place follows the page shown');
+  // By the keyboard: the arrow keys choose, the focus goes along, and the look chosen comes whole
+  // into view (at 360 px Grayscale is past the row's end).
+  await page.locator('.images-look[data-look="enhanced"]').focus();
+  eq(await page.evaluate(() => {
+    const g = document.querySelector('.images-look[data-look="grayscale"]').getBoundingClientRect();
+    return g.right > document.querySelector('.images-looks').getBoundingClientRect().right;
+  }), true, 'Grayscale past the row\'s end at first');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowRight');
+  await looksReady(page);
+  eq(await chosenLook(page), 'grayscale', 'Grayscale for page 2');
+  eq(await page.evaluate(() => document.activeElement?.dataset.look), 'grayscale', 'the focus with the look chosen');
+  ok(await lookInView(page), 'the look chosen by the keyboard brought whole into view');
+  await showPage(page, 1);
+  eq(await chosenLook(page), 'enhanced', 'page 1 kept Enhanced');
+  await showPage(page, 3);
+  eq(await chosenLook(page), 'enhanced', 'page 3 kept Enhanced');
+
+  // Brightness by the keyboard, and Reset; contrast held at 0 near the middle when dragged.
   const brightness = page.locator('.images-adjust-input').nth(0);
   await brightness.focus();
   for (let i = 0; i < 12; i++) await page.keyboard.press('ArrowRight');
@@ -557,46 +675,68 @@ await test('scan on a phone: Upload images, crop each in turn, looks, apply to a
   const cbox = await contrast.boundingBox();
   await page.mouse.click(cbox.x + cbox.width / 2 + 1, cbox.y + cbox.height / 2);
   eq(await contrast.getAttribute('aria-valuetext'), '0', 'contrast holds at 0 near the middle');
-  await page.mouse.click(cbox.x + cbox.width * 0.25, cbox.y + cbox.height / 2);
-  const c = Number(await contrast.inputValue());
-  ok(c < -30, `contrast lowered (${c})`);
-  await page.locator('[aria-label="Reset contrast"]').click();
+  await showPage(page, 1);
+  eq(await brightness.getAttribute('aria-valuetext'), '0', 'page 1 has its own brightness');
+  await showPage(page, 3);
+  eq(await brightness.getAttribute('aria-valuetext'), '+12', 'page 3 kept its brightness');
+  await page.locator('[aria-label="Reset brightness"]').click();
+  eq(await brightness.getAttribute('aria-valuetext'), '0', 'Reset brightness');
+  // Contrast lowered; Reset contrast by the keyboard puts it back, and the focus, as the button
+  // turns off, goes to its slider rather than out of the screen.
+  const cbox2 = await contrast.boundingBox();
+  await page.mouse.click(cbox2.x + cbox2.width * 0.25, cbox2.y + cbox2.height / 2);
+  const lowered = Number(await contrast.inputValue());
+  ok(lowered < -30, `contrast lowered (${lowered})`);
+  const resetContrast = page.locator('[aria-label="Reset contrast"]');
+  ok(!(await resetContrast.isDisabled()), 'Reset contrast on');
+  await resetContrast.focus();
+  await page.keyboard.press('Enter');
   eq(await contrast.getAttribute('aria-valuetext'), '0', 'Reset contrast');
-  await filtersReady(page);
-  eq(await stepButton(page, 'Next').count(), 1, 'Next on an image before the last');
-  await stepButton(page, 'Next').click();
+  ok(await resetContrast.isDisabled(), 'Reset contrast off at 0');
+  eq(await page.evaluate(() => [document.activeElement?.classList.contains('images-adjust-input'), document.activeElement?.labels?.[0]?.textContent]), [true, 'Contrast'], 'the focus on the contrast slider, not lost');
+  await looksReady(page);
 
-  // The second image starts on the look chosen last.
-  eq(await cropReady(page), 'Page 2 of 3', 'second image');
-  await stepButton(page, 'Next').click();
-  await filtersReady(page);
-  eq(await chosenLook(page), 'grayscale', 'the next image starts on the look chosen last');
-  eq(await page.$eval('.images-adjust-input', (e) => e.getAttribute('aria-valuetext')), '0', 'its own brightness');
+  // Same filter for all pages, turned on with page 2 shown: every page takes page 2's look at once;
+  // a look chosen then goes to every page; turned off, nothing changes, and a look is the page's own.
+  await showPage(page, 2);
+  await sameSwitch(page).click();
+  eq(await sameSwitch(page).getAttribute('aria-checked'), 'true', 'the switch on');
+  for (const n of [1, 3]) {
+    await showPage(page, n);
+    eq(await chosenLook(page), 'grayscale', `page ${n} took page 2's look`);
+  }
   await page.locator('.images-look[data-look="black_white"]').click();
-  await page.locator('.images-all-pages').click();
-  ok(await page.$eval('.images-all-pages-box', (e) => e.checked), 'Apply to all pages ticked');
-  await stepButton(page, 'Next').click();
+  await looksReady(page);
+  await showPage(page, 1);
+  eq(await chosenLook(page), 'black_white', 'Black & white reached page 1');
+  await sameSwitch(page).click();
+  eq(await sameSwitch(page).getAttribute('aria-checked'), 'false', 'the switch off');
+  await showPage(page, 2);
+  eq(await chosenLook(page), 'black_white', 'turning it off changed nothing');
+  await showPage(page, 3);
+  await page.locator('.images-look[data-look="original"]').click();
+  await looksReady(page);
+  await showPage(page, 2);
+  eq(await chosenLook(page), 'black_white', 'with the switch off, a look is the page\'s own');
 
-  // The last image: Done.
-  eq(await cropReady(page), 'Page 3 of 3', 'third image');
-  eq(await hintText(page), 'Drag the corners or sides onto the edges of the page.', 'no page found on a plain picture');
-  await page.locator('.images-crop-resets .ui-btn:has-text("Whole image")').click();
+  // Back goes to the last image's crop screen; Next from there comes back to the looks chosen.
+  await page.goBack();
+  eq(await cropReady(page), 'Page 3 of 3', 'Back on Filters goes to the last image');
   await stepButton(page, 'Next').click();
-  await filtersReady(page);
-  eq(await chosenLook(page), 'black_white', 'Black & white from Apply to all pages');
-  eq(await stepButton(page, 'Done').count(), 1, 'Done on the last image');
-  await stepButton(page, 'Done').click();
+  eq(await looksReady(page), 'Page 2 of 3', 'back on Filters, page 2 still shown');
+  eq(await chosenLook(page), 'black_white', 'its look kept');
 
+  // Save: the scan's pages in Images to PDF, in order, each in its look.
+  await stepButton(page, 'Save').click();
   await page.waitForSelector('.images-editor');
   await settled(page, 3);
   eq(await names(page), ['Receipt.png', 'Letter.png', 'Note.png'], 'the scan\'s pages');
-  eq(await handleLabels(page), ['Page 1, Black & white', 'Page 2, Black & white', 'Page 3, Black & white'], 'Apply to all pages reached every page');
+  eq(await handleLabels(page), ['Page 1, Black & white', 'Page 2, Black & white', 'Page 3'], 'each page in its look');
   await previewsDrawn(page);
   await shots2(page, 'phone-editor-scanned');
-  const steps = await page.evaluate(() => history.state?.stepDepth ?? 0);
-  eq(steps, 0, 'no step left in the history');
+  eq(await page.evaluate(() => history.state?.stepDepth ?? 0), 0, 'no step left in the history');
 
-  // One PDF, named, at Less: three A4 pages stored a bit a pixel.
+  // One PDF, named, at Less: three A4 pages, the black and white ones a bit a pixel.
   await openSheet(page);
   eq(await page.$eval('.images-sheet-summary', (e) => e.textContent), '3 images · A4 · Portrait · No margin', 'sheet summary');
   await shots2(page, 'phone-sheet');
@@ -612,12 +752,12 @@ await test('scan on a phone: Upload images, crop each in turn, looks, apply to a
   eq(s.pages.length, 3, 'three pages');
   eq(s.title, 'Scan test', 'title');
   eq(s.producer, 'Usugami', 'producer');
-  for (const p of s.pages) {
-    eq([p.width, p.height], [595.28, 841.89], 'A4 portrait');
+  for (const p of s.pages) eq([p.width, p.height], [595.28, 841.89], 'A4 portrait');
+  for (const p of s.pages.slice(0, 2)) {
     eq([p.bits, p.colorSpace], [1, '/DeviceGray'], 'black and white a bit a pixel');
     ok(['/CCITTFaxDecode', '/FlateDecode'].includes(p.filter), `CCITT G4 or Flate (${p.filter})`);
   }
-  // The cropped page fills its page: the paper is white, the line across it black.
+  // The cropped page fills its page: the paper is white.
   const r = await inspect(page, file.bytes, { samples: [[0.5, 0.25], [0.5, 0.75]] });
   ok(r.colors.every((col) => near(col, [255, 255, 255], 20)), `white paper (${JSON.stringify(r.colors)})`);
 
@@ -629,23 +769,87 @@ await test('scan on a phone: Upload images, crop each in turn, looks, apply to a
   eq([saved['images.compression'], saved['images.merge']], ['less', true], 'compression and merge remembered');
 }, { viewport: PHONE }));
 
-await test('scan stopped part way keeps the images; a scan of nothing readable goes back Home', () => withPage(async (page, url) => {
+// ---------------------------------------------------------------------------------------------
+// Images picked for a scan: Stop cropping, and the back arrow on the first image, go on to Filters
+// with the images not cropped yet whole; a scan of nothing readable goes back Home.
+
+await test('scan of images picked: Stop cropping and Back on the first image go on to Filters, the rest whole; nothing readable goes Home', () => withPage(async (page, url) => {
   await openApp(page, url, '#/');
   await choose(page, '.scan-card button:has-text("Upload images")', [asPng('One.png', photo), asPng('Two.png', photo)]);
   eq(await cropReady(page), 'Page 1 of 2', 'scan started');
-  // Stop cropping: the images not cropped yet stay in the page list as they are.
-  await page.locator('.images-crop .ui-topbar-nav').click();
+  // Next on the first; Stop cropping on the second: it stays whole.
+  await stepButton(page, 'Next').click();
+  eq(await cropReady(page), 'Page 2 of 2', 'the second image');
+  await page.locator('.images-crop .ui-topbar [aria-label="Stop cropping"]').click();
+  eq(await looksReady(page), 'Page 1 of 2', 'Stop cropping goes on to Filters');
+  eq(await pageTiles(page), ['Page 1*', 'Page 2'], 'both images are pages of the scan');
+  await showPage(page, 2);
+  eq(await chosenLook(page), 'enhanced', 'the image left whole starts on Enhanced too');
+  await stepButton(page, 'Save').click();
   await page.waitForSelector('.images-editor');
   await settled(page, 2);
-  eq(await names(page), ['One.png', 'Two.png'], 'both images kept, uncropped');
+  eq(await names(page), ['One.png', 'Two.png'], 'both images kept');
+  eq(await handleLabels(page), ['Page 1, Enhanced', 'Page 2, Enhanced'], 'on Enhanced');
   eq(await page.evaluate(() => history.state?.stepDepth ?? 0), 0, 'the scan step taken back');
   await previewsDrawn(page);
-  ok(await page.$$eval('.images-preview-canvas', (cs) => cs.every((c) => c.width === 384)), 'uncropped previews');
+  eq(await page.$$eval('.images-preview-canvas', (cs) => cs.map((c) => (c.width === 384 ? 'whole' : 'cropped'))), ['cropped', 'whole'], 'the first cropped, the second whole');
   // Leaving asks, then goes Home.
   await page.goBack();
   await page.waitForSelector('dialog[open] .ui-dialog-title');
   await page.locator('dialog[open] .ui-btn:has-text("Discard")').click();
   await page.waitForSelector('.screen[data-route="home"]');
+
+  // The back arrow on the first image picked: on to Filters, every image whole.
+  await choose(page, '.scan-card button:has-text("Upload images")', [asPng('One.png', photo), asPng('Two.png', photo)]);
+  eq(await cropReady(page), 'Page 1 of 2', 'another scan');
+  await page.locator('.images-crop .ui-topbar-nav').click();
+  eq(await looksReady(page), 'Page 1 of 2', 'Back on the first image picked goes on to Filters');
+  // The browser's Back there goes to the last image, which is now cropped with Next.
+  await page.goBack();
+  eq(await cropReady(page), 'Page 2 of 2', 'the browser\'s Back on Filters: the last image');
+  // And the browser's Back on it, the image before.
+  await page.goBack();
+  eq(await cropReady(page), 'Page 1 of 2', 'the browser\'s Back on an image: the image before');
+  await page.locator('.images-crop .ui-topbar [aria-label="Stop cropping"]').click();
+  await looksReady(page);
+  await stepButton(page, 'Save').click();
+  await page.waitForSelector('.images-editor');
+  await settled(page, 2);
+  await previewsDrawn(page);
+  ok(await page.$$eval('.images-preview-canvas', (cs) => cs.every((c) => c.width === 384)), 'every image whole');
+  await page.goBack();
+  await page.locator('dialog[open] .ui-btn:has-text("Discard")').click();
+  await page.waitForSelector('.screen[data-route="home"]');
+
+  // An image still being added when cropping stops joins Filters, whole, on Enhanced: a HEIC photo
+  // waits for libheif, held back here (Chromium can't decode HEIC itself).
+  const held = [];
+  let holding = true;
+  await page.route((u) => u.pathname.includes('/vendor/libheif/'), (route) => (holding ? held.push(route) : route.continue()));
+  await choose(page, '.scan-card button:has-text("Upload images")', [asPng('One.png', photo), { name: 'turned.heic', mimeType: 'image/heic', buffer: await fixture('turned.heic') }]);
+  eq(await cropReady(page), 'Page 1 of 2', 'the first image, the second still being added');
+  for (let i = 0; i < 100 && !held.length; i++) await page.waitForTimeout(100);
+  ok(held.length > 0, 'the HEIC photo waits for its decoder');
+  await page.locator('.images-crop .ui-topbar [aria-label="Stop cropping"]').click();
+  eq(await looksReady(page), null, 'Filters with the one image there');
+  await page.locator('.images-look[data-look="grayscale"]').click();
+  await looksReady(page);
+  holding = false;
+  for (const route of held.splice(0)) await route.continue();
+  await page.waitForFunction(() => document.querySelectorAll('.images-scan-page').length === 2 &&
+    !document.querySelector('.images-scan-pages').hidden, null, { timeout: 30000 });
+  eq(await looksReady(page), 'Page 1 of 2', 'the image still being added joined the scan');
+  await showPage(page, 2);
+  eq(await chosenLook(page), 'enhanced', 'on Enhanced, as the scan\'s pages started');
+  await stepButton(page, 'Save').click();
+  await page.waitForSelector('.images-editor');
+  await settled(page, 2);
+  eq(await handleLabels(page), ['Page 1, Grayscale', 'Page 2, Enhanced'], 'both saved, each in its look');
+  eq(await names(page), ['One.png', 'turned.heic'], 'in the order picked');
+  await page.goBack();
+  await page.locator('dialog[open] .ui-btn:has-text("Discard")').click();
+  await page.waitForSelector('.screen[data-route="home"]');
+
   // Nothing that could be read: the scan ends, and Home shows again, saying why.
   await choose(page, '.scan-card button:has-text("Upload images")', [{ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('text') }]);
   await snackWith(page, 'Skipped 1 file');
@@ -654,78 +858,292 @@ await test('scan stopped part way keeps the images; a scan of nothing readable g
 }, { viewport: PHONE }));
 
 // ---------------------------------------------------------------------------------------------
-// A photo taken with Take photo: Discard photo, Take another and Done, the browser's Back.
+// Images to PDF's own Take photo: a scan whose Photos come first (numbered, removable, Take another
+// and Done, Back asking first), then each photo cropped in turn (Back to the image before with its
+// corners, from the first back to the photos; Discard photo), then Filters, and Save puts the pages
+// after those already there. Then a page cropped again with its crop button: Crop page, then
+// Filters with Apply to all pages and Done, as before.
 
-await test('take photo on a phone: Discard photo, Take another, Done, Back', () => withPage(async (page, url) => {
+await test('take photo on a phone: Photos, Remove, Take another, Done; Back to the image before and to the photos; Discard photo; Save after the pages there', () => withPage(async (page, url) => {
   await openApp(page, url, '#/tool/images');
-  await choose(page, '.images-empty-buttons .ui-btn:has-text("Take photo")', [asPng('image.png', photo)]);
-  await cropReady(page);
-  eq(await page.$eval('.images-crop .ui-topbar-nav', (e) => e.getAttribute('aria-label')), 'Discard photo', 'a photo can be discarded');
-  eq(await page.$eval('.images-crop .ui-topbar-subtitle', (e) => e.hidden), true, 'no page count for a photo');
-  await stepButton(page, 'Next').click();
-  await filtersReady(page);
-  eq(await chosenLook(page), 'enhanced', 'a photo starts on Enhanced');
-  ok(await page.$eval('.images-all-pages', (e) => e.hidden), 'no Apply to all pages with one page');
-  await page.locator('.images-look[data-look="super_enhanced"]').click();
-  eq(await page.$$eval('.images-step-buttons .ui-btn', (els) => els.map((e) => e.textContent.trim())), ['Take another', 'Done'], 'Take another and Done');
-  await shots2(page, 'phone-filters-photo');
+  await choose(page, '.images-empty-buttons .ui-btn:has-text("Photos")', [asPng('Red.png', red)]);
+  await settled(page, 1);
 
-  // Take another: the page is done, the camera opens again.
-  await choose(page, '.images-step-buttons .ui-btn:has-text("Take another")', [asPng('image.png', photo)]);
-  await cropReady(page);
-  await stepButton(page, 'Next').click();
-  await filtersReady(page);
-  eq(await chosenLook(page), 'super_enhanced', 'the next photo starts on the look chosen last');
-  // The browser's Back goes to Crop page, then discards the photo.
-  await page.goBack();
-  await cropReady(page);
-  await page.goBack();
+  // Back on the photos with none: no question, back to the editor (ScanPhotosAndFiltersDeviceTest's
+  // leavingWithPhotosAsksFirstAndWithoutLeavesAtOnce); here with the camera still open.
+  await page.locator('.images-add-button').click();
+  let chooser = await openChooser(page, '.ui-menu-item:has-text("Take photo")');
+  await page.waitForSelector('.images-scan-photos');
+  await page.locator('.images-scan-photos .ui-topbar-nav').click();
+  await page.waitForSelector('.images-editor');
+  await page.waitForTimeout(300);
+  ok(!(await page.$('dialog[open]')), 'Back with no photo asks nothing');
+  await settled(page, 1);
+  eq(await page.evaluate(() => history.state?.stepDepth ?? 0), 0, 'and leaves no step in the history');
+  await chooser.setFiles([]);
+  await page.waitForTimeout(300);
+  // The only photo removed on the photos: the scan is over, the editor as it was (ScanDeviceTest's
+  // aPageRemovedAtEachStageIsLeftOutAtOnce).
+  await pickFromMenu(page, '.images-add-button', 'Take photo', [asPng('image.png', photo)]);
+  await photosReady(page, 1);
+  await page.locator('[aria-label="Remove page 1"]').click();
   await page.waitForSelector('.images-editor');
   await settled(page, 1);
-  const name = (await names(page))[0];
-  ok(/^Scan_\d{8}_\d{6}\.jpg$/.test(name), `a photo is named as the app names its photos (${name})`);
-  eq((await handleLabels(page))[0], 'Page 1, Super enhanced', 'the first photo kept its look');
+  eq(await names(page), ['Red.png'], 'the last photo removed: the editor with its page');
+  eq(await page.evaluate(() => history.state?.stepDepth ?? 0), 0, 'no step left in the history');
 
-  // The crop button opens the page again where it was cropped; Back returns.
-  await page.locator('[aria-label="Crop page 1"]').click();
-  await cropReady(page);
-  eq(await page.$eval('.images-crop .ui-topbar-nav', (e) => e.getAttribute('aria-label')), 'Back', 'a page from the list goes Back');
+  // Take photo from Add images: the Photos screen shows while the camera is open, with nothing to crop.
+  await page.locator('.images-add-button').click();
+  chooser = await openChooser(page, '.ui-menu-item:has-text("Take photo")');
+  await page.waitForSelector('.images-scan-photos');
+  eq(await page.$eval('.images-scan-photos h1', (e) => e.textContent), 'Photos', 'the Photos screen');
+  eq(await page.$eval('.images-photos-hint', (e) => e.textContent), 'Take a photo of each page in order, then tap Done to crop them.', 'its hint');
+  eq(await page.$$eval('.images-step-buttons .ui-btn', (els) => els.map((e) => e.textContent.trim())), ['Take photo', 'Done'], 'Take photo while there is no photo');
+  ok(await stepButton(page, 'Done').isDisabled(), 'Done off with no photo');
+  ok(await page.isVisible('.images-photos-outline'), 'a dashed page outline where the photo goes');
+  await shots2(page, 'phone-photos-empty');
+  // While the photo is added: blank paper with a ring, said as "Adding the photo…", Done still off.
+  await page.evaluate(() => {
+    window.__seen = [];
+    new MutationObserver(() => {
+      const ring = document.querySelector('.images-photo.is-coming [role="img"]');
+      const done = [...document.querySelectorAll('.images-step-buttons .ui-btn')].find((b) => b.textContent.includes('Done'));
+      if (ring) window.__seen.push({ ring: ring.getAttribute('aria-label'), done: done?.disabled });
+    }).observe(document.body, { subtree: true, childList: true, attributes: true });
+  });
+  await chooser.setFiles([asPng('image.png', photo)]);
+  await photosReady(page, 1);
+  const seen = await page.evaluate(() => window.__seen);
+  ok(seen.length > 0 && seen.every((s) => s.ring === 'Adding the photo…' && s.done === true), `a photo being added shows a ring and Done waits (${JSON.stringify(seen.slice(0, 2))})`);
+  eq(await page.$$eval('.images-step-buttons .ui-btn', (els) => els.map((e) => e.textContent.trim())), ['Take another', 'Done'], 'Take another and Done once there is a photo');
+  ok(!(await stepButton(page, 'Done').isDisabled()), 'Done on');
+
+  // Take another, twice: the photos in the order taken, each numbered with its Remove button.
+  await choose(page, '.images-step-buttons .ui-btn:has-text("Take another")', [asPng('image.png', photo)]);
+  await photosReady(page, 2);
+  await choose(page, '.images-step-buttons .ui-btn:has-text("Take another")', [asPng('1731150000000.png', photo)]);
+  await photosReady(page, 3);
+  eq(await photoLabels(page), [['Page 1', 'Remove page 1'], ['Page 2', 'Remove page 2'], ['Page 3', 'Remove page 3']], 'numbered, each removable');
+  eq(await page.$$eval('.images-photo-number', (els) => els.map((e) => e.textContent)), ['1', '2', '3'], 'their numbers');
+  eq(await page.$eval('.images-photos-grid', (e) => getComputedStyle(e).gridTemplateColumns.split(' ').length), 3, 'three photos to a row at 360 px');
+  await shots2(page, 'phone-photos');
+  await noSidewaysScroll(page, 'Photos');
+  // Remove page 2: the others are numbered again, the focus on the next one's Remove.
+  await page.locator('[aria-label="Remove page 2"]').click();
+  await photosReady(page, 2);
+  eq(await photoLabels(page), [['Page 1', 'Remove page 1'], ['Page 2', 'Remove page 2']], 'page 2 removed');
+  eq(await page.evaluate(() => document.activeElement?.getAttribute('aria-label')), 'Remove page 2', 'the focus on the next photo\'s Remove');
+  // The camera closed without a photo: the photos stay as they were.
+  chooser = await openChooser(page, '.images-step-buttons .ui-btn:has-text("Take another")');
+  await chooser.setFiles([]);
+  await page.waitForTimeout(800);
+  await photosReady(page, 2);
+  ok(true, 'a camera closed without a photo leaves the photos');
+
+  // Back asks first; Keep stays. The browser's Back asks too.
+  await page.locator('.images-scan-photos .ui-topbar-nav').click();
+  await page.waitForSelector('dialog[open] .ui-dialog-title');
+  eq(await page.$eval('dialog[open] .ui-dialog-title', (e) => e.textContent), 'Discard these photos?', 'the question');
+  eq(await page.$eval('dialog[open] .ui-dialog-body', (e) => e.textContent), 'The photos you took for this scan will be deleted.', 'what it means');
+  eq(await page.$$eval('dialog[open] .ui-dialog-actions .ui-btn', (els) => els.map((e) => [e.textContent.trim(), e.classList.contains('ui-btn--danger')])), [['Keep', false], ['Discard', true]], 'Keep, and Discard in red');
+  await shots2(page, 'phone-photos-discard');
+  await page.locator('dialog[open] .ui-btn:has-text("Keep")').click();
+  await page.waitForSelector('dialog[open]', { state: 'detached' });
+  await page.goBack();
+  await page.waitForSelector('dialog[open] .ui-dialog-title');
+  await page.locator('dialog[open] .ui-btn:has-text("Keep")').click();
+  await page.waitForSelector('dialog[open]', { state: 'detached' });
+  await photosReady(page, 2);
+  eq(await page.evaluate(() => history.state?.stepDepth ?? 0), 1, 'Keep stays on the photos, a step above the editor');
+
+  // Done: each photo cropped in turn, the corners alone.
+  await stepButton(page, 'Done').click();
+  eq(await cropReady(page), 'Page 1 of 2', 'the first photo');
+  eq(await barButtons(page), ['Back', 'Discard photo', 'Rotate left', 'Rotate right'], 'the bar of a photo: Back, Discard photo, Rotate left and right');
+  for (let i = 0; i < 5; i++) await page.locator('[aria-label="Move left"]').click();
+  const corner = await handleBox(page, 0);
+  await stepButton(page, 'Next').click();
+  eq(await cropReady(page), 'Page 2 of 2', 'the second photo');
+  // Back: the image before, with the corners it was given.
+  await page.goBack();
+  eq(await cropReady(page), 'Page 1 of 2', 'Back goes to the image before');
+  const again = await handleBox(page, 0);
+  ok(Math.abs(again.x - corner.x) < 1 && Math.abs(again.y - corner.y) < 1, `with its corners (${again.x - corner.x}, ${again.y - corner.y})`);
+  // The back arrow on the first photo: the photos, both kept.
+  await page.locator('.images-crop .ui-topbar-nav').click();
+  await photosReady(page, 2);
+  ok(true, 'from the first photo, back to the photos');
+  // Take another there: it comes after them; Done crops all of them again, each where it was left.
+  await choose(page, '.images-step-buttons .ui-btn:has-text("Take another")', [asPng('image.png', photo)]);
+  await photosReady(page, 3);
+  await stepButton(page, 'Done').click();
+  eq(await cropReady(page), 'Page 1 of 3', 'the first again');
+  const kept = await handleBox(page, 0);
+  ok(Math.abs(kept.x - corner.x) < 1, 'still where it was left');
+  await stepButton(page, 'Next').click();
+  eq(await cropReady(page), 'Page 2 of 3', 'the second');
+  // Discard photo: it goes, and the next shows in its place.
+  await page.locator('.images-crop .ui-topbar [aria-label="Discard photo"]').click();
+  eq(await cropReady(page), 'Page 2 of 2', 'the next photo, in its place');
+  await page.locator('.images-crop .ui-topbar [aria-label="Rotate right"]').click();
+  await stepButton(page, 'Next').click();
+  eq(await looksReady(page), 'Page 1 of 2', 'Filters after the last');
+  eq(await pageTiles(page), ['Page 1*', 'Page 2'], 'the two photos left');
+
+  // Save: the scan's pages after the page that was there.
+  await stepButton(page, 'Save').click();
+  await page.waitForSelector('.images-editor');
+  await settled(page, 3);
+  const taken = await names(page);
+  eq(taken[0], 'Red.png', 'the page that was there first');
+  ok(taken.slice(1).every((n) => /^Scan_\d{8}_\d{6}\.jpg$/.test(n)), `photos named as the app names its photos (${taken})`);
+  eq(await handleLabels(page), ['Page 1', 'Page 2, Enhanced', 'Page 3, Turned right, Enhanced'], 'the scan\'s pages after it, in their looks, the turn kept');
+  eq(await page.evaluate(() => history.state?.stepDepth ?? 0), 0, 'no step left in the history');
+
+  // Cropped again with its crop button: Crop page, then Filters with Apply to all pages and Done.
+  await previewsDrawn(page);
+  const croppedWidth = await page.$eval('.images-card:nth-child(2) .images-preview-canvas', (c) => c.width);
+  ok(croppedWidth < 380, `the page is the cropped paper (${croppedWidth} × 512 preview)`);
+  await page.locator('[aria-label="Crop page 2"]').click();
+  eq(await cropReady(page), null, 'no place for a page cropped again');
+  eq(await barButtons(page), ['Back', 'Rotate left', 'Rotate right'], 'a page from the list: Back, Rotate left and right');
+  eq(await hintText(page), 'Usugami found the page. Drag the corners or sides to adjust it.', 'the picture as taken, searched again');
   await stepButton(page, 'Next').click();
   await filtersReady(page);
-  eq(await chosenLook(page), 'super_enhanced', 'a page opens with its own look');
-  await page.locator('.images-crop .ui-topbar-nav').click();
+  eq(await page.$eval('.images-crop h1', (e) => e.textContent), 'Filters', 'its Filters step');
+  eq(await chosenLook(page), 'enhanced', 'a page opens with its own look');
+  ok(await page.$eval('.images-look-title', (e) => e.textContent === 'Look'), 'with its Look heading');
+  ok(await page.$eval('.images-all-pages', (e) => !e.hidden), 'Apply to all pages offered');
+  eq(await page.$$eval('.images-step-buttons .ui-btn', (els) => els.map((e) => e.textContent.trim())), ['Done'], 'Done');
+  await shots2(page, 'phone-filters');
+  await noSidewaysScroll(page, 'a page\'s Filters');
+  // Back on Filters goes back to Crop page (the browser's Back too), the corners kept.
+  await page.goBack();
   await cropReady(page);
-  await page.locator('.images-crop .ui-topbar-nav').click();
+  eq(await page.$eval('.images-crop h1', (e) => e.textContent), 'Crop page', 'Back went to Crop page');
+  await stepButton(page, 'Next').click();
+  await filtersReady(page);
+  await page.locator('.images-look[data-look="super_enhanced"]').click();
+  await page.locator('.images-all-pages').click();
+  ok(await page.$eval('.images-all-pages-box', (e) => e.checked), 'Apply to all pages ticked');
+  await stepButton(page, 'Done').click();
   await page.waitForSelector('.images-editor');
-  eq(await page.evaluate(() => document.activeElement?.getAttribute('aria-label')), 'Crop page 1', 'focus back on the crop button');
-
-  // Cropped again from scratch: the picture as taken, with the corners where they were; Whole
-  // image puts the photo back as it was taken.
-  await previewsDrawn(page);
-  const croppedWidth = await page.$eval('.images-preview-canvas', (c) => c.width);
-  ok(Math.abs(croppedWidth - 367) <= 2, `the page is the cropped paper (${croppedWidth} × 512 preview)`);
-  await page.locator('[aria-label="Crop page 1"]').click();
+  await settled(page, 3);
+  eq(await handleLabels(page), ['Page 1, Super enhanced', 'Page 2, Super enhanced', 'Page 3, Turned right, Super enhanced'], 'Apply to all pages reached every page');
+  eq(await page.evaluate(() => document.activeElement?.getAttribute('aria-label')), 'Crop page 2', 'focus back on the crop button');
+  // Whole image puts the photo back as it was taken.
+  await page.locator('[aria-label="Crop page 2"]').click();
   await cropReady(page);
-  eq(await hintText(page), 'Usugami found the page. Drag the corners or sides to adjust it.', 'the picture as taken, searched again');
   await page.locator('.images-crop-resets .ui-btn:has-text("Whole image")').click();
   await stepButton(page, 'Next').click();
   await filtersReady(page);
   await stepButton(page, 'Done').click();
   await page.waitForSelector('.images-editor');
-  await settled(page, 1);
-  await page.waitForFunction(() => document.querySelector('.images-preview-canvas')?.width === 384, null, { timeout: 15000 });
+  await settled(page, 3);
+  await page.waitForFunction(() => document.querySelector('.images-card:nth-child(2) .images-preview-canvas')?.width === 384, null, { timeout: 15000 });
   ok(true, 'Whole image put the photo back as taken (384 × 512 preview)');
 
   // Leaving with images asks the app's question.
   await page.locator('.images-editor .ui-topbar-nav').click();
   await page.waitForSelector('dialog[open] .ui-dialog-title');
   eq(await page.$eval('dialog[open] .ui-dialog-title', (e) => e.textContent), 'Discard these images?', 'discard question');
-  await page.locator('dialog[open] .ui-btn:has-text("Keep")').click();
-  await page.waitForSelector('dialog[open]', { state: 'detached' });
-  await page.locator('.images-editor .ui-topbar-nav').click();
   await page.locator('dialog[open] .ui-btn:has-text("Discard")').click();
   await page.waitForSelector('.screen[data-route="home"]');
   ok(true, 'Discard leaves');
+}, { viewport: PHONE }));
+
+// ---------------------------------------------------------------------------------------------
+// Filters' rules: a page alone has no row of pages and no switch; a slider is handed on to the
+// pages as it is let go, not at each step; each scan's pages start on Enhanced, also a photo taken
+// after going back from Filters, the others keeping their looks.
+
+await test('scan Filters: one page has no row and no switch; a slider reaches the pages when let go; every scan starts on Enhanced', () => withPage(async (page, url) => {
+  await openApp(page, url, '#/');
+  // One page: no row of pages, no Same filter for all pages, no place under the title.
+  await choose(page, '.scan-card button:has-text("Upload images")', [asPng('Only.png', photo)]);
+  eq(await cropReady(page), 'Page 1 of 1', 'one image');
+  await stepButton(page, 'Next').click();
+  eq(await looksReady(page), null, 'no place for one page');
+  ok(await page.$eval('.images-scan-pages', (e) => e.hidden), 'no row of pages');
+  ok(await page.$eval('.images-scan-same', (e) => e.hidden), 'no switch');
+  await page.locator('.images-look[data-look="black_white"]').click();
+  await stepButton(page, 'Save').click();
+  await page.waitForSelector('.images-editor');
+  await settled(page, 1);
+  eq(await handleLabels(page), ['Page 1, Black & white'], 'its look');
+  // Cropped again, a page alone: its Filters step offers no Apply to all pages. The back arrow twice
+  // goes back to the editor, the focus on the page's crop button.
+  await page.locator('[aria-label="Crop page 1"]').click();
+  await cropReady(page);
+  await stepButton(page, 'Next').click();
+  await filtersReady(page);
+  ok(await page.$eval('.images-all-pages', (e) => e.hidden), 'no Apply to all pages with one page');
+  await page.locator('.images-crop .ui-topbar-nav').click();
+  await cropReady(page);
+  await page.locator('.images-crop .ui-topbar-nav').click();
+  await page.waitForSelector('.images-editor');
+  await settled(page, 1);
+  eq(await page.evaluate(() => document.activeElement?.getAttribute('aria-label')), 'Crop page 1', 'focus back on the crop button');
+  eq(await handleLabels(page), ['Page 1, Black & white'], 'the page as it was');
+
+  // The editor's Take photo: a new scan, its page on Enhanced, not on the look chosen last.
+  await pickFromMenu(page, '.images-add-button', 'Take photo', [asPng('image.png', photo)]);
+  await photosReady(page, 1);
+  await stepButton(page, 'Done').click();
+  await cropReady(page);
+  await stepButton(page, 'Next').click();
+  await looksReady(page);
+  eq(await chosenLook(page), 'enhanced', 'a new scan starts on Enhanced');
+  // Grayscale, then back to the photos: a photo taken there starts on Enhanced as the others did,
+  // which keep their looks.
+  await page.locator('.images-look[data-look="grayscale"]').click();
+  await looksReady(page);
+  await page.goBack();
+  await cropReady(page);
+  await page.goBack();
+  await photosReady(page, 1);
+  await choose(page, '.images-step-buttons .ui-btn:has-text("Take another")', [asPng('image.png', photo)]);
+  await photosReady(page, 2);
+  await stepButton(page, 'Done').click();
+  await cropReady(page);
+  await stepButton(page, 'Next').click();
+  await cropReady(page);
+  await stepButton(page, 'Next').click();
+  await looksReady(page);
+  eq(await chosenLook(page), 'grayscale', 'the first photo kept its look');
+  await showPage(page, 2);
+  eq(await chosenLook(page), 'enhanced', 'the photo taken after going back starts on Enhanced');
+
+  // A slider held changes what shows; the pages get it once it is let go.
+  await sameSwitch(page).click();
+  await page.locator('.images-look[data-look="original"]').click();
+  await looksReady(page);
+  const before = await tileMean(page, 1);
+  const input = await page.locator('.images-adjust-input').nth(0).boundingBox();
+  const y = input.y + input.height / 2;
+  await page.mouse.move(input.x + input.width / 2, y);
+  await page.mouse.down();
+  await page.mouse.move(input.x + input.width * 0.9, y, { steps: 8 });
+  await page.waitForTimeout(900);
+  const held = await page.locator('.images-adjust-input').nth(0).getAttribute('aria-valuetext');
+  ok(/^\+\d+$/.test(held) && Number(held) > 40, `the slider shows the value held (${held})`);
+  const whileHeld = await tileMean(page, 1);
+  ok(Math.abs(whileHeld - before) < 0.5, `page 1 unchanged while the slider is held (${before} → ${whileHeld})`);
+  await page.mouse.up();
+  await page.waitForFunction((b) => {
+    const c = document.querySelector('.images-scan-page:nth-child(1) canvas');
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    let sum = 0;
+    for (let k = 0; k < d.length; k += 4) sum += d[k] + d[k + 1] + d[k + 2];
+    return sum / (d.length / 4) / 3 > b + 2;
+  }, before, { timeout: 15000 });
+  ok(true, 'let go, the brightness reached page 1 too (Same filter for all pages)');
+  await showPage(page, 1);
+  eq(await page.locator('.images-adjust-input').nth(0).getAttribute('aria-valuetext'), held, 'page 1 has the brightness let go');
+  await stepButton(page, 'Save').click();
+  await page.waitForSelector('.images-editor');
+  await settled(page, 3);
+  eq(await handleLabels(page), ['Page 1, Black & white', 'Page 2', 'Page 3'], 'the first scan\'s page kept its look; the second scan\'s in Original');
 }, { viewport: PHONE }));
 
 // ---------------------------------------------------------------------------------------------
@@ -1237,34 +1655,6 @@ await test('the tool shows before the PDF writer and text recognition have loade
   eq((await structure(file.bytes)).pages.length, 1, 'once they come, the PDF is made');
 }, { viewport: PHONE }));
 
-await test('leaving through the router\'s Discard starts the next photo on Enhanced again', () => withPage(async (page, url) => {
-  const openImages = async () => {
-    await page.evaluate(async () => (await import('./js/core/router.js')).navigate('/tool/images'));
-    await page.waitForSelector('.screen[data-tool="images"]:not([aria-busy]) .images-editor');
-  };
-  // From Home, so the browser's Back has the app to go back to.
-  await openApp(page, url, '#/');
-  await openImages();
-  await choose(page, '.images-empty-buttons .ui-btn:has-text("Take photo")', [asPng('image.png', photo)]);
-  await cropReady(page);
-  await stepButton(page, 'Next').click();
-  await filtersReady(page);
-  await page.locator('.images-look[data-look="black_white"]').click();
-  await stepButton(page, 'Done').click();
-  await page.waitForSelector('.images-editor');
-  await settled(page, 1);
-  await page.goBack();
-  await page.waitForSelector('dialog[open] .ui-dialog-title');
-  await page.locator('dialog[open] .ui-btn:has-text("Discard")').click();
-  await page.waitForSelector('.screen[data-route="home"]');
-  await openImages();
-  await choose(page, '.images-empty-buttons .ui-btn:has-text("Take photo")', [asPng('image.png', photo)]);
-  await cropReady(page);
-  await stepButton(page, 'Next').click();
-  await filtersReady(page);
-  eq(await chosenLook(page), 'enhanced', 'the next photo starts on Enhanced, as after the app\'s Discard');
-}, { viewport: PHONE }));
-
 for (const browser of QUICK ? ['chromium'] : ['chromium', 'firefox', 'webkit']) {
   await test(`${browser} desktop: Filters' looks scroll with the mouse wheel; Crop page shows grab cursors over its handles`, () => withPage(async (page, url) => {
     await openApp(page, url, '#/tool/images');
@@ -1323,28 +1713,54 @@ for (const browser of QUICK ? ['chromium'] : ['chromium', 'firefox', 'webkit']) 
 // the app's question on the browser's Back.
 
 for (const browser of QUICK ? ['chromium'] : ['chromium', 'firefox', 'webkit']) {
-  await test(`${browser}: Take photo on Home: Discard photo, Take another, Done; Back asks the app's question`, () => withPage(async (page, url) => {
+  await test(`${browser}: Take photo on Home: Photos, Take another, Done, Next on each, Save; Back asks the scan's and the app's questions`, () => withPage(async (page, url) => {
     await openApp(page, url, '#/');
-    // A photo discarded: nothing is left, so back to Home.
+    // A scan whose only photo is removed on its Photos: nothing is left, so back to Home, asking nothing.
     await choose(page, '.scan-card button:has-text("Take photo")', [asPng('image.png', photo)]);
-    await cropReady(page);
-    ok((await page.evaluate(() => location.hash)).startsWith('#/tool/scan'), 'Scan document opened');
-    eq(await page.$eval('.images-crop .ui-topbar-nav', (e) => e.getAttribute('aria-label')), 'Discard photo', 'a photo just taken can be discarded');
-    await page.locator('.images-crop .ui-topbar-nav').click();
+    await photosReady(page, 1);
+    await page.locator('[aria-label="Remove page 1"]').click();
     await page.waitForSelector('.screen[data-route="home"]', { timeout: 15000 });
-    // Another photo, Take another, then Done.
+    ok(!(await page.$('dialog[open]')), 'the only photo removed: back on Home, nothing asked');
+    // A scan whose only photo is discarded on the crop screen: nothing is left, so back to Home.
     await choose(page, '.scan-card button:has-text("Take photo")', [asPng('image.png', photo)]);
-    await cropReady(page);
-    await stepButton(page, 'Next').click();
-    await filtersReady(page);
+    await photosReady(page, 1);
+    ok((await page.evaluate(() => location.hash)).startsWith('#/tool/scan'), 'Scan document opened on its Photos');
+    await stepButton(page, 'Done').click();
+    eq(await cropReady(page), 'Page 1 of 1', 'its photo on Crop page');
+    await page.locator('.images-crop .ui-topbar [aria-label="Discard photo"]').click();
+    await page.waitForSelector('.screen[data-route="home"]', { timeout: 15000 });
+    ok(true, 'the only photo discarded: back on Home');
+    // The browser's Back on the photos asks first; Discard goes back Home.
+    await choose(page, '.scan-card button:has-text("Take photo")', [asPng('image.png', photo)]);
+    await photosReady(page, 1);
+    await page.goBack();
+    await page.waitForSelector('dialog[open] .ui-dialog-title');
+    eq(await page.$eval('dialog[open] .ui-dialog-title', (e) => e.textContent), 'Discard these photos?', 'the scan\'s question');
+    await page.locator('dialog[open] .ui-btn:has-text("Discard")').click();
+    await page.waitForSelector('.screen[data-route="home"]', { timeout: 15000 });
+    ok(true, 'Discard went back Home');
+    // Another photo, Take another, then Done, Next on each, Save.
+    await choose(page, '.scan-card button:has-text("Take photo")', [asPng('image.png', photo)]);
+    await photosReady(page, 1);
     eq(await page.$$eval('.images-step-buttons .ui-btn', (els) => els.map((e) => e.textContent.trim())), ['Take another', 'Done'], 'Take another and Done');
-    eq(await chosenLook(page), 'enhanced', 'a scan from Home starts on Enhanced');
     // An Android camera names its capture with a number: no name worth keeping either.
     await choose(page, '.images-step-buttons .ui-btn:has-text("Take another")', [asPng('1731150000000.png', photo)]);
-    await cropReady(page);
-    await stepButton(page, 'Next').click();
-    await filtersReady(page);
+    await photosReady(page, 2);
     await stepButton(page, 'Done').click();
+    eq(await cropReady(page), 'Page 1 of 2', 'the first photo');
+    await stepButton(page, 'Next').click();
+    eq(await cropReady(page), 'Page 2 of 2', 'the second photo');
+    await stepButton(page, 'Next').click();
+    eq(await looksReady(page), 'Page 1 of 2', 'Filters');
+    eq(await chosenLook(page), 'enhanced', 'a scan starts on Enhanced');
+    // A slider's keys each reach the page shown, as a change let go; the other page keeps its own.
+    await page.locator('.images-adjust-input').nth(0).focus();
+    for (let i = 0; i < 10; i++) await page.keyboard.press('ArrowRight');
+    await showPage(page, 2);
+    eq(await page.locator('.images-adjust-input').nth(0).getAttribute('aria-valuetext'), '0', 'page 2 keeps its own brightness');
+    await showPage(page, 1);
+    eq(await page.locator('.images-adjust-input').nth(0).getAttribute('aria-valuetext'), '+10', 'page 1 has the brightness set by the keyboard');
+    await stepButton(page, 'Save').click();
     await page.waitForSelector('.images-editor');
     await settled(page, 2);
     const taken = await names(page);
@@ -1367,6 +1783,173 @@ for (const browser of QUICK ? ['chromium'] : ['chromium', 'firefox', 'webkit']) 
     ok(true, 'Discard leaves');
   }, { browser, viewport: PHONE, mobile: browser !== 'firefox' }));
 }
+
+// ---------------------------------------------------------------------------------------------
+// A scan's screens on a wide desktop (the app's side column) and at 320 px, by keyboard, as a
+// screen reader hears them, with the focus in sight, in a contrast theme and with reduced motion.
+
+await test('scan screens: a wide desktop and 320 px, the keyboard, a screen reader, forced colours, reduced motion', () => withPage(async (page, url) => {
+  await openApp(page, url, '#/');
+  await watchAnnouncer(page);
+  await choose(page, '.scan-card button:has-text("Take photo")', [asPng('image.png', photo)]);
+  await photosReady(page, 1);
+  // A screen reader: the screen's heading has the focus as it comes, as on every screen.
+  eq(await page.evaluate(() => [document.activeElement?.tagName, document.activeElement?.textContent]), ['H1', 'Photos'], 'the focus on the Photos heading');
+  await choose(page, '.images-step-buttons .ui-btn:has-text("Take another")', [asPng('image.png', photo)]);
+  await photosReady(page, 2);
+  await choose(page, '.images-step-buttons .ui-btn:has-text("Take another")', [asPng('Red.png', red)]);
+  await photosReady(page, 3);
+  // The photos a list of pictures named by number.
+  eq(await page.$eval('.images-photos-grid', (e) => [e.getAttribute('role'), e.getAttribute('aria-label')]), ['list', 'Photos'], 'the photos are a list');
+  eq(await page.$$eval('.images-photo', (els) => els.map((e) => e.getAttribute('role'))), ['listitem', 'listitem', 'listitem'], 'each photo a list item');
+  // On a wide screen: the photos fill the start side, the hint and the buttons a 320 px column.
+  ok(await page.$eval('.images-photos', (e) => e.classList.contains('is-wide')), 'the side column on a wide screen');
+  eq(await page.$eval('.images-photos-side', (e) => Math.round(e.getBoundingClientRect().width)), 320, 'a 320 px column');
+  ok(await page.$eval('.images-photos-side .images-photos-hint', (e) => !!e), 'the hint in the column');
+  eq(await page.$$eval('.images-step-buttons .ui-btn', (els) => new Set(els.map((e) => Math.round(e.getBoundingClientRect().top))).size), 1, 'Take another and Done side by side in it');
+  await shots2(page, 'desktop-photos');
+  await noSidewaysScroll(page, 'Photos on a desktop');
+
+  // The keyboard: Tab reaches each Remove button and Done, the focus in sight.
+  await page.locator('[aria-label="Remove page 1"]').focus();
+  await page.keyboard.press('Tab');
+  eq(await page.evaluate(() => document.activeElement?.getAttribute('aria-label')), 'Remove page 2', 'Tab goes on to the next photo\'s Remove');
+  ok(await page.evaluate(() => document.activeElement.matches(':focus-visible') && getComputedStyle(document.activeElement).outlineStyle !== 'none'), 'the focus shows');
+  await stepButton(page, 'Done').focus();
+  await page.keyboard.press('Enter');
+  eq(await cropReady(page), 'Page 1 of 3', 'Done by the keyboard');
+  await page.waitForFunction(() => window.__said.some((s) => s.text === 'Crop page, Page 1 of 3'), null, { timeout: 5000 });
+  ok(true, 'each image is said as it comes, with its place');
+  ok(await page.$eval('.images-crop-step', (e) => e.classList.contains('is-wide')), 'Crop page beside its controls');
+  await shots2(page, 'desktop-scan-crop');
+  for (const place of ['Page 2 of 3', 'Page 3 of 3']) {
+    await stepButton(page, 'Next').focus();
+    await page.keyboard.press('Enter');
+    eq(await cropReady(page), place, `Next by the keyboard (${place})`);
+  }
+  await stepButton(page, 'Next').focus();
+  await page.keyboard.press('Enter');
+  eq(await looksReady(page), 'Page 1 of 3', 'Filters');
+  await page.waitForFunction(() => window.__said.some((s) => s.text === 'Filters'), null, { timeout: 5000 });
+  ok(true, 'Filters is said as it comes');
+  // A later stage slides in over the one before (none of it with reduced motion, below).
+  eq(await slideOf(page, '.images-scan-looks'), { slide: 'images-in-forward', moves: true }, 'Filters slid in');
+  // On a wide screen: the row of pages under the page, the controls and Save in a 320 px column.
+  ok(await page.$eval('.images-scan-looks-step', (e) => e.classList.contains('is-wide')), 'the side column');
+  ok(await page.$eval('.images-scan-main .images-scan-pages', (e) => !!e), 'the pages under the page');
+  eq(await page.$eval('.images-scan-panel', (e) => Math.round(e.getBoundingClientRect().width)), 320, 'a 320 px column');
+  await shots2(page, 'desktop-scan-filters');
+  await noSidewaysScroll(page, 'Filters on a desktop');
+
+  // The pages are radio buttons: the arrow keys choose, Home and End go to the ends.
+  eq(await page.$$eval('.images-scan-page', (els) => els.map((e) => [e.getAttribute('role'), e.tabIndex])), [['radio', 0], ['radio', -1], ['radio', -1]], 'radio buttons, one in the Tab order');
+  eq(await page.$eval('.images-scan-pages', (e) => [e.getAttribute('role'), e.getAttribute('aria-label')]), ['radiogroup', 'Pages'], 'in a radio group named Pages');
+  await page.locator('.images-scan-page').nth(0).focus();
+  await page.keyboard.press('ArrowRight');
+  eq(await looksReady(page), 'Page 2 of 3', 'ArrowRight shows the next page');
+  eq(await page.evaluate(() => document.activeElement?.getAttribute('aria-label')), 'Page 2', 'the focus with it');
+  ok(await page.evaluate(() => getComputedStyle(document.activeElement).outlineStyle !== 'none'), 'its focus shows');
+  await page.keyboard.press('End');
+  eq(await looksReady(page), 'Page 3 of 3', 'End shows the last page');
+  // The looks: a radio group named "Look", chosen with the arrow keys.
+  eq(await page.$eval('.images-scan-looks .images-looks', (e) => [e.getAttribute('role'), e.getAttribute('aria-label')]), ['radiogroup', 'Look'], 'the looks are a radio group');
+  await page.locator('.images-look[data-look="enhanced"]').focus();
+  await page.keyboard.press('ArrowRight');
+  eq(await chosenLook(page), 'super_enhanced', 'ArrowRight chose the next look');
+  eq(await page.evaluate(() => document.activeElement?.dataset.look), 'super_enhanced', 'the focus with it');
+  ok(await lookInView(page), 'brought whole into view in the 320 px column');
+  // The sliders, named, with their values said.
+  eq(await page.$$eval('.images-adjust-input', (els) => els.map((e) => [e.labels?.[0]?.textContent, e.getAttribute('aria-valuetext')])), [['Brightness', '0'], ['Contrast', '0']], 'the sliders named, with their values');
+  // The switch, by the keyboard.
+  eq(await sameSwitch(page).getAttribute('role'), 'switch', 'a switch');
+  await sameSwitch(page).focus();
+  await page.keyboard.press('Space');
+  eq(await sameSwitch(page).getAttribute('aria-checked'), 'true', 'Space turns it on');
+  await showPage(page, 1);
+  eq(await chosenLook(page), 'super_enhanced', 'every page took page 3\'s look');
+
+  // 320 px: nothing sideways; the sliders' names over them; Save in sight. The phone turned keeps
+  // the page shown and the switch.
+  await page.setViewportSize({ width: 320, height: 640 });
+  await page.waitForTimeout(400);
+  await noSidewaysScroll(page, 'Filters at 320 px');
+  ok(await page.$eval('.images-scan-looks-step', (e) => !e.classList.contains('is-wide')), 'the controls under the page');
+  ok(await page.$eval('.images-adjust', (e) => !e.classList.contains('is-inline')), 'at 320 px the sliders\' names over them');
+  const save = await stepButton(page, 'Save').boundingBox();
+  ok(save.y + save.height <= 640, 'Save in sight at 320 px');
+  eq(await pageTiles(page), ['Page 1*', 'Page 2', 'Page 3'], 'the page shown kept');
+  eq(await sameSwitch(page).getAttribute('aria-checked'), 'true', 'the switch kept');
+  await shot(page, 'phone320-scan-filters');
+
+  // A contrast theme: the tiles keep their borders, the page shown in the highlight colour.
+  await page.emulateMedia({ forcedColors: 'active' });
+  await page.waitForTimeout(200);
+  const forced = await page.evaluate(() => {
+    const chosen = document.querySelector('.images-scan-page[aria-checked="true"]');
+    const other = document.querySelector('.images-scan-page[aria-checked="false"]');
+    return { chosen: parseFloat(getComputedStyle(chosen).borderTopWidth), other: parseFloat(getComputedStyle(other).borderTopWidth) };
+  });
+  ok(forced.other >= 1 && forced.chosen >= 3, `forced colours: tiles outlined, the page shown marked (${JSON.stringify(forced)})`);
+  await shot(page, 'phone320-scan-filters-forced');
+  await page.emulateMedia({ forcedColors: 'none' });
+
+  // Reduced motion: the screens don't slide. Back to the last image, and the photos at 320 px.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.locator('.images-scan-looks .ui-topbar-nav').click();
+  eq(await cropReady(page), 'Page 3 of 3', 'Back on Filters: the last image');
+  await page.locator('.images-crop .ui-topbar-nav').click();
+  eq(await cropReady(page), 'Page 2 of 3', 'the image before');
+  await page.locator('.images-crop .ui-topbar-nav').click();
+  eq(await cropReady(page), 'Page 1 of 3', 'the first');
+  await page.locator('.images-crop .ui-topbar-nav').click();
+  await photosReady(page, 3);
+  // The photos came back from the other side, which with reduced motion doesn't move.
+  eq(await slideOf(page, '.images-scan-photos'), { slide: 'images-in-back', moves: false }, 'no slide with reduced motion');
+  ok(await page.evaluate(() => window.__said.at(-1)?.text === 'Photos' && document.activeElement?.textContent === 'Photos'), 'back on the photos, the screen is said and its heading focused');
+  await noSidewaysScroll(page, 'Photos at 320 px');
+  eq(await page.$eval('.images-photos-grid', (e) => getComputedStyle(e).gridTemplateColumns.split(' ').length), 2, 'two photos to a row at 320 px');
+  const take = await page.$$eval('.images-step-buttons .ui-btn', (els) => els.map((e) => Math.round(e.getBoundingClientRect().height)));
+  ok(take.every((hgt) => hgt >= 40), `the buttons 40 px tall at least, 48 to tap (${take})`);
+  await page.emulateMedia({ forcedColors: 'active' });
+  ok(await page.$eval('.images-photo', (e) => parseFloat(getComputedStyle(e).borderTopWidth) >= 1), 'forced colours: the photos outlined');
+  await shot(page, 'phone320-photos-forced');
+  await page.emulateMedia({ forcedColors: 'none', reducedMotion: 'no-preference' });
+  await shots2(page, 'phone320-photos');
+
+  // A window zoomed to 400 % (320 × 256, from 1280 × 1024): too narrow for the column beside the
+  // photos, which keep the width, Tab's focus in sight on them, Done and Take another at the foot.
+  await page.setViewportSize({ width: 320, height: 256 });
+  await page.waitForTimeout(400);
+  ok(await page.$eval('.images-photos', (e) => !e.classList.contains('is-wide')), '400 %: no column beside the photos');
+  ok(await page.$eval('.images-photos-area', (e) => e.getBoundingClientRect().width >= 300 && e.getBoundingClientRect().height >= 100), '400 %: the photos have the width');
+  await page.locator('.images-scan-photos .ui-topbar-nav').focus();
+  await page.keyboard.press('Tab');
+  eq(await page.evaluate(() => document.activeElement?.getAttribute('aria-label')), 'Remove page 1', '400 %: Tab to the first photo\'s Remove');
+  ok(await inSight(page, '[aria-label="Remove page 1"]'), '400 %: it is in sight');
+  ok(await inSight(page, '.images-step-buttons .ui-btn:has-text("Done")'), '400 %: Done in sight');
+  await noSidewaysScroll(page, 'Photos at 400 %');
+  await shot(page, 'zoom400-photos');
+  // Crop page and Filters: the picture keeps the width under the bar, the step scrolls, and its
+  // button stays in sight at the foot, over what scrolls; a control reached with Tab shows above it.
+  await stepButton(page, 'Done').click();
+  eq(await cropReady(page), 'Page 1 of 3', '400 %: Crop page');
+  ok(await page.$eval('.images-crop-step', (e) => !e.classList.contains('is-wide')), '400 %: Crop page\'s controls under the picture');
+  ok(await page.$eval('.images-crop-step .images-step-area', (e) => e.getBoundingClientRect().width >= 300 && e.getBoundingClientRect().height >= 140), '400 %: the picture 140 px tall, the width wide');
+  ok(await inSight(page, '.images-step-buttons .ui-btn'), '400 %: Next in sight');
+  await shot(page, 'zoom400-crop');
+  for (let i = 0; i < 3; i++) {
+    await stepButton(page, 'Next').click();
+    if (i < 2) await cropReady(page);
+  }
+  await looksReady(page);
+  ok(await page.$eval('.images-scan-looks-step', (e) => !e.classList.contains('is-wide')), '400 %: Filters\' controls under the page');
+  ok(await page.$eval('.images-scan-looks .images-filter-area', (e) => e.getBoundingClientRect().width >= 300 && e.getBoundingClientRect().height >= 140), '400 %: the page 140 px tall, the width wide');
+  ok(await inSight(page, '.images-step-buttons .ui-btn'), '400 %: Save in sight');
+  await sameSwitch(page).focus();
+  ok(await inSight(page, '.images-scan-same .ui-switch'), '400 %: the switch, reached by the keyboard, scrolled into sight above Save');
+  await noSidewaysScroll(page, 'Filters at 400 %');
+  await shot(page, 'zoom400-filters');
+}, { viewport: DESKTOP, mobile: false }));
 
 for (const browser of QUICK ? ['chromium'] : ['chromium', 'firefox', 'webkit']) {
   await test(`${browser}: images shared while Scan document or Images to PDF shows join its pages`, () => withPage(async (page, url) => {

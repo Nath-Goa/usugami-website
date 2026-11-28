@@ -247,7 +247,8 @@ function wait(entries, ui) {
 
 /**
  * The addresses showing the screen files shared for `target` open in: Scan document and Images to
- * PDF are one screen (tools/images/index.js), so images shared during a scan join it.
+ * PDF are one screen (tools/images/index.js), so images shared during a scan join the editor's
+ * pages there.
  */
 const SAME_SCREEN = {
   '/tool/images': ['/tool/images', '/tool/scan'],

@@ -52,8 +52,9 @@ export async function mount(ctx) {
   };
 
   /**
-   * Picks images for a scan. A photo goes through the app's photo flow (Discard photo, Take
-   * another, Done); uploaded images through the crop screen one after another.
+   * Picks images for a scan. A photo opens the scan's Photos screen (Take another, Done), then each
+   * photo is cropped in turn and one Filters screen ends the scan; uploaded images start at the
+   * crop screen, one after another (tools/images/).
    */
   const pickForScan = async ({ camera = false, ...options }) => {
     const files = await pickFiles({ accept: 'image', ...options });

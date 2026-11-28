@@ -1,10 +1,13 @@
-// The crop screen (CropScreen.kt): a page cropped out of its image in two steps. First Crop page:
-// the image, turned as on its page, with four corners and four sides to drag onto the page's edges,
-// a magnifier under the finger while dragging, and buttons that move the chosen handle a step at a
-// time (each handle can also be focused and moved with the arrow keys). Then Filters (filter-step.js).
-// On both, Rotate left and Rotate right turn the image, the corners with it; Back on Filters goes
-// back to Crop page with the corners kept. A photo just taken ends with Take another or Done; the
-// images of a scan come one after another ("Page 2 of 5"), with Next and Done on the last.
+// The crop screen (CropScreen.kt): a page cropped out of its image. First Crop page: the image,
+// turned as on its page, with four corners and four sides to drag onto the page's edges, a
+// magnifier under the finger while dragging, and buttons that move the chosen handle a step at a
+// time (each handle can also be focused and moved with the arrow keys). A page cropped again from
+// the editor then has Filters (filter-step.js), and Back on Filters goes back to Crop page with the
+// corners kept. The images of a scan have Crop page alone, one after another ("Page 2 of 5"), with
+// Next on each: Back goes to the image before (from the first, back to the photos, or for images
+// picked, on to Filters with the images whole), and the bar has Discard photo for photos and Stop
+// cropping for images picked. On both steps, Rotate left and Rotate right turn the image, the
+// corners with it.
 import { h, announce } from '../../core/dom.js';
 import { t } from '../../core/i18n.js';
 import { icon } from '../../core/icons.js';
@@ -13,7 +16,7 @@ import { loadImage } from '../../engine/images/decode.js';
 import {
   shownQuad, uprightQuad, withCorner, movedCorner, movedSide, turned, ordered, isUsable, isWhole, WHOLE,
 } from '../../engine/images/crop.js';
-import { sourceOf } from './model.js';
+import { sourceOf, scanPlace, scanTotal } from './model.js';
 import { createFilterStep } from './filter-step.js';
 
 /** A page's four corners, then its four sides: the handles of the crop step. */
@@ -446,8 +449,12 @@ class CropArea {
   }
 }
 
-/** A step's buttons at its foot: `main`, filled, and before it `other`, side by side while they fit. */
-function stepButtons(main, other) {
+/**
+ * A step's buttons at its foot (StepButtons): `main`, filled, and before it `other`, outlined, side
+ * by side while they fit, else stacked with `main` last. Each is `{ label, icon, iconAfter?,
+ * disabled?, onClick }`; the row's `main` and `other` are the buttons.
+ */
+export function stepButtons(main, other) {
   const make = (b, variant) => {
     const el = button({ label: '', variant, disabled: b.disabled, onClick: b.onClick, cls: 'images-step-button' + (b.iconAfter ? ' has-icon-after' : '') });
     el.querySelector('.ui-btn-label').textContent = b.label;
@@ -456,20 +463,37 @@ function stepButtons(main, other) {
     return el;
   };
   const row = h('div', { class: 'images-step-button-row' + (other ? ' has-two' : '') });
-  if (other) row.append(make(other, 'outlined'));
+  if (other) row.other = row.appendChild(make(other, 'outlined'));
   const mainEl = make(main, 'filled');
   row.append(mainEl);
   row.main = mainEl;
   return row;
 }
 
-/** Makes the step's layout follow its shape: the controls beside the image when it is wider than tall. */
-function stepLayout(el, hint) {
+/** On a wide screen, the width of the column of controls beside the picture (the app's SIDE_WIDTH). */
+const SIDE_WIDTH = 320;
+/**
+ * The least width the picture keeps beside that column: a column of photos (96 px, 16 px from the
+ * edges), a page with room for its corners. With less, in a window zoomed to 400 % (320 × 256 px,
+ * say), the controls go under the picture as on a phone held upright, rather than leave the picture
+ * no room at all (images.css then lets the step scroll whole, its buttons kept in sight).
+ */
+const PICTURE_LEAST = 160;
+
+/**
+ * Whether a screen of this size ({ width, height }) has its controls in a column beside the
+ * picture: when it is wider than tall (as the app's), and the picture keeps room beside them.
+ */
+export function isWideStep(r) {
+  return r.width > r.height && r.width - SIDE_WIDTH >= PICTURE_LEAST;
+}
+
+/** Makes the step's layout follow its shape: the controls beside the image when it is wide (isWideStep). */
+export function stepLayout(el, hint) {
   const area = el.querySelector('.images-step-area');
   const controls = el.querySelector('.images-step-controls');
   const apply = () => {
-    const r = el.getBoundingClientRect();
-    const wide = r.width > r.height;
+    const wide = isWideStep(el.getBoundingClientRect());
     el.classList.toggle('is-wide', wide);
     if (hint) {
       if (wide && hint.parentElement !== controls) controls.prepend(hint);
@@ -486,11 +510,12 @@ function stepLayout(el, hint) {
  * The crop screen for one opening of it.
  * @param {object} o
  * @param {import('./model.js').ImagesModel} o.model
- * @param {object} o.session   the model's crop session
+ * @param {object} o.session   the model's crop session (`staged`: an image of a scan)
  * @param {() => object|null} o.scan   the scan, while this page is one of its images
  * @param {() => number} o.pageCount   the pages Apply to all pages would reach
  * @param {(step: 'crop'|'filters') => void} o.onStep
- * @param {{ done(choices), takeAnother(choices), close() }} o.actions
+ * @param {{ done(choices), close(), back(), discard(), stop() }} o.actions  back, discard and stop:
+ *   a scan's image (the image before; Discard photo; Stop cropping)
  * @returns {{ el, step, setStep(step), back(), update(), focus(), destroy() }}
  */
 export function createCropScreen({ model, session, scan, pageCount, onStep, actions }) {
@@ -526,27 +551,35 @@ export function createCropScreen({ model, session, scan, pageCount, onStep, acti
   };
 
   const title = () => t(state.step === 'filters' ? 'filter_title' : 'crop_title');
+  // Which of the scan's images this is: its place among them, as it is now.
   const place = () => {
     const s = scan();
-    return s ? t('scan_place', s.done + 1, s.done + s.waiting.length + s.coming) : null;
+    if (!s) return null;
+    const at = s.pages.indexOf(session.itemId);
+    return t('scan_place', at < 0 ? scanPlace(s) : at + 1, scanTotal(s));
   };
 
   function makeBar() {
     const filtersStep = state.step === 'filters';
-    const closes = !filtersStep && (session.fromCamera || session.queued);
+    // A scan's photo can be discarded, and the rest of the images picked left as they are.
+    const scanAction = !session.staged ? []
+      : session.fromCamera ? [{ icon: 'delete', label: t('crop_discard'), onClick: () => actions.discard() }]
+        : [{ icon: 'close', label: t('crop_stop'), onClick: () => actions.stop() }];
     const b = topBar({
       title: title(),
       subtitle: place(),
-      onBack: () => (filtersStep ? setStep('crop') : actions.close()),
-      backLabel: filtersStep ? t('back') : closes ? t(session.fromCamera ? 'crop_discard' : 'crop_stop') : t('back'),
+      // A scan's image: the image before.
+      onBack: () => (session.staged ? actions.back() : filtersStep ? setStep('crop') : actions.close()),
+      backLabel: t('back'),
       actions: [
+        ...scanAction,
         { icon: 'rotate_left', label: t('crop_rotate_left'), onClick: () => turn(-90) },
         { icon: 'rotate_right', label: t('crop_rotate_right'), onClick: () => turn(90) },
       ],
     });
-    if (closes) b.back.replaceChildren(icon('close', { size: 24 }));
     // A turn to the left is to the left whichever way the text runs.
     for (const a of b.actions) a.querySelector('.icon')?.classList.remove('icon-mirrored');
+    if (scanAction.length) b.actions[0].classList.add('images-scan-action');
     return b;
   }
 
@@ -589,7 +622,9 @@ export function createCropScreen({ model, session, scan, pageCount, onStep, acti
         if (!usable()) return;
         const [w, hgt] = shown();
         state.settle(w, hgt);
-        setStep('filters');
+        // A scan's image has its corners alone: Next gives them to it, and the scan goes on.
+        if (session.staged) actions.done(choices());
+        else setStep('filters');
       },
     });
     const panel = h('div', { class: 'images-step-panel' }, controls, h('div', { class: 'images-step-buttons' }, buttons));
@@ -613,24 +648,10 @@ export function createCropScreen({ model, session, scan, pageCount, onStep, acti
     return stepEl;
   }
 
+  /** Filters, for a page cropped again from the editor (a scan's images have their own Filters). */
   function filtersStep() {
-    const s = () => (session.queued ? scan() : null);
-    let buttons;
-    if (session.fromCamera) {
-      buttons = stepButtons(
-        { label: t('crop_done'), icon: 'check', onClick: () => actions.done(choices()) },
-        { label: t('crop_take_another'), icon: 'photo_camera', onClick: () => actions.takeAnother(choices()) },
-      );
-    } else {
-      const last = () => { const q = s(); return !q || (q.waiting.length <= 1 && q.coming === 0); };
-      buttons = last()
-        ? stepButtons({ label: t('crop_done'), icon: 'check', onClick: () => actions.done(choices()) })
-        : stepButtons({ label: t('crop_next'), icon: 'arrow_forward', iconAfter: true, onClick: () => actions.done(choices()) });
-      buttons.isLast = last();
-      buttons.last = last;
-    }
+    const buttons = stepButtons({ label: t('crop_done'), icon: 'check', onClick: () => actions.done(choices()) });
     filters = createFilterStep({ photo, corners: () => uprightQuad(state.corners, state.rotation), state, pageCount, buttons });
-    filters.buttons = buttons;
     cleanup.push(stepLayout(filters.el, null), () => filters?.destroy());
     return filters.el;
   }
@@ -680,20 +701,22 @@ export function createCropScreen({ model, session, scan, pageCount, onStep, acti
   return {
     el,
     get step() { return state.step; },
+    /** Whether this shows an image of a scan. */
+    staged: !!session.staged,
     setStep: (step) => setStep(step, { fromHistory: true }),
-    /** What Back does: Filters goes back to Crop page, Crop page closes the screen. */
+    /**
+     * What Back does: a scan's image goes back to the image before (see the model's scanBack);
+     * Filters goes back to Crop page; Crop page closes the screen.
+     */
     back() {
-      if (state.step === 'filters') setStep('crop');
+      if (session.staged) actions.back();
+      else if (state.step === 'filters') setStep('crop');
       else actions.close();
     },
     /** The scan's count or the page count changed. */
     update() {
       bar.setSubtitle(place());
-      if (filters) {
-        const b = filters.buttons;
-        if (b.last && b.last() !== b.isLast) render(0);
-        else filters.update();
-      }
+      filters?.update();
     },
     focus: focusTitle,
     destroy() {
@@ -706,16 +729,24 @@ export function createCropScreen({ model, session, scan, pageCount, onStep, acti
 }
 
 /**
- * The crop screen while a scan waits for its next image: one still being added, or its page being
- * looked for (ScanWaiting). Closing it stops the scan.
+ * The crop screen while a scan waits for its next image (ScanWaiting): one still being added, its
+ * page being looked for, or (gone back to) being made. Back goes back as on an image; images picked
+ * can be left as they are from here too (Stop cropping).
  */
-export function createScanWaiting({ scan, onClose }) {
+export function createScanWaiting({ scan, onBack, onStop }) {
   const place = () => {
     const s = scan();
-    return s ? t('scan_place', s.done + 1, s.done + s.waiting.length + s.coming) : null;
+    return s ? t('scan_place', scanPlace(s), scanTotal(s)) : null;
   };
-  const bar = topBar({ title: t('crop_title'), subtitle: place(), onBack: onClose, backLabel: t('crop_stop') });
-  bar.back.replaceChildren(icon('close', { size: 24 }));
+  const stops = !scan()?.camera;
+  const bar = topBar({
+    title: t('crop_title'),
+    subtitle: place(),
+    onBack,
+    backLabel: t('back'),
+    actions: stops ? [{ icon: 'close', label: t('crop_stop'), onClick: onStop }] : [],
+  });
+  if (stops) bar.actions[0].classList.add('images-scan-action');
   const text = h('p', { class: 'images-waiting-text', 'aria-live': 'polite' });
   const el = h('div', { class: 'images-crop images-waiting' }, bar,
     h('div', { class: 'images-waiting-body' }, h('div', { class: 'images-spinner', 'aria-hidden': 'true' }), text));

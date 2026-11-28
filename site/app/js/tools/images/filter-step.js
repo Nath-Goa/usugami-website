@@ -1,8 +1,9 @@
-// The crop screen's second step (FilterScreen.kt): the page straightened out of the photo inside its
-// corners, large and turned as it will be in the PDF, with its look and brightness and contrast;
-// under it the looks, each shown on the page itself, the Brightness and Contrast sliders, Apply to all
-// pages, and the step's buttons. The large page is made again in the background as the choices
-// change, once a slider rests; the looks' small pages are made once for the corners.
+// The crop screen's second step for a page cropped again (FilterScreen.kt): the page straightened
+// out of the photo inside its corners, large and turned as it will be in the PDF, with its look and
+// brightness and contrast; under it the looks, each shown on the page itself, the Brightness and
+// Contrast sliders, Apply to all pages, and the step's buttons. The large page is made again in the
+// background as the choices change, once a slider rests; the looks' small pages are made once for
+// the corners. The looks row and the sliders are also the scan's Filters screen's (scan-looks.js).
 import { h } from '../../core/dom.js';
 import { t } from '../../core/i18n.js';
 import { icon } from '../../core/icons.js';
@@ -13,19 +14,19 @@ import { applyLookAsync, LOOKS, LOOK_LABELS, MAX_ADJUSTMENT } from '../../engine
 import { wheelAlong } from './wheel.js';
 
 /** The large page is made at most this many pixels on its long side. */
-const PAGE_MAX = 1200;
+export const PAGE_MAX = 1200;
 /** The looks' small pages are this many pixels on their long side. */
 const SAMPLE_MAX = 200;
 /** The looks are made on the page this large, then made small, so each looks as it does on the page. */
 const SAMPLE_LOOK_MAX = 512;
 /** How long the choices stay put before the page is made again with them. */
-const LOOK_DELAY_MS = 150;
+export const LOOK_DELAY_MS = 150;
 /** A slider this close to 0 holds at 0. */
 const SNAP = 2;
 
 const signed = (v) => (v > 0 ? `+${v}` : `${v}`);
 
-function delay(ms, signal) {
+export function delay(ms, signal) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(resolve, ms);
     signal?.addEventListener('abort', () => { clearTimeout(timer); reject(new CancelledError()); }, { once: true });
@@ -45,7 +46,7 @@ async function straightened(photo, quad, maxSide) {
 }
 
 /** `picture` made SAMPLE_MAX pixels on its long side, as a new canvas; `picture` itself when it is no larger. */
-function small(picture) {
+export function small(picture) {
   const long = Math.max(picture.width, picture.height);
   if (long <= SAMPLE_MAX) return picture;
   const scale = SAMPLE_MAX / long;
@@ -74,22 +75,30 @@ export function drawTurnedInto(canvas, picture, rotation) {
 /**
  * A slider from -100 to 100 with 0 in its middle, filled from the middle to the thumb, its name and
  * value over it ("+12"), and a button beside it that puts it back to 0 (AdjustmentSlider). Close to
- * 0 it holds at 0, so the middle is easy to find.
+ * 0 it holds at 0, so the middle is easy to find. `onChange` follows the thumb; `onRest` comes once
+ * the value is let go: as the pointer lifts, or at once for a key's change or a reset. With the
+ * class `is-inline` (see fitSliders) its name is before it and its value after it, on one line.
+ * el.setValue(v), el.value, el.held (true while a pointer holds it), el.input, el.label.
  */
-function adjustmentSlider({ label, resetLabel, value, onChange }) {
+export function adjustmentSlider({ label, resetLabel, value, onChange, onRest = () => {} }) {
   const id = uid('images-adjust');
   const shown = h('span', { class: 'images-adjust-value', 'aria-hidden': 'true' });
   const input = h('input', { type: 'range', class: 'images-adjust-input', id, min: String(-MAX_ADJUSTMENT), max: String(MAX_ADJUSTMENT), step: '1' });
-  const reset = iconButton({ icon: 'restart_alt', label: resetLabel, onClick: () => set(0, true) });
-  const el = h('div', { class: 'images-adjust' },
-    h('div', { class: 'images-adjust-head' }, h('label', { class: 'images-adjust-label', for: id }, label), shown),
-    h('div', { class: 'images-adjust-row' }, input, reset));
+  const reset = iconButton({
+    icon: 'restart_alt', label: resetLabel, cls: 'images-adjust-reset',
+    onClick: () => { set(0, true); onRest(current); },
+  });
+  const name = h('label', { class: 'images-adjust-label', for: id }, label);
+  const el = h('div', { class: 'images-adjust' }, name, shown, input, reset);
   let current = value;
   const render = () => {
     input.value = String(current);
     shown.textContent = signed(current);
     input.setAttribute('aria-valuetext', signed(current));
     input.style.setProperty('--at', `${((current + MAX_ADJUSTMENT) / (2 * MAX_ADJUSTMENT)) * 100}%`);
+    // Back at 0, the reset is off: the focus it had (it was just pressed) goes to the slider beside
+    // it first, as a button turned off can't keep it.
+    if (current === 0 && document.activeElement === reset) input.focus({ preventScroll: true });
     reset.disabled = current === 0;
   };
   const set = (v, notify, snap = false) => {
@@ -103,12 +112,127 @@ function adjustmentSlider({ label, resetLabel, value, onChange }) {
   // Dragged, it holds at 0 near the middle; the arrow keys move it a step at a time from there.
   let byKey = false;
   input.addEventListener('keydown', () => { byKey = true; });
-  input.addEventListener('pointerdown', () => { byKey = false; });
+  input.addEventListener('pointerdown', () => { byKey = false; el.held = true; });
   input.addEventListener('input', () => set(Number(input.value), true, !byKey));
+  // Let go: the pointer lifted, or a key's step (which a range input ends with a change).
+  input.addEventListener('change', () => { el.held = false; onRest(current); });
+  for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) input.addEventListener(type, () => { el.held = false; });
   render();
+  el.held = false;
   el.setValue = (v) => { current = v; render(); };
+  Object.defineProperty(el, 'value', { get: () => current, configurable: true });
   el.input = input;
+  el.label = name;
   return el;
+}
+
+/** The width `text` takes in `el`'s font. */
+function textWidth(el, text) {
+  const style = getComputedStyle(el);
+  const g = (textWidth.canvas ??= document.createElement('canvas')).getContext('2d');
+  g.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+  return g.measureText(text).width;
+}
+
+/** A slider's name and its slider share a line while the slider keeps at least this length. */
+const SLIDER_SHORTEST = 160;
+/** Between a slider's name and the slider, when they share a line. */
+const LABEL_GAP = 12;
+
+/**
+ * Lays `sliders` (adjustmentSliders) out in `width` pixels: each on one line (name, slider, value,
+ * reset) while the slider keeps at least 160 px beside its name, otherwise each name over its
+ * slider, as on the crop screen's Filters (ScanLooksScreen's Sliders).
+ */
+export function fitSliders(sliders, width) {
+  if (!sliders.length || !width) return;
+  const widest = Math.max(...sliders.map((s) => textWidth(s.label, s.label.textContent)));
+  const value = textWidth(sliders[0].querySelector('.images-adjust-value'), `-${MAX_ADJUSTMENT}`);
+  // Beside a slider on its line: the padding at the start, the gap, its value at its widest, and its
+  // reset button with the padding at the end.
+  const beside = 16 + 8 + value + 48 + 4;
+  const labelWidth = Math.ceil(widest + LABEL_GAP);
+  const inline = width - labelWidth - beside >= SLIDER_SHORTEST;
+  for (const s of sliders) {
+    s.classList.toggle('is-inline', inline);
+    s.style.setProperty('--label-width', `${labelWidth}px`);
+    s.style.setProperty('--value-width', `${Math.ceil(value)}px`);
+  }
+}
+
+/**
+ * The looks in a row that scrolls sideways (LooksRow), each shown on the page once its small copy is
+ * drawn (drawSample), the one chosen marked. A radio group: the arrow keys choose. A look chosen
+ * (tapped at the row's edge, or reached with the arrow keys) comes whole into view, as the app's
+ * LookChoice. `onChoose(look)` hears of a look chosen. el.setLook(look), el.drawSample(look,
+ * picture, rotation), el.clearSamples(), el.reveal() (the look chosen scrolled into view), el.buttons.
+ */
+export function looksRow({ labelledBy, label, onChoose }) {
+  let current = null;
+  const buttons = LOOKS.map((look) => {
+    const sample = h('canvas', { class: 'images-look-canvas', 'aria-hidden': 'true' });
+    const check = h('span', { class: 'images-look-check', 'aria-hidden': 'true' }, icon('check', { size: 14 }));
+    const b = h('button', { type: 'button', role: 'radio', class: 'images-look', dataset: { look } },
+      h('span', { class: 'images-look-sample' }, sample, check),
+      h('span', { class: 'images-look-label' }, t(LOOK_LABELS[look])));
+    b.sample = sample;
+    b.addEventListener('click', () => {
+      onChoose(look);
+      revealIn(row, b);
+    });
+    return b;
+  });
+  const row = h('div', { class: 'images-looks', role: 'radiogroup', 'aria-labelledby': labelledBy, 'aria-label': labelledBy ? null : label }, ...buttons);
+  // Beside a wide picture the row shows three or four looks: a mouse wheel scrolls along it.
+  wheelAlong(row);
+  row.addEventListener('keydown', (e) => {
+    const at = buttons.indexOf(document.activeElement);
+    if (at < 0) return;
+    const rtl = getComputedStyle(row).direction === 'rtl';
+    let next = null;
+    if (e.key === 'ArrowRight') next = at + (rtl ? -1 : 1);
+    else if (e.key === 'ArrowLeft') next = at + (rtl ? 1 : -1);
+    else if (e.key === 'ArrowDown') next = at + 1;
+    else if (e.key === 'ArrowUp') next = at - 1;
+    else if (e.key === 'Home') next = 0;
+    else if (e.key === 'End') next = buttons.length - 1;
+    else return;
+    e.preventDefault();
+    next = (next + buttons.length) % buttons.length;
+    buttons[next].focus();
+    onChoose(LOOKS[next]);
+    revealIn(row, buttons[next]);
+  });
+  row.setLook = (look) => {
+    current = look;
+    for (const b of buttons) {
+      const on = b.dataset.look === look;
+      b.setAttribute('aria-checked', String(on));
+      b.classList.toggle('is-selected', on);
+      b.tabIndex = on ? 0 : -1;
+    }
+  };
+  row.drawSample = (look, picture, rotation) => drawTurnedInto(buttons[LOOKS.indexOf(look)].sample, picture, rotation);
+  row.clearSamples = () => { for (const b of buttons) { b.sample.width = 0; b.sample.height = 0; } };
+  /** The look chosen brought into view along the row, clear of its ends. */
+  row.reveal = () => revealIn(row, buttons[LOOKS.indexOf(current)]);
+  row.buttons = buttons;
+  return row;
+}
+
+/**
+ * Scrolls `row` (a row that scrolls sideways) so that `item` shows whole, 48 px clear of its ends
+ * where there is room, unless it does already. Either way the text runs.
+ */
+export function revealIn(row, item) {
+  if (!item || !row.clientWidth) return;
+  const margin = Math.min(48, Math.max(0, (row.clientWidth - item.offsetWidth) / 2));
+  const r = row.getBoundingClientRect();
+  const b = item.getBoundingClientRect();
+  let by = 0;
+  if (b.left < r.left + margin) by = b.left - (r.left + margin);
+  else if (b.right > r.right - margin) by = b.right - (r.right - margin);
+  if (by) row.scrollBy({ left: by, behavior: 'instant' });
 }
 
 /**
@@ -145,36 +269,8 @@ export function createFilterStep({ photo: photoPromise, corners: getCorners, sta
 
   // ---- The looks ----
   const titleId = uid('images-look');
-  const lookButtons = LOOKS.map((look) => {
-    const sample = h('canvas', { class: 'images-look-canvas', 'aria-hidden': 'true' });
-    const check = h('span', { class: 'images-look-check', 'aria-hidden': 'true' }, icon('check', { size: 14 }));
-    const b = h('button', { type: 'button', role: 'radio', class: 'images-look', dataset: { look } },
-      h('span', { class: 'images-look-sample' }, sample, check),
-      h('span', { class: 'images-look-label' }, t(LOOK_LABELS[look])));
-    b.sample = sample;
-    b.addEventListener('click', () => chooseLook(look));
-    return b;
-  });
-  const looks = h('div', { class: 'images-looks', role: 'radiogroup', 'aria-labelledby': titleId }, ...lookButtons);
-  // Beside a wide picture the row shows three or four looks: a mouse wheel scrolls along it.
-  wheelAlong(looks);
-  looks.addEventListener('keydown', (e) => {
-    const at = lookButtons.indexOf(document.activeElement);
-    if (at < 0) return;
-    const rtl = getComputedStyle(looks).direction === 'rtl';
-    let next = null;
-    if (e.key === 'ArrowRight') next = at + (rtl ? -1 : 1);
-    else if (e.key === 'ArrowLeft') next = at + (rtl ? 1 : -1);
-    else if (e.key === 'ArrowDown') next = at + 1;
-    else if (e.key === 'ArrowUp') next = at - 1;
-    else if (e.key === 'Home') next = 0;
-    else if (e.key === 'End') next = lookButtons.length - 1;
-    else return;
-    e.preventDefault();
-    next = (next + lookButtons.length) % lookButtons.length;
-    lookButtons[next].focus();
-    chooseLook(LOOKS[next]);
-  });
+  const looks = looksRow({ labelledBy: titleId, onChoose: (look) => chooseLook(look) });
+  const lookButtons = looks.buttons;
 
   const brightness = adjustmentSlider({
     label: t('filter_brightness'), resetLabel: t('filter_reset_brightness'), value: state.adjustments.brightness,
@@ -204,12 +300,7 @@ export function createFilterStep({ photo: photoPromise, corners: getCorners, sta
   }
 
   function renderLooks() {
-    for (const b of lookButtons) {
-      const on = b.dataset.look === state.look;
-      b.setAttribute('aria-checked', String(on));
-      b.classList.toggle('is-selected', on);
-      b.tabIndex = on ? 0 : -1;
-    }
+    looks.setLook(state.look);
   }
 
   function drawSamples() {

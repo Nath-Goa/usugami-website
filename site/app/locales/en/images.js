@@ -1,5 +1,5 @@
-// Scan document and Images to PDF (js/tools/images/): the editor, Crop page, Filters and the Create
-// PDF sheet. Keys and English texts are the Android app's (strings.xml); those the app doesn't have
+// Scan document and Images to PDF (js/tools/images/): the editor, a scan's Photos, Crop page,
+// Filters and the Create PDF sheet. Keys and English texts are the Android app's (strings.xml); those the app doesn't have
 // start with web_. Strings shared with other screens (Take photo, Upload images, Discard, Keep, the
 // result screen, "Couldn't create the PDF: …", Page 3, Move page 3 earlier…) are in common.js and
 // kit.js and aren't repeated here.
@@ -74,6 +74,19 @@ export default {
   look_ink_saver: 'Ink saver',
   look_all_pages: 'Apply to all pages',
 
+  // ---- A scan's Photos and Filters screens ----
+  // The title of a scan's first screen: the photos taken so far, before they are cropped.
+  scan_photos_title: 'Photos',
+  // Under the title of that screen. "Done" is the name of the button at its foot (crop_done).
+  scan_photos_hint: 'Take a photo of each page in order, then tap Done to crop them.',
+  // What a screen reader says for the place of a photo just taken while it is being added.
+  scan_adding_photo: 'Adding the photo…',
+  // Asked on leaving that screen with photos taken: Discard deletes them and ends the scan, Keep stays.
+  scan_discard_title: 'Discard these photos?',
+  scan_discard_body: 'The photos you took for this scan will be deleted.',
+  // A switch on a scan's Filters screen: on, the look, brightness and contrast chosen go to every page.
+  scan_same_look: 'Same filter for all pages',
+
   option_margin: 'Margin',
   size_fit: 'Fit (same as image)',
   size_fit_short: 'Fit',
@@ -132,6 +145,9 @@ export default {
   web_reorder_hint_mouse: 'Drag a page to reorder, or press Ctrl and an arrow key',
   // Said to screen readers on each corner and side handle of the crop screen.
   web_crop_handle_hint: 'The arrow keys move it a step at a time.',
+  // Said to screen readers as the name of the row of a scan's pages on its Filters screen ("Page 1",
+  // "Page 2"…), one of which shows large.
+  web_scan_pages: 'Pages',
   // Under "Text language" in the Create PDF sheet: where text recognition runs and comes from.
   web_ocr_note: 'Text is recognized on this device. The first time you use a language, its recognition data is downloaded from this site.',
   // Under "Downloading text recognition…".
