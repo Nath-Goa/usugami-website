@@ -1347,6 +1347,26 @@ async function testPageGrid(page, { wide }) {
   r = { model: await modelOrder(page), dom: await domOrder(page), log: await page.evaluate(() => log.slice()) };
   check('dragging with a mouse moves the page', lifted && r.model.slice(0, 5).join() === '1,2,3,0,4' && r.dom.slice(0, 5).join() === '1,2,3,0,4', JSON.stringify({ lifted, ...r, model: r.model.slice(0, 6), dom: r.dom.slice(0, 6) }));
   check('one drag start and end', r.log[0] === 'start' && r.log[r.log.length - 1] === 'end:0>3' && !r.log.some((l) => l.startsWith('toggle')), JSON.stringify(r.log));
+  // Let go outside the grid, a drag gives the grid no click of its own to swallow: a page clicked
+  // straight after is still chosen (only the click that ends a drag is eaten, not the next press).
+  await page.waitForTimeout(400);
+  await page.evaluate(() => { log = []; });
+  const c = await tileCenter(page, 1);
+  const outside = await page.evaluate(() => {
+    for (const [x, y] of [[4, 4], [innerWidth - 4, 4], [4, innerHeight - 4], [innerWidth - 4, innerHeight - 4]]) {
+      if (!grid.contains(document.elementFromPoint(x, y))) return { x, y };
+    }
+    return null;
+  });
+  await page.mouse.move(c.x, c.y);
+  await page.mouse.down();
+  await page.mouse.move(c.x + 10, c.y + 2, { steps: 2 });
+  await page.mouse.move(outside.x, outside.y, { steps: 6 });
+  await page.mouse.up();
+  const d = await tileCenter(page, 2);
+  await page.mouse.click(d.x, d.y);
+  r = await page.evaluate(() => log.slice());
+  check('a page clicked straight after a drag let go outside the grid is chosen', !!outside && r.includes('start') && r.some((l) => l.startsWith('toggle:')), JSON.stringify({ outside, log: r }));
   // The 'delete' look: a page marked fades behind a delete sign, framed in the error colour.
   await page.evaluate(() => {
     window.marked = new Set([1]);

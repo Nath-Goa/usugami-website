@@ -355,6 +355,8 @@ export function pageGrid(o) {
   };
 
   grid.addEventListener('keydown', (e) => {
+    // Space or Enter on a page chooses it, also straight after a drag.
+    if (!dragging) suppressClick = false;
     const button = e.target.closest?.('.ui-page');
     if (!button) return;
     const tile = button.closest('.ui-page-tile').tile;
@@ -455,6 +457,9 @@ export function pageGrid(o) {
   let scrollFrame = 0;
 
   grid.addEventListener('pointerdown', (e) => {
+    // A new press is a new tap: only the click that ends a drag is swallowed. (Let go outside the
+    // grid, a drag gives it no click, and a page pressed straight after would be lost.)
+    if (!dragging) suppressClick = false;
     if (!opts.reorderable || dragging || (e.pointerType === 'mouse' && e.button !== 0)) return;
     const button = e.target.closest('.ui-page');
     if (!button || !grid.contains(button)) return;

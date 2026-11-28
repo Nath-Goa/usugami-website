@@ -386,7 +386,9 @@ decoded images until the PDF is closed.
 Moving: a long press (450 ms, timed by the events' own times, so a tap handled late while the page
 is busy stays a tap) and drag on touch screens (a quick swipe still scrolls), a drag with
 a mouse, Ctrl (⌘) + arrow keys on a focused page (Ctrl+Home/End: first/last), or the move
-buttons. Arrow keys alone move the focus. The page dragged near the top or bottom edge scrolls the
+buttons. Arrow keys alone move the focus. The click that ends a drag chooses nothing; the next
+press or key on the grid is a tap again at once, also when the drag was let go outside the grid
+(which gives the grid no click of its own). The page dragged near the top or bottom edge scrolls the
 grid (or the page). Moves are announced ("Moved to place 5 of 12"). Columns: at least 96 px wide
 (128 px from 840 px). Tiles off screen skip layout and painting (`content-visibility: auto`, always
 on: switched on and off a tile would be laid out at its placeholder size for a moment), sized as a
