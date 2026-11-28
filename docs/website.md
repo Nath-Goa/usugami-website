@@ -10,9 +10,9 @@ page.
 
 | File | What it is |
 |---|---|
-| `site/index.html` | Home: what Usugami is, the web app first and then the Android app, screenshots, every feature grouped as on the app's Home (the Usugami watermark among them), privacy highlights, the three editions in brief, source code and license |
-| `site/download/index.html` | Download: the three editions compared, GitHub, Obtainium and F-Droid, install steps, verifying the download, the source code of the app and of this website (with their third-party notices), badge credits |
-| `site/privacy/index.html` | Privacy: the Android app's policy (all of `PRIVACY.md`), then "Usugami on the web": this website, the web app, what it downloads (text recognition, fonts), everything it stores on the device, and how to delete it |
+| `site/index.html` | Home: what Usugami is, the web app first and then the Android app, screenshots, every feature grouped as on the app's Home (the Usugami watermark among them), privacy highlights, the three editions in brief, Translate PDF (`#translate-pdf`), source code and license |
+| `site/download/index.html` | Download: the latest version, the three editions compared, Translate PDF (`#translate-pdf`, with its limits), GitHub, Obtainium and F-Droid, install steps, verifying the download, the source code of the app and of this website (with their third-party notices), badge credits |
+| `site/privacy/index.html` | Privacy: the Android app's policy (all of `PRIVACY.md` but one clause, below), then "Usugami on the web": this website, the web app, what it downloads (text recognition, fonts), everything it stores on the device, and how to delete it |
 | `site/merge-pdf/index.html` and the other tool pages | One page per tool, written by `tools/build-tool-pages.mjs` (see [The tool pages](#the-tool-pages)) |
 | `site/404.html` | Page not found, served by GitHub Pages for any unknown address |
 | `site/robots.txt` | Allows everything and names the sitemap (read only at the domain's root) |
@@ -25,10 +25,31 @@ page.
 | `tests/site.test.mjs` | Opens every page in Chromium, Firefox and WebKit and checks it (see below) |
 
 The content comes from the Android app's repository: `README.md` (features, editions, install,
-verify, Obtainium), `PRIVACY.md` and `fastlane/metadata/android/en-US/`. When those change (a new
-size, a new edition, a new install note, a policy update), change the pages to match. Things that
-date: the editions' sizes, the "developer verification" answer ("As of October 2026"), and the
-policies' effective date (9 November 2026).
+verify, Obtainium, Translate PDF), `PRIVACY.md`, `CHANGELOG.md`, `app/build.gradle.kts` (the
+version) and `fastlane/metadata/android/en-US/`. When those change (a new release, a new size, a
+new edition, a new install note, a policy update), change the pages to match. Things that date:
+the latest version and its date on Download (4.0.0, 28 November 2026, the day its GitHub release
+was published), the editions' sizes (Usugami.apk about 19 MB, Usugami-lite.apk about 4.8 MB,
+Usugami-ocr.apk about 16 MB; Home's hero note, copied into the tool pages, gives Usugami.apk's), the
+"developer verification" answer ("As of October 2026"), and the policies' effective dates (the
+Android app's 28 November 2026, the web part's 9 November 2026). With the app's repository next
+to this one, `tests/site.test.mjs` compares the sizes, the version and its date, the seven
+languages and the whole policy with it, so it fails on the maintainer's PC until the pages follow
+a change there.
+
+What the pages say of the Android app must be true of each edition. Since 4.0.0, Usugami.apk has
+the internet permission, only so that Android's download manager can fetch Translate PDF's
+language packs (Usugami's own code opens no connection), and is for ARM phones like Usugami OCR;
+"no internet permission" is said only of Usugami Lite and Usugami OCR (the tests check every
+sentence). Translate PDF is in Usugami.apk only: Home and Download each have a short part on it,
+and it has no feature card, no tool page and nothing in the web app (the tests fail if a tool page
+names it). No page names the store (Google Play or the Play Store: not a listing, not that Usugami
+isn't there, not an edition made for it) until the owner says Usugami is listed there, so the
+policy's clause on "the edition made for Google Play (Usugami-ocr.aab)" is left out of the Privacy
+page, and the tests know it. Google Play services (text recognition, Translate PDF) and Google Play
+Protect (the install steps) are not the store, and stay. Of the Android app, the pages say "no
+analytics of its own", as the policy does: Google's libraries hand usage records to Google Play
+services, which may send them to Google.
 
 The Privacy page's web part ("Usugami on the web") comes from the web app itself instead: what it
 keeps in `localStorage` (`app/js/core/settings.js`: language, appearance, the tools' last choices,
@@ -124,12 +145,14 @@ columns at 600, 720, 840, 960 and 1080 px. It uses logical properties (`margin-i
 Main components: `.btn` (`.btn-filled`, `.btn-tonal`, `.btn-outlined`, `.btn-large`), `.card`,
 `.icon-badge`, `.section` (`.section-band` for a tinted band), `.section-head` with `.eyebrow`,
 `.pills`, `.shots` (the screenshots: a swipeable row with scroll snapping on phones, four columns
-from 840 px), `.feature-grid` and `.feature` (`.compact` for the Everywhere group), `.points`,
-`.editions` (`.compare` on Download: on wide screens the rows of the three cards line up with
-CSS subgrid), `.source-grid`, `.source-pair` (two cards side by side from 840 px), `.link-list`,
+from 840 px), `.feature-grid` and `.feature` (`.compact` for the Everywhere group), `.points`
+(Home's privacy highlights and its Translate PDF part), `.editions` (`.compare` on Download: on
+wide screens the rows of the three cards line up with CSS subgrid, ten rows: the name, the file,
+seven compared facts and the button, so a fact more needs `site.css` changed with it), `.source-grid`, `.source-pair` (two cards side by side from 840 px), `.link-list`,
 `.steps` (numbered install steps), `.disclosure` (`<details>` blocks), `.note`, `.kv`, `.toc`,
-`.prose`, `.doc-toc` (the policy's sticky section list from 1080 px, in windows at least 620 px
-high, 692 px with a touch screen, so its last entries never lie under the Buy me a coffee button),
+`.prose`, `.doc-toc` (the policy's sticky section list from 1080 px, in windows at least 660 px
+high, 740 px with a touch screen, so its last entries never lie under the Buy me a coffee button;
+those heights hold its eleven entries, and an entry more needs them raised),
 `.nowrap` (a file name kept
 on one line), `.link-note` (a note inside a `.link-list` link, after its text, such as "(the main
 edition)": not underlined and kept whole, so on phones it moves under the link's text),
@@ -445,8 +468,20 @@ lists English alone; Download links to the three APKs, the
 releases, the three Obtainium links, `nathank.me/usugami/`, the web app and the website's source
 and notices, has the one-tap `fdroidrepos://` link with the repository fingerprint and the
 by-hand steps (Settings → Repositories → +), gives the F-Droid address and fingerprint, what the
-repository serves and the signing certificate, and every `<pre>` either wraps (`select-all`) or
-is focusable and named; Privacy's web part names the text-recognition download (about 5 to 8 MB, from
+repository serves (Usugami OCR, without Translate PDF) and the signing certificate, and every
+`<pre>` either wraps (`select-all`) or is focusable and named; what the pages say of the Android
+app is the app's 4.0.0: the editions' sizes (about 19, 4.8 and 16 MB on Download, Home's edition
+cards and its hero note), Usugami.apk's internet permission and why (Home, Download, Privacy),
+"no internet permission" only in sentences about Usugami Lite or Usugami OCR (or in their edition
+cards), ARM phones for Usugami.apk and Usugami OCR, the seven languages, Translate PDF's parts on
+Home and Download (Usugami.apk only, the 40 MB pack, no internet after it, scanned pages, what the
+translator can change, the system log) and on no tool page, the version and its date on Download,
+and the policy's effective date and Translate PDF section, in both lists of sections; and no page
+says what 4.0.0 made untrue (the old sizes, "Four languages", a 30 MB pack, Usugami-ocr.apk
+"bigger than Usugami.apk", "works on most phones"). With the app's repository next to this one
+(`../pdfer`, or `USUGAMI_APP_REPO`), the sizes are compared with its README, the version with
+`build.gradle.kts`, its date with `CHANGELOG.md`, the languages with `locales_config.xml`, and the
+policy, word for word, with `PRIVACY.md`; Privacy's web part names the text-recognition download (about 5 to 8 MB, from
 this same website), fonts, local storage with the Usugami watermark settings, IndexedDB, the
 service worker and shared files, files opened with the installed app, Open showing a file in a
 browser tab, and that a share needs the service worker. It also scans the web app's own JavaScript (not `vendor/`,

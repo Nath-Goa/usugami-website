@@ -1,8 +1,8 @@
 # Usugami website
 
 The website and web app for [Usugami](https://github.com/Nath-Goa/usugami), the free, open-source
-Android app that turns photos, Word, PowerPoint, Excel and EPUB files into PDFs and splits,
-merges, edits, signs, compresses and redacts PDFs.
+Android app that turns photos, Word, PowerPoint, Excel and EPUB files into PDFs and reads,
+annotates, splits, merges, signs, compresses, redacts and translates PDFs.
 
 - **Website**: Home, Download and Privacy pages, and a page for each tool (usugami.com/merge-pdf/
   and so on) that says what it does and opens it in the web app.

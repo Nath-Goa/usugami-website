@@ -15,8 +15,10 @@
 // Open Graph tags, the structured data, the sitemap and robots.txt, the tool pages being as
 // tools/build-tool-pages.mjs makes them (Home linking to each tool's, and a page about one kind of
 // file following its tool's), the mistakes in tools/tool-pages.mjs the script refuses, what Home
-// and Download must say, and a Privacy page that describes every kind of browser storage the web
-// app's code uses and exactly the tool choices it saves.
+// and Download must say, what the pages say of the Android app (its 4.0.0 facts; with ../pdfer,
+// compared with its README, version, changelog, languages and PRIVACY.md), and a Privacy page that
+// describes every kind of browser storage the web app's code uses and exactly the tool choices it
+// saves.
 import { chromium } from 'playwright';
 import { withPage, root, outputDir } from './harness.mjs';
 import { checkSite, stripJsComments } from '../tools/check-site.mjs';
@@ -25,7 +27,7 @@ import { buildToolPages, buttonLabel } from '../tools/build-tool-pages.mjs';
 import { TOOL_PAGES } from '../tools/tool-pages.mjs';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -578,7 +580,7 @@ async function checkDarkScreenshots(page, url) {
  * entry under it (the list stops being sticky in windows too short to hold it above the button).
  */
 async function checkShortWindows(page, url) {
-  const sizes = [{ width: 740, height: 400 }, { width: 683, height: 384 }, { width: 1280, height: 552 }, { width: 1280, height: 600 }, { width: 1280, height: 640 }, { width: 1080, height: 620 }];
+  const sizes = [{ width: 740, height: 400 }, { width: 683, height: 384 }, { width: 1280, height: 552 }, { width: 1280, height: 620 }, { width: 1080, height: 630 }, { width: 1280, height: 660 }, { width: 1080, height: 660 }, { width: 1366, height: 700 }];
   for (const size of sizes) {
     await page.setViewportSize(size);
     await page.goto(url + 'privacy/', { waitUntil: 'load' });
@@ -719,13 +721,14 @@ function checkContent() {
     const webCard = pageText(part(main, /<article class="card way" aria-labelledby="way-web">[\s\S]*?<\/article>/));
     const offline = webCard.split(/(?<=\.)\s+/).filter((s) => /offline/i.test(s));
     check(offline.length && offline.every((s) => /\bused\b/.test(s)), `home: the web app's card should promise offline use only for the tools used once: "${offline.join(' ')}"`);
-    // Four languages: the web app's own languages (site/app/locales/languages.js) as they are.
+    // Seven languages: the Android app's seven, and the web app's own languages
+    // (site/app/locales/languages.js) as they are.
     const languages = stripJsComments(readFileSync(join(root, 'site', 'app', 'locales', 'languages.js'), 'utf8'));
     const codes = [...part(languages, /LANGUAGES\s*=\s*\[[\s\S]*?\]/).matchAll(/code:\s*'([^']+)'/g)].map((m) => m[1]);
     check(codes.includes('en'), `home: couldn't read the web app's languages (${codes.join(', ')})`);
     const englishOnly = codes.length === 1;
     check(text.includes('The web app is in English for now') === englishOnly,
-      `home: the Four languages card should ${englishOnly ? '' : 'no longer '}say the web app is in English for now (the web app has ${codes.join(', ')})`);
+      `home: the Seven languages card should ${englishOnly ? '' : 'no longer '}say the web app is in English for now (the web app has ${codes.join(', ')})`);
   }
 
   // Each tool's feature card on Home leads to its page (the name is the link), and each tool page
@@ -775,7 +778,9 @@ function checkContent() {
     check(new Set(obtainium).size === 3, `download: ${new Set(obtainium).size} different Obtainium links, expected one per edition`);
     const text = pageText(main);
     for (const words of ['https://nathank.me/usugami/fdroid/repo', '8D92FFB46DB5C052B334438D8E012974D3969A27EACFF4AEEE687B99A4760DA8',
-      'It serves Usugami (with the open-source text recognition of Usugami OCR) and Usugami Lite',
+      // F-Droid's Usugami is Usugami OCR, without Translate PDF (the app's README, since 4.0.0).
+      'It serves Usugami, which is Usugami-ocr.apk (no Translate PDF, no internet permission and no Google code), and Usugami Lite',
+      'Installing Usugami.apk over F-Droid’s Usugami makes it the main edition, with Translate PDF and the internet permission',
       '6F:4F:23:AD:E0:3E:63:6A:7C:C3:68:16:89:44:D0:CC:FC:81:32:EF:34:C5:0B:C5:A4:6B:0C:A4:CB:BD:F4:ED',
       // How to add the F-Droid repository, as on its own page (pdfer/fdroid/site/index.html).
       'Settings → Repositories → +', 'Then search for Usugami and install the app you want']) {
@@ -791,6 +796,8 @@ function checkContent() {
         `download: <pre${attrs}> should wrap (select-all) or have tabindex="0", role="region" and an aria-label`);
     }
   }
+
+  checkAppFacts(pages, part);
 
   // Privacy: what the web app downloads and stores, and where.
   {
@@ -846,6 +853,173 @@ function checkContent() {
     }
   }
   console.log(`content: footers, Home, Download, Privacy and ${TOOL_PAGE_LIST.length} tool pages say what they must, with the sitemap`);
+}
+
+/**
+ * What the pages say of the Android app is what the app says of itself (4.0.0): the editions'
+ * sizes, Usugami.apk's internet permission and why, ARM phones, the seven languages, Translate PDF
+ * on Home and Download only, the version, and the privacy policy (all of PRIVACY.md, with its
+ * effective date). Old facts that 4.0.0 made untrue must not come back. With the app's repository
+ * next to this one (../pdfer, or USUGAMI_APP_REPO; not on GitHub's runners), the sizes, version,
+ * dates, languages and policy are also compared with its README.md, build.gradle.kts,
+ * CHANGELOG.md, locales_config.xml and PRIVACY.md.
+ */
+function checkAppFacts(pages, part) {
+  const appRepo = resolve(process.env.USUGAMI_APP_REPO || join(root, '..', 'pdfer'));
+  const appFile = (...path) => { try { return readFileSync(join(appRepo, ...path), 'utf8'); } catch { return null; } };
+  const mainText = (html) => pageText(part(html, /<main[\s\S]*?<\/main>/));
+  const home = mainText(pages.home);
+  const download = mainText(pages.download);
+  const privacy = mainText(pages.privacy);
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  // The editions' sizes, as the app's README gives them (its Download row).
+  const sizes = { 'Usugami.apk': '19', 'Usugami-lite.apk': '4.8', 'Usugami-ocr.apk': '16' };
+  const readme = appFile('README.md');
+  if (readme) {
+    const row = readme.match(/^\| Download \|.*$/m)?.[0] ?? '';
+    for (const [apk, mb] of Object.entries(sizes)) {
+      const said = row.match(new RegExp(`${esc(apk)}\\]\\([^)]*\\)\\*\\*, about ([\\d.]+) MB`))?.[1];
+      check(said === mb, `the app's README gives ${apk} as about ${said} MB; the pages say about ${mb} MB`);
+    }
+  }
+  for (const [apk, mb] of Object.entries(sizes)) {
+    const found = download.match(new RegExp(`${esc(apk)} ?, about ${esc(mb)} MB`, 'g')) ?? [];
+    check(found.length >= 2, `download: should give ${apk} as about ${mb} MB in the comparison and in the GitHub links (found ${found.length})`);
+  }
+  for (const [card, mb] of [['e-main', '19'], ['e-lite', '4.8'], ['e-ocr', '16']]) {
+    const text = pageText(part(pages.home, new RegExp(`<article class="card edition[^"]*" aria-labelledby="${card}">[\\s\\S]*?</article>`)));
+    check(text.includes(`About ${mb} MB`), `home: the edition card ${card} should say About ${mb} MB`);
+  }
+  // The hero's note on the Android app (copied into every tool page) is Usugami.apk's size.
+  check(pageText(part(pages.home, /<ul class="cta-list">[\s\S]*?<\/ul>/)).includes('Free, for Android 8.0 or newer. About 19 MB.'), 'home: the hero should say "Free, for Android 8.0 or newer. About 19 MB."');
+
+  // Usugami.apk has the internet permission, and why; Usugami Lite and Usugami OCR don't. A
+  // sentence that says "no internet permission" is about Usugami Lite or Usugami OCR (or sits in
+  // their edition cards), never about Usugami.apk or Usugami as a whole.
+  const why = 'only so that Android’s download manager can fetch Translate PDF’s language packs';
+  check(download.includes(`Internet permission Yes, ${why}. Usugami’s own code opens no connection.`), `download: Usugami’s Internet permission row should say "Yes, ${why}. Usugami’s own code opens no connection."`);
+  check(home.includes(`Usugami.apk has it ${why}, and Usugami’s own code opens no connection`), `home: the No uploads point should say that Usugami.apk has the internet permission ${why}`);
+  check(home.includes(`It has the internet permission ${why}`), `home: the Usugami edition card should say that it has the internet permission ${why}`);
+  check(privacy.includes('Usugami (the main edition) has it only so that Android’s download manager can download Translate PDF’s language packs'), 'privacy: the policy should say why Usugami (the main edition) has the internet permission');
+  const editionCards = /<article class="card edition" aria-labelledby="(?:e|ed)-(?:lite|ocr)">[\s\S]*?<\/article>/g;
+  for (const [name, html] of Object.entries(pages)) {
+    const sentences = pageText(part(html, /<main[\s\S]*?<\/main>/).replace(editionCards, ' ')).split(/(?<=[.;])\s+/);
+    for (const s of sentences.filter((x) => /no internet permission/i.test(x))) {
+      check(/Usugami Lite|Usugami OCR|Usugami-ocr\.apk|Usugami-lite\.apk/.test(s), `${name}: "no internet permission" said of something other than Usugami Lite or Usugami OCR: "${s.trim()}"`);
+    }
+  }
+
+  // ARM phones for Usugami.apk and Usugami OCR; any Android 8.0 phone for Usugami Lite.
+  for (const card of ['ed-main', 'ed-ocr']) {
+    const text = pageText(part(pages.download, new RegExp(`<article class="card edition[^"]*" aria-labelledby="${card}">[\\s\\S]*?</article>`)));
+    check(text.includes('Works on Android 8.0 or newer, ARM phones (virtually all phones)'), `download: the ${card} card should work on "Android 8.0 or newer, ARM phones (virtually all phones)"`);
+  }
+  check(download.includes('Usugami.apk and Usugami-ocr.apk need an ARM phone (virtually all phones are)'), 'download: the install steps should say that Usugami.apk and Usugami-ocr.apk need an ARM phone');
+
+  // Seven languages in the Android app.
+  check(home.includes('Seven languages The Android app comes in English, French, Spanish, Hindi, German, Brazilian Portuguese and Indonesian'), 'home: the languages card should name the Android app’s seven languages');
+  const locales = appFile('app', 'src', 'main', 'res', 'xml', 'locales_config.xml');
+  if (locales) {
+    const n = [...locales.matchAll(/<locale android:name="[^"]+"/g)].length;
+    check(n === 7, `the app's locales_config.xml lists ${n} languages; Home says seven`);
+  }
+
+  // Translate PDF: a part of Home and of Download, and nowhere else (no tool page, not in the web
+  // app). Each part says it is in Usugami.apk only, what it needs, and what it can't do.
+  check(/<section class="section" id="translate-pdf" aria-labelledby="translate-title">/.test(pages.home), 'home: no Translate PDF part (section#translate-pdf)');
+  check(/<h3 class="subhead" id="translate-pdf">Translate PDF \(Usugami\.apk only\)<\/h3>/.test(pages.download), 'download: no Translate PDF part (h3#translate-pdf)');
+  const homePart = pageText(part(pages.home, /<section class="section" id="translate-pdf"[\s\S]*?<\/section>/));
+  const downloadPart = pageText(part(pages.download, /<h3 class="subhead" id="translate-pdf">[\s\S]*?<\/details>/));
+  for (const [name, text] of [['home', homePart], ['download', downloadPart]]) {
+    for (const words of ['Usugami.apk', 'Usugami Lite and Usugami OCR don’t have it', 'Usugami OCR. The web app doesn’t have it either', 'about 40 MB', 'downloaded once',
+      'After that, translating needs no internet', 'read with text recognition first', 'Hindi and Marathi', 'can change names of people, companies and places, and a lone number or year',
+      'into the phone’s system log']) {
+      check(text.includes(words), `${name}: the Translate PDF part doesn't say "${words}"`);
+    }
+  }
+  check(homePart.includes('More about Translate PDF') && hrefs(part(pages.home, /<section class="section" id="translate-pdf"[\s\S]*?<\/section>/)).includes('download/#translate-pdf'), 'home: the Translate PDF part should link to download/#translate-pdf');
+  for (const t of TOOL_PAGE_LIST) {
+    if (pages[t.slug]) check(!/Translate PDF/.test(mainText(pages[t.slug])), `${t.slug}: names Translate PDF, which is in the Android app's Usugami.apk only (Home and Download say so)`);
+  }
+  check(!Object.values(TOOL_PAGES).some((t) => /translat/i.test(`${t.id} ${t.slug} ${t.name}`)), 'tool pages: Translate PDF has no tool page (it is not in the web app)');
+  check(!/^\s*id: 'translate'/m.test(readFileSync(join(root, 'site', 'app', 'js', 'core', 'tools.js'), 'utf8')), 'the web app has a translate tool now: say so on Home and Download, and give it a tool page');
+
+  // The owner wants no store named on any page until Usugami is listed there: not "Usugami isn't
+  // on the Play Store". Google Play services (text recognition, Translate PDF) and Google Play
+  // Protect (the install steps) are not the store. The one exception is the Privacy page's copy of
+  // the app's PRIVACY.md, kept word for word, which names the edition made for Google Play.
+  const policyClause = 'and so is the edition made for Google Play (Usugami-ocr.aab):';
+  for (const [name, html] of Object.entries(pages)) {
+    const text = html.replace(/<!--[\s\S]*?-->/g, ' ');
+    const hit = (name === 'privacy' ? text.replace(policyClause, '') : text).match(/Play Store|Google Play(?! services| Protect)|\.aab\b/);
+    check(!hit, `${name}: names the store ("${hit?.[0]}"); no page does until the owner says Usugami is listed there`);
+  }
+  // The privacy policy says "no analytics of its own": Google's libraries hand usage records to
+  // Google Play services, which may send them to Google. The pages never say a bare "no analytics"
+  // of the Android app (the Privacy page's web part says it of the website and the web app).
+  for (const [name, text] of [['home', home], ['download', download]]) {
+    check(!/\bno analytics\b(?! of its own)/i.test(text), `${name}: says "no analytics" without "of its own", which the app's policy doesn't say of the Android app`);
+  }
+  check(home.includes('No ads, no analytics of its own, no tracking, no accounts and no in-app purchases.'), 'home: the privacy point should say "No ads, no analytics of its own, no tracking, no accounts and no in-app purchases."');
+
+  // The version on Download: the app's versionName, and the date of its release in CHANGELOG.md.
+  const latest = download.match(/The latest version is (\d+\.\d+\.\d+) ?, from (\d{1,2} [A-Z][a-z]+ \d{4})/);
+  check(latest?.[1] === '4.0.0' && latest?.[2] === '28 November 2026', `download: should say "The latest version is 4.0.0, from 28 November 2026" (says ${latest?.[0]})`);
+  const gradle = appFile('app', 'build.gradle.kts');
+  if (gradle && latest) {
+    const name = gradle.match(/versionName = "([^"]+)"/)?.[1];
+    check(name === latest[1], `download: says the latest version is ${latest[1]}; the app's build.gradle.kts has ${name}`);
+  }
+  const changelog = appFile('CHANGELOG.md');
+  if (changelog && latest) {
+    const iso = changelog.match(new RegExp(`^## \\[${esc(latest[1])}\\] - (\\d{4})-(\\d{2})-(\\d{2})`, 'm'));
+    const month = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const date = iso && `${Number(iso[3])} ${month[Number(iso[2]) - 1]} ${iso[1]}`;
+    check(date === latest[2], `download: dates ${latest[1]} ${latest[2]}; the app's CHANGELOG.md has ${date}`);
+  }
+
+  // The privacy policy: its effective date, its Translate PDF section in both lists of sections,
+  // and, with the app's repository at hand, every word of PRIVACY.md (quotes and apostrophes
+  // curly on the page).
+  const effective = pages.privacy.match(/<p class="meta">Effective date: (\d{1,2} [A-Z][a-z]+ \d{4})\. This is the privacy policy of the Android app/)?.[1];
+  check(effective === '28 November 2026', `privacy: the Android app's policy should be effective from 28 November 2026 (says ${effective})`);
+  check(/<h3 id="translate-pdf" class="anchor-heading">Translate PDF \(Usugami, the main edition, only\)<\/h3>/.test(pages.privacy), 'privacy: no Translate PDF section (h3#translate-pdf)');
+  for (const nav of [/<ul class="toc">[\s\S]*?<\/ul>/, /<nav class="doc-toc"[\s\S]*?<\/nav>/]) {
+    check(hrefs(part(pages.privacy, nav)).includes('#translate-pdf'), `privacy: the list of sections (${nav.source.slice(1, 20)}) doesn't link to #translate-pdf`);
+  }
+  // The sidebar list links every section of the Android app's policy. (A section more may need the
+  // sticky heights of site.css's .doc-toc raised: checkShortWindows tells.)
+  {
+    const sidebar = hrefs(part(pages.privacy, /<nav class="doc-toc"[\s\S]*?<\/nav>/));
+    const unlisted = new Set();
+    const sections = [...part(pages.privacy, /<article class="prose" aria-labelledby="android-app">[\s\S]*?<\/article>/).matchAll(/<h[23] id="([^"]+)"/g)].map((m) => m[1]);
+    check(sections.length >= 10, `privacy: found only ${sections.length} sections in the Android app's policy (is the scan broken?)`);
+    for (const id of sections.filter((s) => !unlisted.has(s))) {
+      check(sidebar.includes(`#${id}`), `privacy: the sidebar list of sections doesn't link to #${id}`);
+    }
+  }
+  const policy = appFile('PRIVACY.md');
+  if (policy) {
+    check(policy.match(/^Effective date: (.*)$/m)?.[1] === effective, `privacy: effective ${effective}; the app's PRIVACY.md says ${policy.match(/^Effective date: (.*)$/m)?.[1]}`);
+    const plain = (s) => s.replace(/[“”]/g, '"').replace(/[‘’]/g, '\'').replace(/&gt;/g, '>').replace(/\s+/g, ' ').replace(/ ([.,;:)])/g, '$1').trim();
+    const fromApp = plain(policy.replace(/^Effective date: .*$/m, '').replace(/^#+ /gm, '').replace(/\*\*/g, '').replace(/^\s*- /gm, ''));
+    const article = part(pages.privacy, /<article class="prose" aria-labelledby="android-app">[\s\S]*?<\/article>/)
+      .replace(/<p class="eyebrow">[\s\S]*?<\/p>/, '').replace(/<p class="meta">[\s\S]*?<\/p>/, '');
+    const onPage = plain(pageText(article));
+    let at = 0;
+    while (at < fromApp.length && fromApp[at] === onPage[at]) at++;
+    check(onPage === fromApp, `privacy: the Android app's policy differs from the app's PRIVACY.md at "…${onPage.slice(Math.max(0, at - 40), at + 40)}…" (PRIVACY.md: "…${fromApp.slice(Math.max(0, at - 40), at + 40)}…")`);
+  }
+
+  // What 4.0.0 made untrue, on every page: the old sizes, "Four languages", Usugami-ocr.apk being
+  // bigger than Usugami.apk, a 30 MB language pack, "works on most phones".
+  for (const [name, html] of Object.entries(pages)) {
+    const text = pageText(part(html, /<main[\s\S]*?<\/main>/));
+    for (const re of [/\babout (?:3|2\.8|14|5\.1) MB\b/i, /\b5\.1 MB\b/, /\b30 MB\b/, /Four languages/, /bigger than Usugami\.apk/, /works on most phones/i]) {
+      check(!re.test(text), `${name}: says "${text.match(re)?.[0]}", which isn't true of the Android app since 4.0.0`);
+    }
+  }
 }
 
 /**
